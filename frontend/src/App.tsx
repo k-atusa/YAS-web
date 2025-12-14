@@ -1,0 +1,505 @@
+import { useEffect, useState } from "react";
+import generate from "random-words";
+import { getAccountByUsername, login as loginApi, saveAccount, signup } from "./api";
+import { buildAccountPayload, generateRsaKeyPair } from "./crypto";
+import type { AccountRecord } from "./types";
+
+type IconProps = { active?: boolean };
+
+function IconHome({ active }: IconProps) {
+	const stroke = active ? "#38bdf8" : "#94a3b8";
+	return (
+		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<path d="M3 10.5 12 3l9 7.5" />
+			<path d="M5 12v7.5a.5.5 0 0 0 .5.5H10v-5h4v5h4.5a.5.5 0 0 0 .5-.5V12" />
+		</svg>
+	);
+}
+
+function IconBook({ active }: IconProps) {
+	const stroke = active ? "#38bdf8" : "#94a3b8";
+	return (
+		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<path d="M5 4h11a3 3 0 0 1 3 3v12" />
+			<path d="M5 20h11a3 3 0 0 0 3-3" />
+			<path d="M5 20a3 3 0 0 1 0-6h14" />
+			<path d="M9 8h6" />
+			<path d="M9 12h3" />
+		</svg>
+	);
+}
+
+function IconLock({ active }: IconProps) {
+	const stroke = active ? "#38bdf8" : "#94a3b8";
+	return (
+		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<rect x="4" y="11" width="16" height="10" rx="2" />
+			<path d="M8 11V7a4 4 0 0 1 8 0v4" />
+			<path d="M12 15v2" />
+		</svg>
+	);
+}
+
+function IconUnlock({ active }: IconProps) {
+	const stroke = active ? "#38bdf8" : "#94a3b8";
+	return (
+		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<rect x="4" y="11" width="16" height="10" rx="2" />
+			<path d="M16 11V7a4 4 0 0 0-8 0" />
+			<path d="M12 15v2" />
+		</svg>
+	);
+}
+
+type Tab = "keys" | "address-book" | "encrypt" | "decrypt";
+
+function App() {
+	const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem("authToken"));
+	const [authUsername, setAuthUsername] = useState<string | null>(() => localStorage.getItem("authUsername"));
+	const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+	const [loginUsername, setLoginUsername] = useState("");
+	const [loginPass, setLoginPass] = useState("");
+	const [loginPassConfirm, setLoginPassConfirm] = useState("");
+	const [loginBusy, setLoginBusy] = useState(false);
+
+	const [username, setUsername] = useState("");
+	const [passphrase, setPassphrase] = useState("");
+	const [showPassphrase, setShowPassphrase] = useState(false);
+	const [publicKeyPem, setPublicKeyPem] = useState("");
+	const [privateKeyPem, setPrivateKeyPem] = useState("");
+	const [notes, setNotes] = useState("");
+	const [status, setStatus] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [tab, setTab] = useState<Tab>("keys");
+	const [storedAccount, setStoredAccount] = useState<AccountRecord | null>(null);
+	const [showKeySection, setShowKeySection] = useState(true);
+	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
+
+	const canUpload = Boolean(username && passphrase && publicKeyPem && privateKeyPem);
+	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
+	const isAuthed = Boolean(authToken);
+
+	useEffect(() => {
+		if (authToken) {
+			localStorage.setItem("authToken", authToken);
+			if (authUsername) localStorage.setItem("authUsername", authUsername);
+		} else {
+			localStorage.removeItem("authToken");
+			localStorage.removeItem("authUsername");
+		}
+	}, [authToken, authUsername]);
+
+	useEffect(() => {
+		if (authUsername) {
+			setUsername(authUsername);
+		} else {
+			setUsername("");
+		}
+	}, [authUsername]);
+
+	useEffect(() => {
+		let cancelled = false;
+		async function loadStored() {
+			if (!authUsername) {
+				setStoredAccount(null);
+				setShowKeySection(true);
+				return;
+			}
+			try {
+				const record = await getAccountByUsername(authUsername);
+				if (!cancelled) {
+					setStoredAccount(record);
+					setShowKeySection(!record);
+					if (record) {
+						setPublicKeyPem(record.publicKey);
+						setPrivateKeyPem("");
+						setStatus(null);
+					}
+				}
+			} catch (err) {
+				console.error(err);
+				if (!cancelled) {
+					setStoredAccount(null);
+					setShowKeySection(true);
+				}
+			}
+		}
+		loadStored();
+		return () => {
+			cancelled = true;
+		};
+	}, [authUsername]);
+
+	async function handleLogin(e: React.FormEvent) {
+		e.preventDefault();
+		if (!canLogin) return;
+		setLoginBusy(true);
+		setError(null);
+		setStatus(null);
+		try {
+			const result = await loginApi(loginUsername, loginPass);
+			setAuthToken(result.token);
+			setAuthUsername(result.user.username);
+		} catch (err) {
+			console.error(err);
+			setError((err as Error).message || "Login failed");
+		} finally {
+			setLoginBusy(false);
+		}
+	}
+
+	async function handleCopyPublicKey(value?: string) {
+		if (!value) return;
+		try {
+			await navigator.clipboard.writeText(value);
+			setCopyPublicStatus("copied");
+			setTimeout(() => setCopyPublicStatus("idle"), 2000);
+		} catch (err) {
+			console.error(err);
+			setCopyPublicStatus("error");
+			setTimeout(() => setCopyPublicStatus("idle"), 2000);
+		}
+	}
+
+	async function handleSignup(e: React.FormEvent) {
+		e.preventDefault();
+		if (!canLogin) return;
+		setLoginBusy(true);
+		setError(null);
+		setStatus(null);
+		try {
+			await signup(loginUsername, loginPass);
+			const result = await loginApi(loginUsername, loginPass);
+			setAuthToken(result.token);
+			setAuthUsername(result.user.username);
+			setAuthMode("login");
+		} catch (err) {
+			console.error(err);
+			setError((err as Error).message || "Signup failed");
+		} finally {
+			setLoginBusy(false);
+		}
+	}
+
+	function handleSignOut() {
+		setAuthToken(null);
+		setAuthUsername(null);
+		setLoginPass("");
+		setUsername("");
+		setStoredAccount(null);
+		setShowKeySection(true);
+	}
+
+	function generatePassphrase() {
+		const phrase = generate({ exactly: 8, join: "-" }) as string;
+		setPassphrase(phrase);
+	}
+
+	async function handleGenerateKeys() {
+		setError(null);
+		setStatus("Generating RSA-4096 key pair...");
+		try {
+			const { publicKeyPem, privateKeyPem } = await generateRsaKeyPair();
+			setPublicKeyPem(publicKeyPem);
+			setPrivateKeyPem(privateKeyPem);
+			setStatus("Key pair ready. Keep the private key encrypted only.");
+		} catch (err) {
+			console.error(err);
+			setError("Failed to generate key pair");
+			setStatus(null);
+		}
+	}
+
+	async function handleUpload() {
+		if (!canUpload) return;
+		setBusy(true);
+		setError(null);
+		setStatus("Encrypting and uploading...");
+		try {
+			const payload = await buildAccountPayload(username, passphrase, publicKeyPem, privateKeyPem, notes || undefined);
+			const result = await saveAccount(payload, authToken ?? undefined);
+			const record: AccountRecord = {
+				...payload,
+				id: result.id,
+				createdAt: result.createdAt,
+			};
+			setStoredAccount(record);
+			setStatus("Stored encrypted key");
+			setShowKeySection(false);
+			setPrivateKeyPem("");
+			setPassphrase("");
+		} catch (err) {
+			console.error(err);
+			setError((err as Error).message || "Upload failed");
+			setStatus(null);
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	function handleRegenerate() {
+		setStoredAccount(null);
+		setShowKeySection(true);
+		setPublicKeyPem("");
+		setPrivateKeyPem("");
+		setPassphrase("");
+		setNotes("");
+		setStatus(null);
+		setError(null);
+	}
+
+	function renderTabContent() {
+		if (tab === "keys") {
+			const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
+
+			if (tab === "keys") {
+				return hasStoredKey && !showKeySection ? (
+					<section className="card">
+						<h2>Your stored key</h2>
+						<p className="hint">Private key is stored encrypted. Regenerate to replace it.</p>
+						<div className="preview">
+							<div>
+								<h3>Public key</h3>
+								<div className="copy-block">
+									<button
+										type="button"
+										className={copyPublicStatus === "copied" ? "copy-button copied" : "copy-button"}
+										onClick={() => handleCopyPublicKey(storedAccount?.publicKey)}
+									>
+										{copyPublicStatus === "copied" ? "Copied" : copyPublicStatus === "error" ? "Error" : "Copy"}
+									</button>
+									<pre>{storedAccount?.publicKey}</pre>
+								</div>
+							</div>
+							<div>
+								<h3>Private key</h3>
+								<pre>Encrypted (ciphertext saved on server)</pre>
+							</div>
+						</div>
+						<div className="actions">
+							<button className="secondary" onClick={handleRegenerate}>Regenerate keys</button>
+						</div>
+					</section>
+				) : (
+					<>
+						<section className="card">
+							<div className="grid single-col">
+								<div>
+									<label className="label" htmlFor="passphrase">Passphrase</label>
+									<div className="input-row">
+										<input
+											id="passphrase"
+											type={showPassphrase ? "text" : "password"}
+											value={passphrase}
+											onChange={(e) => setPassphrase(e.target.value)}
+											placeholder="Enter a strong passphrase"
+										/>
+										<button type="button" className="secondary" onClick={generatePassphrase}>Generate</button>
+										<button type="button" className="secondary" onClick={() => setShowPassphrase((v) => !v)}>
+											{showPassphrase ? "Hide" : "Show"}
+										</button>
+									</div>
+								</div>
+							</div>
+
+							<label className="label" htmlFor="notes">Notes (optional)</label>
+							<textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Label this key..." />
+
+							<div className="actions">
+								<button onClick={handleGenerateKeys} className="secondary">Generate RSA key pair</button>
+								<button onClick={handleUpload} disabled={!canUpload || busy}>
+									{busy ? "Working..." : "Encrypt and upload"}
+								</button>
+							</div>
+
+							{status && <div className="status success">{status}</div>}
+							{error && <div className="status error">{error}</div>}
+						</section>
+
+						<section className="card">
+							<h2>Local preview</h2>
+							<div className="preview">
+								<div>
+									<h3>Public key</h3>
+									<div className="copy-block">
+										<button
+											type="button"
+											className={copyPublicStatus === "copied" ? "copy-button copied" : "copy-button"}
+											onClick={() => handleCopyPublicKey(publicKeyPem || undefined)}
+											disabled={!publicKeyPem}
+										>
+											{copyPublicStatus === "copied" ? "Copied" : copyPublicStatus === "error" ? "Error" : "Copy"}
+										</button>
+										<pre>{publicKeyPem || "(generate a key pair)"}</pre>
+									</div>
+								</div>
+								<div>
+									<h3>Private key (plaintext)
+									</h3>
+									<pre>{privateKeyPem || "(generate a key pair)"}</pre>
+								</div>
+							</div>
+							<p className="hint">Private key is encrypted in-browser with AES-GCM using PBKDF2-derived key.</p>
+						</section>
+					</>
+				);
+			}
+		}
+
+		if (tab === "encrypt") {
+			return (
+				<section className="card">
+					<h2>Encrypt data</h2>
+					<p className="hint">Use recipients' public keys to encrypt text or files. Payloads are protected with hybrid RSA-OAEP + AES-GCM.</p>
+					<p className="hint">Coming soon: paste plaintext or upload a file, choose a contact, and download ciphertext locally.</p>
+				</section>
+			);
+		}
+
+		if (tab === "address-book") {
+			return (
+				<section className="card">
+					<h2>Contacts</h2>
+					<p className="hint">Manage trusted recipients and their public keys so you can encrypt messages to them.</p>
+					<p className="hint">Future: add, edit, and verify contacts; import/export public keys.</p>
+				</section>
+			);
+		}
+
+		return (
+			<section className="card">
+				<h2>Decrypt</h2>
+				<p className="hint">Restore plaintext locally using your encrypted private key and passphrase-derived AES-GCM key.</p>
+				<p className="hint">Coming soon: paste ciphertext and KDF metadata, enter your passphrase, and decrypt entirely in-browser.</p>
+			</section>
+		);
+	}
+
+	if (!isAuthed) {
+		const onSubmit = authMode === "login" ? handleLogin : handleSignup;
+		return (
+			<div className="page">
+				<header className="hero">
+					<div>
+						<p className="eyebrow">Yet Another Security - Web</p>
+						<h1>{authMode === "login" ? "Sign in to manage encrypted keys" : "Create an account to get started"}</h1>
+						<p className="lede">Access your encrypted key vault and tools after authentication.</p>
+					</div>
+				</header>
+
+				<section className="card">
+					<form className="form-vertical" onSubmit={onSubmit}>
+						<div>
+							<label className="label" htmlFor="login-username">Username</label>
+							<input
+								id="login-username"
+								type="text"
+								value={loginUsername}
+								onChange={(e) => setLoginUsername(e.target.value)}
+								placeholder="your_id"
+								autoComplete="username"
+							/>
+						</div>
+						<div>
+							<label className="label" htmlFor="login-pass">Password</label>
+							<input
+								id="login-pass"
+								type="password"
+								value={loginPass}
+								onChange={(e) => setLoginPass(e.target.value)}
+								placeholder="••••••••"
+								autoComplete={authMode === "login" ? "current-password" : "new-password"}
+							/>
+						</div>
+						{authMode === "signup" && (
+							<div>
+								<label className="label" htmlFor="login-pass-confirm">Confirm password</label>
+								<input
+									id="login-pass-confirm"
+									type="password"
+									value={loginPassConfirm}
+									onChange={(e) => setLoginPassConfirm(e.target.value)}
+									placeholder="repeat password"
+									autoComplete="new-password"
+								/>
+							</div>
+						)}
+						<div className="actions vertical-actions">
+							<button type="submit" disabled={!canLogin || loginBusy}>
+								{loginBusy ? "Working..." : authMode === "login" ? "Sign in" : "Create account"}
+							</button>
+							<button
+								type="button"
+								className="secondary"
+								onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")}
+							>
+								{authMode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
+							</button>
+						</div>
+					</form>
+					{error && <div className="status error">{error}</div>}
+					<p className="hint">Passwords are stored hashed (bcrypt) in MongoDB. Tokens are JWT (1d).</p>
+				</section>
+			</div>
+		);
+	}
+
+	const heroTitle =
+		tab === "keys"
+			? "Protect private keys with a passphrase-derived key"
+			: tab === "address-book"
+			? "Manage trusted contacts and their public keys"
+			: tab === "encrypt"
+			? "Encrypt data with recipients' public keys"
+			: "Decrypt securely in your browser";
+
+	const heroLede =
+		tab === "keys"
+			? "Encrypt in the browser, store only ciphertext, and keep your passphrase local. Public keys are shareable; private keys stay yours."
+			: tab === "address-book"
+			? "Keep recipients' public keys organized so you can encrypt to the right person every time."
+			: tab === "encrypt"
+			? "Use hybrid RSA-OAEP + AES-GCM: choose a contact, encrypt locally, and share only ciphertext."
+			: "Paste ciphertext and KDF metadata, derive your AES key from your passphrase, and decrypt without leaving the browser.";
+
+	return (
+		<div className="page">
+			<nav className="nav-bar">
+				<button className={tab === "keys" ? "nav-item active" : "nav-item"} onClick={() => setTab("keys")}>
+					<IconHome active={tab === "keys"} />
+					<span>Keys</span>
+				</button>
+				<button className={tab === "address-book" ? "nav-item active" : "nav-item"} onClick={() => setTab("address-book")}>
+					<IconBook active={tab === "address-book"} />
+					<span>Contacts</span>
+				</button>
+				<button className={tab === "encrypt" ? "nav-item active" : "nav-item"} onClick={() => setTab("encrypt")}>
+					<IconLock active={tab === "encrypt"} />
+					<span>Encrypt</span>
+				</button>
+				<button className={tab === "decrypt" ? "nav-item active" : "nav-item"} onClick={() => setTab("decrypt")}>
+					<IconUnlock active={tab === "decrypt"} />
+					<span>Decrypt</span>
+				</button>
+			</nav>
+
+			<header className="hero">
+				<div>
+					<p className="eyebrow">Yet Another Security - Web</p>
+					<h1>{heroTitle}</h1>
+					<p className="lede">{heroLede}</p>
+				</div>
+			</header>
+
+			<div className="top-actions">
+				<span className="muted">Signed in as {authUsername}</span>
+				<button className="ghost" onClick={handleSignOut}>Sign out</button>
+			</div>
+
+			{renderTabContent()}
+		</div>
+	);
+}
+
+export default App;
