@@ -88,6 +88,10 @@ function App() {
 	const [contactForm, setContactForm] = useState({ contactUsername: "", publicKey: "", notes: "" });
 	const [contactError, setContactError] = useState<string | null>(null);
 	const [contactBusy, setContactBusy] = useState(false);
+	const [contactModalOpen, setContactModalOpen] = useState(false);
+	const [contactModalMode, setContactModalMode] = useState<"add" | "edit">("add");
+	const [editingContactMeta, setEditingContactMeta] = useState<{ id: string; username: string } | null>(null);
+	const [contactModalError, setContactModalError] = useState<string | null>(null);
 
 	const canUpload = Boolean(username && passphrase && publicKeyPem && privateKeyPem);
 	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
@@ -248,6 +252,38 @@ function App() {
 		setContacts([]);
 		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
 		setContactError(null);
+		setContactModalOpen(false);
+		setContactModalMode("add");
+		setEditingContactMeta(null);
+		setContactModalError(null);
+	}
+
+	function openAddContactModal() {
+		setContactModalMode("add");
+		setEditingContactMeta(null);
+		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
+		setContactModalError(null);
+		setContactModalOpen(true);
+	}
+
+	function openEditContactModal(contact: ContactRecord) {
+		setContactModalMode("edit");
+		setEditingContactMeta({ id: contact.id, username: contact.contactUsername });
+		setContactForm({
+			contactUsername: contact.contactUsername,
+			publicKey: contact.publicKey,
+			notes: contact.notes || "",
+		});
+		setContactModalError(null);
+		setContactModalOpen(true);
+	}
+
+	function closeContactModal() {
+		setContactModalOpen(false);
+		setContactModalMode("add");
+		setEditingContactMeta(null);
+		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
+		setContactModalError(null);
 	}
 
 	function generatePassphrase() {
@@ -308,41 +344,47 @@ function App() {
 		setError(null);
 	}
 
-	async function handleAddContact(e: React.FormEvent) {
+	async function handleContactSubmit(e: React.FormEvent) {
 		e.preventDefault();
 		if (!authToken) return;
 		const trimmedUsername = contactForm.contactUsername.trim();
 		const trimmedKey = contactForm.publicKey.trim();
 		if (authUsername && trimmedUsername === authUsername) {
-			setContactError("You cannot add yourself as a contact");
+			setContactModalError("You cannot add yourself as a contact");
 			return;
 		}
 		if (!trimmedUsername || !trimmedKey) {
-			setContactError("Username and public key are required");
+			setContactModalError("Username and public key are required");
 			return;
 		}
 		setContactBusy(true);
-		setContactError(null);
+		setContactModalError(null);
 		try {
 			const payload = {
 				contactUsername: trimmedUsername,
 				publicKey: trimmedKey,
 				notes: contactForm.notes.trim() || undefined,
 			};
-			const created = await createContact(payload, authToken);
+			const saved = await createContact(payload, authToken);
 			setContacts((prev) => {
-				const existingIndex = prev.findIndex((c) => c.id === created.id);
-				if (existingIndex >= 0) {
-					const clone = [...prev];
-					clone[existingIndex] = created;
-					return clone;
-				}
-				return [created, ...prev.filter((c) => c.id !== created.id && c.contactUsername !== created.contactUsername)];
+				const withoutSaved = prev.filter((c) => c.id !== saved.id);
+				const withoutOld = contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username
+					? withoutSaved.filter((c) => c.id !== editingContactMeta.id)
+					: withoutSaved;
+				return [saved, ...withoutOld];
 			});
-			setContactForm({ contactUsername: "", publicKey: "", notes: "" });
+			if (contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username) {
+				try {
+					await deleteContact(editingContactMeta.id, authToken);
+				} catch (deleteErr) {
+					console.error(deleteErr);
+					setContactError((deleteErr as Error).message || "Failed to remove old contact");
+				}
+			}
+			closeContactModal();
 		} catch (err) {
 			console.error(err);
-			setContactError((err as Error).message || "Failed to save contact");
+			setContactModalError((err as Error).message || "Failed to save contact");
 		} finally {
 			setContactBusy(false);
 		}
@@ -473,76 +515,93 @@ function App() {
 			const isContactFormValid = Boolean(contactForm.contactUsername.trim() && contactForm.publicKey.trim());
 
 			return (
-				<section className="card">
-					<h2>Contacts</h2>
-					<p className="hint">Manage trusted recipients and their public keys so you can encrypt messages to them.</p>
-					<form className="form-vertical" onSubmit={handleAddContact}>
-						<label className="label" htmlFor="contact-username">Contact username</label>
-						<input
-							id="contact-username"
-							type="text"
-							value={contactForm.contactUsername}
-							onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
-							placeholder="recipient_id"
-							required
-						/>
-						<label className="label" htmlFor="contact-notes">Notes (optional)</label>
-						<textarea
-							id="contact-notes"
-							value={contactForm.notes}
-							onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
-							placeholder="PGP fingerprint, onboarding status, etc."
-						/>
-						<label className="label" htmlFor="contact-public-key">Public key</label>
-						<textarea
-							id="contact-public-key"
-							value={contactForm.publicKey}
-							onChange={(e) => setContactForm((prev) => ({ ...prev, publicKey: e.target.value }))}
-							placeholder="-----BEGIN PUBLIC KEY-----"
-							required
-						/>
-						<div className="actions">
-							<button type="submit" disabled={contactBusy || !isContactFormValid}>{contactBusy ? "Saving..." : "Save contact"}</button>
-							<button
-								type="button"
-								className="secondary"
-								onClick={() => setContactForm({ contactUsername: "", publicKey: "", notes: "" })}
-								disabled={contactBusy}
-							>
-								Clear
-							</button>
+				<>
+					<section className="card">
+						<div className="contact-header">
+							<div>
+								<h2>Contacts</h2>
+								<p className="hint">Manage trusted recipients and their public keys so you can encrypt messages to them.</p>
+							</div>
+							<button type="button" className="secondary button-inline" onClick={openAddContactModal}>Add contact</button>
 						</div>
-					</form>
 						{contactError && <div className="status error">{contactError}</div>}
-					<div className="contact-list">
-						<div className="contact-list-header">
-							<h3>Saved contacts</h3>
-							{contactsLoading && <span className="muted">Loading...</span>}
+						<div className="contact-list">
+							<div className="contact-list-header">
+								<h3>Saved contacts</h3>
+								{contactsLoading && <span className="muted">Loading...</span>}
+							</div>
+							{contacts.length === 0 && !contactsLoading ? (
+								<p className="hint">No contacts yet. Add someone to start encrypting messages for them.</p>
+							) : (
+								<ul className="contact-items">
+									{contacts.map((contact) => (
+										<li key={contact.id} className="contact-item">
+											<div className="contact-meta">
+												<strong>{contact.contactUsername}</strong>
+												{contact.notes && <p className="hint">{contact.notes}</p>}
+											</div>
+											<div className="contact-actions">
+												<button type="button" className="secondary button-inline" onClick={() => handleCopyPublicKey(contact.publicKey)}>
+													Copy key
+												</button>
+												<button type="button" className="secondary button-inline" onClick={() => openEditContactModal(contact)}>
+													Edit
+												</button>
+												<button type="button" className="ghost button-inline" onClick={() => handleDeleteContact(contact.id)}>
+													Delete
+												</button>
+											</div>
+										</li>
+									))}
+								</ul>
+							)}
 						</div>
-						{contacts.length === 0 && !contactsLoading ? (
-							<p className="hint">No contacts yet. Add someone to start encrypting messages for them.</p>
-						) : (
-							<ul className="contact-items">
-								{contacts.map((contact) => (
-									<li key={contact.id} className="contact-item">
-										<div className="contact-meta">
-											<strong>{contact.contactUsername}</strong>
-											{contact.notes && <p className="hint">{contact.notes}</p>}
-										</div>
-										<div className="contact-actions">
-											<button type="button" className="secondary" onClick={() => handleCopyPublicKey(contact.publicKey)}>
-												Copy key
-											</button>
-											<button type="button" className="ghost" onClick={() => handleDeleteContact(contact.id)}>
-												Delete
-											</button>
-										</div>
-									</li>
-								))}
-							</ul>
-						)}
-					</div>
-				</section>
+					</section>
+
+					{contactModalOpen && (
+						<div className="modal-backdrop" role="dialog" aria-modal="true">
+							<div className="modal-card">
+								<div className="modal-header">
+									<h3>{contactModalMode === "add" ? "Add contact" : "Edit contact"}</h3>
+									<button type="button" className="ghost button-inline" onClick={closeContactModal}>Close</button>
+								</div>
+								<form className="form-vertical" onSubmit={handleContactSubmit}>
+									<label className="label" htmlFor="contact-username">Contact username</label>
+									<input
+										id="contact-username"
+										type="text"
+										value={contactForm.contactUsername}
+										onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
+										placeholder="recipient_id"
+										required
+									/>
+									<label className="label" htmlFor="contact-notes">Notes (optional)</label>
+									<textarea
+										id="contact-notes"
+										value={contactForm.notes}
+										onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
+										placeholder="PGP fingerprint, onboarding status, etc."
+									/>
+									<label className="label" htmlFor="contact-public-key">Public key</label>
+									<textarea
+										id="contact-public-key"
+										value={contactForm.publicKey}
+										onChange={(e) => setContactForm((prev) => ({ ...prev, publicKey: e.target.value }))}
+										placeholder="-----BEGIN PUBLIC KEY-----"
+										required
+									/>
+									<div className="modal-actions">
+										<button type="button" className="ghost button-inline" onClick={closeContactModal}>Cancel</button>
+										<button type="submit" disabled={contactBusy || !isContactFormValid}>
+											{contactBusy ? "Saving..." : contactModalMode === "add" ? "Save contact" : "Update contact"}
+										</button>
+									</div>
+									{contactModalError && <div className="status error">{contactModalError}</div>}
+								</form>
+							</div>
+						</div>
+					)}
+				</>
 			);
 		}
 
