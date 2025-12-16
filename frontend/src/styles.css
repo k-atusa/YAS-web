@@ -319,6 +319,50 @@ h3 {
 	background: rgba(34, 197, 94, 0.08);
 }
 
+.contact-list {
+	margin-top: 22px;
+}
+
+.contact-list-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.contact-items {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.contact-item {
+	display: grid;
+	gap: 12px;
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	padding: 16px;
+	background: rgba(11, 22, 42, 0.8);
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.contact-meta strong {
+	font-size: 16px;
+}
+
+.contact-actions {
+	display: flex;
+	align-items: flex-start;
+}
+
+.contact-item pre {
+	min-height: 80px;
+}
+
 .nav-item.active {
 	border-color: rgba(56, 189, 248, 0.4);
 	box-shadow: 0 10px 25px rgba(56, 189, 248, 0.18);

@@ -1,5 +1,5 @@
 import { API_BASE } from "./config";
-import type { AccountPayload, AccountRecord } from "./types";
+import type { AccountPayload, AccountRecord, ContactPayload, ContactRecord } from "./types";
 
 export async function signup(username: string, password: string): Promise<{ id: string; username: string }> {
   const response = await fetch(`${API_BASE}/auth/signup`, {
@@ -60,4 +60,47 @@ export async function getAccountByUsername(username: string): Promise<AccountRec
   }
 
   return response.json();
+}
+
+export async function listContacts(token: string): Promise<ContactRecord[]> {
+  const response = await fetch(`${API_BASE}/contacts`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to fetch contacts");
+  }
+
+  return response.json();
+}
+
+export async function createContact(payload: ContactPayload, token: string): Promise<ContactRecord> {
+  const response = await fetch(`${API_BASE}/contacts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to save contact");
+  }
+
+  return response.json();
+}
+
+export async function deleteContact(id: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/contacts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to delete contact");
+  }
 }

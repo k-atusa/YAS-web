@@ -29,3 +29,16 @@ export interface AccountRecord extends AccountPayload {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export interface ContactPayload {
+  contactUsername: string;
+  publicKey: string;
+  label?: string;
+  notes?: string;
+}
+
+export interface ContactRecord extends ContactPayload {
+  id: string;
+  createdAt?: string;
+  updatedAt?: string;
+}

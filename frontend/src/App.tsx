@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
 import generate from "random-words";
-import { getAccountByUsername, login as loginApi, saveAccount, signup } from "./api";
+import {
+	getAccountByUsername,
+	login as loginApi,
+	saveAccount,
+	signup,
+	listContacts,
+	createContact,
+	deleteContact,
+} from "./api";
 import { buildAccountPayload, generateRsaKeyPair } from "./crypto";
-import type { AccountRecord } from "./types";
+import type { AccountRecord, ContactRecord } from "./types";
 
 type IconProps = { active?: boolean };
 
@@ -75,6 +83,11 @@ function App() {
 	const [storedAccount, setStoredAccount] = useState<AccountRecord | null>(null);
 	const [showKeySection, setShowKeySection] = useState(true);
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
+	const [contacts, setContacts] = useState<ContactRecord[]>([]);
+	const [contactsLoading, setContactsLoading] = useState(false);
+	const [contactForm, setContactForm] = useState({ contactUsername: "", publicKey: "", label: "", notes: "" });
+	const [contactError, setContactError] = useState<string | null>(null);
+	const [contactBusy, setContactBusy] = useState(false);
 
 	const canUpload = Boolean(username && passphrase && publicKeyPem && privateKeyPem);
 	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
@@ -89,6 +102,42 @@ function App() {
 			localStorage.removeItem("authUsername");
 		}
 	}, [authToken, authUsername]);
+
+	useEffect(() => {
+		let cancelled = false;
+		async function loadContacts() {
+			if (!authToken) {
+				if (!cancelled) {
+					setContacts([]);
+					setContactsLoading(false);
+				}
+				return;
+			}
+			if (!cancelled) {
+				setContactsLoading(true);
+				setContactError(null);
+			}
+			try {
+				const items = await listContacts(authToken);
+				if (!cancelled) {
+					setContacts(items);
+				}
+			} catch (err) {
+				console.error(err);
+				if (!cancelled) {
+					setContactError((err as Error).message || "Failed to load contacts");
+				}
+			} finally {
+				if (!cancelled) {
+					setContactsLoading(false);
+				}
+			}
+		}
+		loadContacts();
+		return () => {
+			cancelled = true;
+		};
+	}, [authToken]);
 
 	useEffect(() => {
 		if (authUsername) {
@@ -189,6 +238,9 @@ function App() {
 		setUsername("");
 		setStoredAccount(null);
 		setShowKeySection(true);
+		setContacts([]);
+		setContactForm({ contactUsername: "", publicKey: "", label: "", notes: "" });
+		setContactError(null);
 	}
 
 	function generatePassphrase() {
@@ -247,6 +299,60 @@ function App() {
 		setNotes("");
 		setStatus(null);
 		setError(null);
+	}
+
+	async function handleAddContact(e: React.FormEvent) {
+		e.preventDefault();
+		if (!authToken) return;
+		const trimmedUsername = contactForm.contactUsername.trim();
+		const trimmedKey = contactForm.publicKey.trim();
+		if (authUsername && trimmedUsername === authUsername) {
+			setContactError("You cannot add yourself as a contact");
+			return;
+		}
+		if (!trimmedUsername || !trimmedKey) {
+			setContactError("Username and public key are required");
+			return;
+		}
+		setContactBusy(true);
+		setContactError(null);
+		try {
+			const payload = {
+				contactUsername: trimmedUsername,
+				publicKey: trimmedKey,
+				label: contactForm.label.trim() || undefined,
+				notes: contactForm.notes.trim() || undefined,
+			};
+			const created = await createContact(payload, authToken);
+			setContacts((prev) => {
+				const existingIndex = prev.findIndex((c) => c.id === created.id);
+				if (existingIndex >= 0) {
+					const clone = [...prev];
+					clone[existingIndex] = created;
+					return clone;
+				}
+				return [created, ...prev.filter((c) => c.id !== created.id && c.contactUsername !== created.contactUsername)];
+			});
+			setContactForm({ contactUsername: "", publicKey: "", label: "", notes: "" });
+		} catch (err) {
+			console.error(err);
+			setContactError((err as Error).message || "Failed to save contact");
+		} finally {
+			setContactBusy(false);
+		}
+	}
+
+	async function handleDeleteContact(id: string) {
+		if (!authToken) return;
+		const confirmed = window.confirm("Delete this contact?");
+		if (!confirmed) return;
+		try {
+			await deleteContact(id, authToken);
+			setContacts((prev) => prev.filter((contact) => contact.id !== id));
+		} catch (err) {
+			console.error(err);
+			setContactError((err as Error).message || "Failed to delete contact");
+		}
 	}
 
 	function renderTabContent() {
@@ -358,11 +464,95 @@ function App() {
 		}
 
 		if (tab === "address-book") {
+			const isContactFormValid = Boolean(contactForm.contactUsername.trim() && contactForm.publicKey.trim());
+
 			return (
 				<section className="card">
 					<h2>Contacts</h2>
 					<p className="hint">Manage trusted recipients and their public keys so you can encrypt messages to them.</p>
-					<p className="hint">Future: add, edit, and verify contacts; import/export public keys.</p>
+					<form className="form-vertical" onSubmit={handleAddContact}>
+						<div className="grid single-col">
+							<div>
+								<label className="label" htmlFor="contact-username">Contact username</label>
+								<input
+									id="contact-username"
+									type="text"
+									value={contactForm.contactUsername}
+									onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
+									placeholder="recipient_id"
+									required
+								/>
+							</div>
+							<div>
+								<label className="label" htmlFor="contact-label">Label (optional)</label>
+								<input
+									id="contact-label"
+									type="text"
+									value={contactForm.label}
+									onChange={(e) => setContactForm((prev) => ({ ...prev, label: e.target.value }))}
+									placeholder="Finance, Ops, ..."
+								/>
+							</div>
+						</div>
+						<label className="label" htmlFor="contact-notes">Notes (optional)</label>
+						<textarea
+							id="contact-notes"
+							value={contactForm.notes}
+							onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
+							placeholder="PGP fingerprint, onboarding status, etc."
+						/>
+						<label className="label" htmlFor="contact-public-key">Public key</label>
+						<textarea
+							id="contact-public-key"
+							value={contactForm.publicKey}
+							onChange={(e) => setContactForm((prev) => ({ ...prev, publicKey: e.target.value }))}
+							placeholder="-----BEGIN PUBLIC KEY-----"
+							required
+						/>
+						<div className="actions">
+							<button type="submit" disabled={contactBusy || !isContactFormValid}>{contactBusy ? "Saving..." : "Save contact"}</button>
+							<button type="button" className="secondary" onClick={() => setContactForm({ contactUsername: "", publicKey: "", label: "", notes: "" })}
+								disabled={contactBusy}
+							>
+								Clear
+							</button>
+						</div>
+					</form>
+						{contactError && <div className="status error">{contactError}</div>}
+					<div className="contact-list">
+						<div className="contact-list-header">
+							<h3>Saved contacts</h3>
+							{contactsLoading && <span className="muted">Loading...</span>}
+						</div>
+						{contacts.length === 0 && !contactsLoading ? (
+							<p className="hint">No contacts yet. Add someone to start encrypting messages for them.</p>
+						) : (
+							<ul className="contact-items">
+								{contacts.map((contact) => (
+									<li key={contact.id} className="contact-item">
+										<div className="contact-meta">
+											<strong>{contact.label || contact.contactUsername}</strong>
+											<p className="muted">@{contact.contactUsername}</p>
+											{contact.notes && <p className="hint">{contact.notes}</p>}
+										</div>
+										<div className="contact-actions">
+											<button type="button" className="ghost" onClick={() => handleDeleteContact(contact.id)}>Remove</button>
+										</div>
+										<div className="copy-block">
+											<button
+												type="button"
+												className="copy-button"
+												onClick={() => handleCopyPublicKey(contact.publicKey)}
+											>
+												Copy
+											</button>
+											<pre>{contact.publicKey}</pre>
+										</div>
+									</li>
+								))}
+							</ul>
+						)}
+					</div>
 				</section>
 			);
 		}

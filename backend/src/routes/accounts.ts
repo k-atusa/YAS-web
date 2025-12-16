@@ -1,8 +1,8 @@
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Response } from "express";
 import { z } from "zod";
 import { AccountModel } from "../models/Account";
 import type { AccountPayload } from "../types/crypto";
-import jwt from "jsonwebtoken";
+import { requireAuth, AuthenticatedRequest } from "../middleware/requireAuth";
 
 const router = Router();
 
@@ -91,35 +91,13 @@ const accountSchema: z.ZodType<AccountPayload> = z
 		}
 	});
 
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-	const header = req.headers.authorization;
-	if (!header || !header.toLowerCase().startsWith("bearer ")) {
-		return res.status(401).json({ message: "Unauthorized" });
-	}
-
-	const token = header.slice("bearer ".length);
-	let secret = process.env.JWT_SECRET;
-	if (!secret) {
-		console.warn("JWT_SECRET is not set; using insecure dev fallback. Set JWT_SECRET in production.");
-		secret = "dev-secret";
-	}
-
-	try {
-		const payload = jwt.verify(token, secret) as { sub?: string; username?: string };
-		(req as any).user = payload;
-		return next();
-	} catch (error) {
-		return res.status(401).json({ message: "Invalid token" });
-	}
-}
-
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
 	const parsed = accountSchema.safeParse(req.body);
 	if (!parsed.success) {
 		return res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
 	}
 
-	const requester = (req as any).user as { username?: string };
+	const requester = req.user;
 	if (requester?.username && requester.username !== parsed.data.username) {
 		return res.status(403).json({ message: "Username mismatch" });
 	}

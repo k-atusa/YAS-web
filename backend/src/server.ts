@@ -5,6 +5,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import accountsRouter from "./routes/accounts";
 import authRouter from "./routes/auth";
+import contactsRouter from "./routes/contacts";
 import { connectToDatabase } from "./db";
 
 const app = express();
@@ -23,6 +24,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRouter);
 app.use("/api/accounts", accountsRouter);
+app.use("/api/contacts", contactsRouter);
 
 async function start() {
   try {
