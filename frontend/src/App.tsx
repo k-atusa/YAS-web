@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import generate from "random-words";
 import {
 	getAccountByUsername,
@@ -103,9 +103,20 @@ function App() {
 	const [contactError, setContactError] = useState<string | null>(null);
 	const [contactBusy, setContactBusy] = useState(false);
 	const [contactModalOpen, setContactModalOpen] = useState(false);
+	const [contactModalClosing, setContactModalClosing] = useState(false);
 	const [contactModalMode, setContactModalMode] = useState<"add" | "edit">("add");
 	const [editingContactMeta, setEditingContactMeta] = useState<{ id: string; username: string } | null>(null);
 	const [contactModalError, setContactModalError] = useState<string | null>(null);
+	const closeModalTimer = useRef<number | null>(null);
+
+	useEffect(() => {
+		return () => {
+			if (closeModalTimer.current) {
+				window.clearTimeout(closeModalTimer.current);
+				closeModalTimer.current = null;
+			}
+		};
+	}, []);
 
 	const canUpload = Boolean(username && passphrase && publicKeyPem && privateKeyPem);
 	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
@@ -266,21 +277,41 @@ function App() {
 		setContacts([]);
 		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
 		setContactError(null);
-		setContactModalOpen(false);
-		setContactModalMode("add");
-		setEditingContactMeta(null);
-		setContactModalError(null);
+		forceCloseContactModal();
 	}
 
-	function openAddContactModal() {
+	function reopenContactModal() {
+		if (closeModalTimer.current) {
+			window.clearTimeout(closeModalTimer.current);
+			closeModalTimer.current = null;
+		}
+		setContactModalClosing(false);
+		setContactModalOpen(true);
+	}
+
+	function forceCloseContactModal() {
+		if (closeModalTimer.current) {
+			window.clearTimeout(closeModalTimer.current);
+			closeModalTimer.current = null;
+		}
+		setContactModalClosing(false);
+		setContactModalOpen(false);
 		setContactModalMode("add");
 		setEditingContactMeta(null);
 		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
 		setContactModalError(null);
-		setContactModalOpen(true);
+	}
+
+	function openAddContactModal() {
+		reopenContactModal();
+		setContactModalMode("add");
+		setEditingContactMeta(null);
+		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
+		setContactModalError(null);
 	}
 
 	function openEditContactModal(contact: ContactRecord) {
+		reopenContactModal();
 		setContactModalMode("edit");
 		setEditingContactMeta({ id: contact.id, username: contact.contactUsername });
 		setContactForm({
@@ -289,15 +320,18 @@ function App() {
 			notes: contact.notes || "",
 		});
 		setContactModalError(null);
-		setContactModalOpen(true);
 	}
 
 	function closeContactModal() {
-		setContactModalOpen(false);
-		setContactModalMode("add");
-		setEditingContactMeta(null);
-		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
-		setContactModalError(null);
+		if (contactModalClosing) return;
+		if (closeModalTimer.current) {
+			window.clearTimeout(closeModalTimer.current);
+		}
+		setContactModalClosing(true);
+		closeModalTimer.current = window.setTimeout(() => {
+			forceCloseContactModal();
+			closeModalTimer.current = null;
+		}, 240);
 	}
 
 	function generatePassphrase() {
@@ -580,9 +614,9 @@ function App() {
 						</div>
 					</section>
 
-					{contactModalOpen && (
-						<div className="modal-backdrop" role="dialog" aria-modal="true">
-							<div className="modal-card">
+					{(contactModalOpen || contactModalClosing) && (
+						<div className={contactModalClosing ? "modal-backdrop closing" : "modal-backdrop"} role="dialog" aria-modal="true">
+							<div className={contactModalClosing ? "modal-card closing" : "modal-card"}>
 								<div className="modal-header">
 									<h3>{contactModalMode === "add" ? "Add contact" : "Edit contact"}</h3>
 									<button type="button" className="ghost button-inline" onClick={closeContactModal}>Close</button>

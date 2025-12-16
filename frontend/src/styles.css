@@ -406,6 +406,12 @@ h3 {
 	justify-content: center;
 	padding: 24px;
 	z-index: 100;
+	opacity: 0;
+	animation: fadeIn 160ms ease forwards;
+}
+
+.modal-backdrop.closing {
+	animation: fadeOut 160ms ease forwards;
 }
 
 .modal-card {
@@ -417,6 +423,13 @@ h3 {
 	max-height: 90vh;
 	overflow-y: auto;
 	box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45);
+	opacity: 0;
+	transform: translateY(16px) scale(0.98);
+	animation: floatIn 220ms ease forwards;
+}
+
+.modal-card.closing {
+	animation: floatOut 220ms ease forwards;
 }
 
 .modal-header {
@@ -432,6 +445,46 @@ h3 {
 	justify-content: flex-end;
 	gap: 12px;
 	margin-top: 12px;
+}
+
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes floatIn {
+	from {
+		opacity: 0;
+		transform: translateY(16px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+}
+
+@keyframes fadeOut {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+
+@keyframes floatOut {
+	from {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
+	to {
+		opacity: 0;
+		transform: translateY(8px) scale(0.97);
+	}
 }
 
 .nav-item.active {
