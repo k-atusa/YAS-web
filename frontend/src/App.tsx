@@ -557,13 +557,19 @@ function App() {
 												{contact.notes && <p className="hint">{contact.notes}</p>}
 											</div>
 											<div className="contact-actions">
-												<button type="button" className="secondary button-inline" onClick={() => handleCopyPublicKey(contact.publicKey)}>
-													Copy key
+												<button
+													type="button"
+													className={`secondary button-inline copy-state ${
+														copyPublicStatus === "copied" ? "copied" : copyPublicStatus === "error" ? "error" : ""
+													}`}
+													onClick={() => handleCopyPublicKey(contact.publicKey)}
+												>
+													{copyPublicStatus === "copied" ? "Copied" : copyPublicStatus === "error" ? "Error" : "Copy key"}
 												</button>
 												<button type="button" className="secondary button-inline" onClick={() => openEditContactModal(contact)}>
 													Edit
 												</button>
-												<button type="button" className="ghost button-inline" onClick={() => handleDeleteContact(contact.id)}>
+												<button type="button" className="ghost button-inline danger" onClick={() => handleDeleteContact(contact.id)}>
 													Delete
 												</button>
 											</div>
