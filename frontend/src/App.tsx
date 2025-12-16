@@ -14,6 +14,20 @@ import type { AccountRecord, ContactRecord } from "./types";
 
 type IconProps = { active?: boolean };
 
+function extractPublicKeyBody(pem: string | undefined | null): string | null {
+	if (!pem) return null;
+	const normalized = pem.replace(/\r/g, "");
+	const headerRegex = /-*\s*BEGIN\s+PUBLIC\s+KEY\s*-*/i;
+	const footerRegex = /-*\s*END\s+PUBLIC\s+KEY\s*-*/i;
+	const headerMatch = headerRegex.exec(normalized);
+	const startIndex = headerMatch ? headerMatch.index + headerMatch[0].length : 0;
+	const afterHeader = normalized.slice(startIndex);
+	const footerMatch = footerRegex.exec(afterHeader);
+	const bodySection = footerMatch ? afterHeader.slice(0, footerMatch.index) : afterHeader;
+	const stripped = bodySection.replace(/[^A-Za-z0-9+/=]/g, "");
+	return stripped.trim() || null;
+}
+
 function IconHome({ active }: IconProps) {
 	const stroke = active ? "#38bdf8" : "#94a3b8";
 	return (
@@ -349,8 +363,10 @@ function App() {
 		if (!authToken) return;
 		const trimmedUsername = contactForm.contactUsername.trim();
 		const trimmedKey = contactForm.publicKey.trim();
-		if (authUsername && trimmedUsername === authUsername) {
-			setContactModalError("You cannot add yourself as a contact");
+		const selfPublicKeyBody = extractPublicKeyBody(storedAccount?.publicKey || publicKeyPem);
+		const targetKeyBody = extractPublicKeyBody(trimmedKey);
+		if (selfPublicKeyBody && targetKeyBody && selfPublicKeyBody === targetKeyBody) {
+			setContactModalError("This public key already belongs to you");
 			return;
 		}
 		if (!trimmedUsername || !trimmedKey) {
