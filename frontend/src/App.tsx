@@ -149,26 +149,33 @@ function App() {
 
 	useEffect(() => {
 		let cancelled = false;
+		const usernameSnapshot = authUsername?.trim();
+
+		setStoredAccount(null);
+		setShowKeySection(true);
+		setPublicKeyPem("");
+		setPrivateKeyPem("");
+
+		if (!usernameSnapshot) {
+			return () => {
+				cancelled = true;
+			};
+		}
+
 		async function loadStored() {
-			if (!authUsername) {
-				setStoredAccount(null);
-				setShowKeySection(true);
-				return;
-			}
 			try {
-				const record = await getAccountByUsername(authUsername);
-				if (!cancelled) {
+				const record = await getAccountByUsername(usernameSnapshot);
+				if (!cancelled && authUsername === usernameSnapshot) {
 					setStoredAccount(record);
 					setShowKeySection(!record);
 					if (record) {
 						setPublicKeyPem(record.publicKey);
-						setPrivateKeyPem("");
 						setStatus(null);
 					}
 				}
 			} catch (err) {
 				console.error(err);
-				if (!cancelled) {
+				if (!cancelled && authUsername === usernameSnapshot) {
 					setStoredAccount(null);
 					setShowKeySection(true);
 				}
