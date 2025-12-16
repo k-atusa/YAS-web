@@ -85,7 +85,7 @@ function App() {
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
 	const [contactsLoading, setContactsLoading] = useState(false);
-	const [contactForm, setContactForm] = useState({ contactUsername: "", publicKey: "", label: "", notes: "" });
+	const [contactForm, setContactForm] = useState({ contactUsername: "", publicKey: "", notes: "" });
 	const [contactError, setContactError] = useState<string | null>(null);
 	const [contactBusy, setContactBusy] = useState(false);
 
@@ -164,7 +164,7 @@ function App() {
 
 		async function loadStored() {
 			try {
-				const record = await getAccountByUsername(usernameSnapshot);
+				const record = await getAccountByUsername(usernameSnapshot as string);
 				if (!cancelled && authUsername === usernameSnapshot) {
 					setStoredAccount(record);
 					setShowKeySection(!record);
@@ -246,7 +246,7 @@ function App() {
 		setStoredAccount(null);
 		setShowKeySection(true);
 		setContacts([]);
-		setContactForm({ contactUsername: "", publicKey: "", label: "", notes: "" });
+		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
 		setContactError(null);
 	}
 
@@ -327,7 +327,6 @@ function App() {
 			const payload = {
 				contactUsername: trimmedUsername,
 				publicKey: trimmedKey,
-				label: contactForm.label.trim() || undefined,
 				notes: contactForm.notes.trim() || undefined,
 			};
 			const created = await createContact(payload, authToken);
@@ -340,7 +339,7 @@ function App() {
 				}
 				return [created, ...prev.filter((c) => c.id !== created.id && c.contactUsername !== created.contactUsername)];
 			});
-			setContactForm({ contactUsername: "", publicKey: "", label: "", notes: "" });
+			setContactForm({ contactUsername: "", publicKey: "", notes: "" });
 		} catch (err) {
 			console.error(err);
 			setContactError((err as Error).message || "Failed to save contact");
@@ -478,29 +477,15 @@ function App() {
 					<h2>Contacts</h2>
 					<p className="hint">Manage trusted recipients and their public keys so you can encrypt messages to them.</p>
 					<form className="form-vertical" onSubmit={handleAddContact}>
-						<div className="grid single-col">
-							<div>
-								<label className="label" htmlFor="contact-username">Contact username</label>
-								<input
-									id="contact-username"
-									type="text"
-									value={contactForm.contactUsername}
-									onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
-									placeholder="recipient_id"
-									required
-								/>
-							</div>
-							<div>
-								<label className="label" htmlFor="contact-label">Label (optional)</label>
-								<input
-									id="contact-label"
-									type="text"
-									value={contactForm.label}
-									onChange={(e) => setContactForm((prev) => ({ ...prev, label: e.target.value }))}
-									placeholder="Finance, Ops, ..."
-								/>
-							</div>
-						</div>
+						<label className="label" htmlFor="contact-username">Contact username</label>
+						<input
+							id="contact-username"
+							type="text"
+							value={contactForm.contactUsername}
+							onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
+							placeholder="recipient_id"
+							required
+						/>
 						<label className="label" htmlFor="contact-notes">Notes (optional)</label>
 						<textarea
 							id="contact-notes"
@@ -518,7 +503,10 @@ function App() {
 						/>
 						<div className="actions">
 							<button type="submit" disabled={contactBusy || !isContactFormValid}>{contactBusy ? "Saving..." : "Save contact"}</button>
-							<button type="button" className="secondary" onClick={() => setContactForm({ contactUsername: "", publicKey: "", label: "", notes: "" })}
+							<button
+								type="button"
+								className="secondary"
+								onClick={() => setContactForm({ contactUsername: "", publicKey: "", notes: "" })}
 								disabled={contactBusy}
 							>
 								Clear
@@ -538,22 +526,16 @@ function App() {
 								{contacts.map((contact) => (
 									<li key={contact.id} className="contact-item">
 										<div className="contact-meta">
-											<strong>{contact.label || contact.contactUsername}</strong>
-											<p className="muted">@{contact.contactUsername}</p>
+											<strong>{contact.contactUsername}</strong>
 											{contact.notes && <p className="hint">{contact.notes}</p>}
 										</div>
 										<div className="contact-actions">
-											<button type="button" className="ghost" onClick={() => handleDeleteContact(contact.id)}>Remove</button>
-										</div>
-										<div className="copy-block">
-											<button
-												type="button"
-												className="copy-button"
-												onClick={() => handleCopyPublicKey(contact.publicKey)}
-											>
-												Copy
+											<button type="button" className="secondary" onClick={() => handleCopyPublicKey(contact.publicKey)}>
+												Copy key
 											</button>
-											<pre>{contact.publicKey}</pre>
+											<button type="button" className="ghost" onClick={() => handleDeleteContact(contact.id)}>
+												Delete
+											</button>
 										</div>
 									</li>
 								))}

@@ -342,12 +342,13 @@ h3 {
 
 .contact-item {
 	display: grid;
-	gap: 12px;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	align-items: center;
+	gap: 16px;
 	border: 1px solid var(--border);
 	border-radius: 14px;
 	padding: 16px;
 	background: rgba(11, 22, 42, 0.8);
-	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .contact-meta strong {
@@ -356,11 +357,9 @@ h3 {
 
 .contact-actions {
 	display: flex;
-	align-items: flex-start;
-}
-
-.contact-item pre {
-	min-height: 80px;
+	gap: 10px;
+	flex-wrap: wrap;
+	justify-content: flex-end;
 }
 
 .nav-item.active {
