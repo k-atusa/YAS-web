@@ -154,6 +154,7 @@ function App() {
 	const [encryptMode, setEncryptMode] = useState<"text" | "file">("text");
 	const [encryptPlaintext, setEncryptPlaintext] = useState("");
 	const [encryptFile, setEncryptFile] = useState<File | null>(null);
+	const [isFileDragActive, setIsFileDragActive] = useState(false);
 	const [encryptBusy, setEncryptBusy] = useState(false);
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
@@ -339,6 +340,7 @@ function App() {
 		setEncryptMode("text");
 		setEncryptPlaintext("");
 		setEncryptFile(null);
+		setIsFileDragActive(false);
 		setEncryptStatus(null);
 		setEncryptError(null);
 		setEncryptedPayload(null);
@@ -402,19 +404,16 @@ function App() {
 
 	function resetEncryptionForm() {
 		setEncryptPlaintext("");
-		setEncryptFile(null);
-		setEncryptStatus(null);
-		setEncryptError(null);
-		setEncryptedPayload(null);
-		setCopyPayloadStatus("idle");
-		setLastEncryptionSummary(null);
+		applySelectedEncryptFile(null);
+		setIsFileDragActive(false);
 	}
 
 	function handleEncryptionModeChange(mode: "text" | "file") {
 		if (mode === encryptMode) return;
 		setEncryptMode(mode);
 		if (mode === "text") {
-			setEncryptFile(null);
+			applySelectedEncryptFile(null);
+			setIsFileDragActive(false);
 		} else {
 			setEncryptPlaintext("");
 		}
@@ -425,8 +424,7 @@ function App() {
 		setLastEncryptionSummary(null);
 	}
 
-	function handleEncryptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-		const file = event.target.files?.[0] ?? null;
+	function applySelectedEncryptFile(file: File | null) {
 		setEncryptFile(file);
 		setEncryptStatus(null);
 		setEncryptError(null);
@@ -435,13 +433,50 @@ function App() {
 		setLastEncryptionSummary(null);
 	}
 
+	function handleFileDragEnter(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		if (encryptBusy || contacts.length === 0) return;
+		setIsFileDragActive(true);
+	}
+
+	function handleFileDragOver(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		if (encryptBusy || contacts.length === 0) return;
+		event.dataTransfer.dropEffect = "copy";
+		if (!isFileDragActive) {
+			setIsFileDragActive(true);
+		}
+	}
+
+	function handleFileDragLeave(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		const nextTarget = event.relatedTarget as Node | null;
+		if (nextTarget && event.currentTarget.contains(nextTarget)) {
+			return;
+		}
+		setIsFileDragActive(false);
+	}
+
+	function handleFileDrop(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		setIsFileDragActive(false);
+		if (encryptBusy || contacts.length === 0) return;
+		const droppedFile = event.dataTransfer.files?.[0];
+		if (droppedFile) {
+			applySelectedEncryptFile(droppedFile);
+		}
+	}
+
+	function handleEncryptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+		const file = event.target.files?.[0] ?? null;
+		applySelectedEncryptFile(file);
+		setIsFileDragActive(false);
+		event.target.value = "";
+	}
+
 	function clearSelectedFile() {
-		setEncryptFile(null);
-		setEncryptStatus(null);
-		setEncryptError(null);
-		setEncryptedPayload(null);
-		setCopyPayloadStatus("idle");
-		setLastEncryptionSummary(null);
+		applySelectedEncryptFile(null);
+		setIsFileDragActive(false);
 	}
 
 	async function handleEncryptSubmit(e: React.FormEvent) {
@@ -818,7 +853,35 @@ function App() {
 								/>
 							) : (
 								<div className="file-picker">
-									<input id="encrypt-file" type="file" onChange={handleEncryptFileChange} disabled={!hasContacts || encryptBusy} />
+									<div
+										className={isFileDragActive ? "file-dropzone drag-active" : "file-dropzone"}
+										onDragEnter={handleFileDragEnter}
+										onDragOver={handleFileDragOver}
+										onDragLeave={handleFileDragLeave}
+										onDrop={handleFileDrop}
+										aria-disabled={!hasContacts || encryptBusy}
+									>
+										<input
+											id="encrypt-file"
+											type="file"
+											onChange={handleEncryptFileChange}
+											disabled={!hasContacts || encryptBusy}
+											className="visually-hidden"
+										/>
+										<label htmlFor="encrypt-file">
+											<div className="drop-graphic" aria-hidden="true">
+												<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+													<rect x="7" y="23" width="26" height="10" rx="3" stroke="#38bdf8" strokeWidth="1.6" opacity="0.7" />
+													<path d="M20 7v18" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" />
+													<path d="M15 18l5 5 5-5" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+												</svg>
+											</div>
+											<strong>Drag & drop a file to encrypt</strong>
+											<span className="drop-highlight">Drop it anywhere inside this panel or click to browse.</span>
+											<span className="muted">Files stay local. We encrypt in your browser before anything leaves.</span>
+										</label>
+									</div>
+
 									{encryptFile && (
 										<div className="file-info">
 											<div>

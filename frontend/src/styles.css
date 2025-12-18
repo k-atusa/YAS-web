@@ -65,14 +65,79 @@ h1 {
 	backdrop-filter: blur(6px);
 }
 
-.label {
-	display: block;
-	margin-bottom: 6px;
-	color: var(--muted);
-	font-size: 14px;
+.file-picker {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
 }
 
-input,
+.file-dropzone {
+	border: 1px dashed var(--border);
+	border-radius: 16px;
+	padding: 28px 20px;
+	background: rgba(8, 14, 28, 0.85);
+	text-align: center;
+	cursor: pointer;
+	transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+	position: relative;
+}
+
+.file-dropzone label {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+}
+
+.file-dropzone strong {
+	font-size: 16px;
+	color: var(--text);
+}
+
+.file-dropzone .muted {
+	font-size: 13px;
+}
+
+.file-dropzone.drag-active {
+	border-color: rgba(56, 189, 248, 0.6);
+	background: rgba(8, 20, 40, 0.95);
+	box-shadow: 0 10px 35px rgba(56, 189, 248, 0.18);
+	transform: translateY(-1px);
+}
+
+.file-dropzone[aria-disabled="true"] {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
+.drop-graphic {
+	width: 64px;
+	height: 64px;
+	border-radius: 50%;
+	background: rgba(56, 189, 248, 0.08);
+	border: 1px solid rgba(56, 189, 248, 0.25);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.drop-highlight {
+	color: var(--accent);
+	font-weight: 600;
+}
+
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	border: 0;
+}
 textarea,
 button,
 select {
