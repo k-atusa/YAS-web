@@ -772,6 +772,7 @@ function App() {
 									setEncryptError(null);
 									setEncryptedPayload(null);
 									setCopyPayloadStatus("idle");
+									setLastEncryptionSummary(null);
 								}}
 								disabled={!hasContacts || encryptBusy}
 							>
@@ -810,6 +811,7 @@ function App() {
 										setEncryptError(null);
 										setEncryptedPayload(null);
 										setCopyPayloadStatus("idle");
+										setLastEncryptionSummary(null);
 									}}
 									placeholder="Write the message to encrypt"
 									disabled={!hasContacts}
