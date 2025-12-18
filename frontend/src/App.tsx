@@ -92,15 +92,8 @@ type Tab = "keys" | "address-book" | "encrypt" | "decrypt";
 
 type EncryptedEnvelope = {
 	schema: string;
-	recipient: string;
-	createdAt: string;
 	payload: {
 		type: "text" | "file";
-		encoding?: string;
-		length?: number;
-		fileName?: string;
-		mimeType?: string;
-		size?: number;
 	};
 	encryption: {
 		algorithm: string;
@@ -112,6 +105,17 @@ type EncryptedEnvelope = {
 		cipherText: string;
 	};
 };
+
+function downloadEncryptedEnvelope(payload: EncryptedEnvelope) {
+	const json = JSON.stringify(payload, null, 2);
+	const blob = new Blob([json], { type: "application/json" });
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = `yas-ciphertext-${Date.now()}.json`;
+	link.click();
+	URL.revokeObjectURL(url);
+}
 
 function App() {
 	const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem("authToken"));
@@ -155,6 +159,7 @@ function App() {
 	const [encryptError, setEncryptError] = useState<string | null>(null);
 	const [encryptedPayload, setEncryptedPayload] = useState<EncryptedEnvelope | null>(null);
 	const [copyPayloadStatus, setCopyPayloadStatus] = useState<"idle" | "copied" | "error">("idle");
+	const [lastEncryptionSummary, setLastEncryptionSummary] = useState<{ recipient: string; payloadDescription: string } | null>(null);
 
 	useEffect(() => {
 		return () => {
@@ -164,6 +169,11 @@ function App() {
 			}
 		};
 	}, []);
+
+	useEffect(() => {
+		if (!encryptedPayload) return;
+		downloadEncryptedEnvelope(encryptedPayload);
+	}, [encryptedPayload]);
 
 	const canUpload = Boolean(username && passphrase && publicKeyPem && privateKeyPem);
 	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
@@ -333,6 +343,7 @@ function App() {
 		setEncryptError(null);
 		setEncryptedPayload(null);
 		setCopyPayloadStatus("idle");
+		setLastEncryptionSummary(null);
 	}
 
 	function reopenContactModal() {
@@ -396,6 +407,7 @@ function App() {
 		setEncryptError(null);
 		setEncryptedPayload(null);
 		setCopyPayloadStatus("idle");
+		setLastEncryptionSummary(null);
 	}
 
 	function handleEncryptionModeChange(mode: "text" | "file") {
@@ -410,6 +422,7 @@ function App() {
 		setEncryptError(null);
 		setEncryptedPayload(null);
 		setCopyPayloadStatus("idle");
+		setLastEncryptionSummary(null);
 	}
 
 	function handleEncryptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -419,6 +432,7 @@ function App() {
 		setEncryptError(null);
 		setEncryptedPayload(null);
 		setCopyPayloadStatus("idle");
+		setLastEncryptionSummary(null);
 	}
 
 	function clearSelectedFile() {
@@ -427,6 +441,7 @@ function App() {
 		setEncryptError(null);
 		setEncryptedPayload(null);
 		setCopyPayloadStatus("idle");
+		setLastEncryptionSummary(null);
 	}
 
 	async function handleEncryptSubmit(e: React.FormEvent) {
@@ -446,17 +461,12 @@ function App() {
 					return;
 				}
 				payloadBuffer = encodeUtf8(encryptPlaintext);
-				payloadMeta.encoding = "utf-8";
-				payloadMeta.length = encryptPlaintext.length;
 			} else {
 				if (!encryptFile) {
 					setEncryptError("Select a file to encrypt");
 					return;
 				}
 				payloadBuffer = await encryptFile.arrayBuffer();
-				payloadMeta.fileName = encryptFile.name || "payload.bin";
-				payloadMeta.mimeType = encryptFile.type || "application/octet-stream";
-				payloadMeta.size = encryptFile.size;
 			}
 		} catch (fileError) {
 			console.error(fileError);
@@ -477,8 +487,6 @@ function App() {
 			const hybrid = await encryptForPublicKey(payloadBuffer, recipient.publicKey);
 			const envelope: EncryptedEnvelope = {
 				schema: "yas.hybrid.v1",
-				recipient: recipient.contactUsername,
-				createdAt: new Date().toISOString(),
 				payload: payloadMeta,
 				encryption: {
 					algorithm: "AES-GCM",
@@ -491,13 +499,18 @@ function App() {
 				},
 			};
 			setEncryptedPayload(envelope);
-			const label = encryptMode === "file" && payloadMeta.fileName ? payloadMeta.fileName : "text";
+			const payloadDescription = encryptMode === "text"
+				? `${encryptPlaintext.length} chars`
+				: formatBytes(encryptFile?.size ?? payloadBuffer.byteLength);
+			setLastEncryptionSummary({ recipient: recipient.contactUsername, payloadDescription });
+			const label = encryptMode === "file" ? "file" : "text";
 			setEncryptStatus(`Encrypted ${label} for ${recipient.contactUsername}`);
 		} catch (err) {
 			console.error(err);
 			setEncryptError((err as Error).message || "Failed to encrypt data");
 			setEncryptStatus(null);
 			setEncryptedPayload(null);
+			setLastEncryptionSummary(null);
 		} finally {
 			setEncryptBusy(false);
 		}
@@ -518,15 +531,7 @@ function App() {
 
 	function handleDownloadEncryptedPayload() {
 		if (!encryptedPayload) return;
-		const json = JSON.stringify(encryptedPayload, null, 2);
-		const blob = new Blob([json], { type: "application/json" });
-		const url = URL.createObjectURL(blob);
-		const slug = encryptedPayload.recipient.replace(/[^A-Za-z0-9_-]/g, "_");
-		const link = document.createElement("a");
-		link.href = url;
-		link.download = `yas-${slug || "payload"}-${Date.now()}.json`;
-		link.click();
-		URL.revokeObjectURL(url);
+		downloadEncryptedEnvelope(encryptedPayload);
 	}
 
 	function generatePassphrase() {
@@ -832,6 +837,15 @@ function App() {
 									Reset
 								</button>
 							</div>
+
+							{encryptBusy && (
+								<div className="progress-row" role="status" aria-live="polite">
+									<div className="progress-bar">
+										<div className="progress-fill" />
+									</div>
+									<span className="muted">Encrypting payload...</span>
+								</div>
+							)}
 						</form>
 						{encryptStatus && <div className="status success">{encryptStatus}</div>}
 						{encryptError && <div className="status error">{encryptError}</div>}
@@ -840,38 +854,36 @@ function App() {
 						{encryptedPayload && (
 							<section className="card">
 								<div className="encrypt-summary">
-									<div>
-										<span className="summary-label">Recipient</span>
-										<p>{encryptedPayload.recipient}</p>
-									</div>
+									{lastEncryptionSummary?.recipient && (
+										<div>
+											<span className="summary-label">Recipient</span>
+											<p>{lastEncryptionSummary.recipient}</p>
+										</div>
+									)}
 									<div>
 										<span className="summary-label">Payload</span>
-										<p>
-										{encryptedPayload.payload.type === "text"
-											? `${encryptedPayload.payload.length ?? 0} chars`
-											: `${encryptedPayload.payload.fileName || "file"} (${formatBytes(encryptedPayload.payload.size ?? 0)})`}
-									</p>
-								</div>
+										<p>{lastEncryptionSummary?.payloadDescription || (encryptedPayload.payload.type === "text" ? "Text" : "Binary data")}</p>
+									</div>
 									<div>
 										<span className="summary-label">Algorithm</span>
 										<p>AES-GCM + RSA-OAEP</p>
 									</div>
-							</div>
-							<div className="result-actions">
-								<button
-									type="button"
-									className={`secondary button-inline copy-state ${copyPayloadStatus === "copied" ? "copied" : copyPayloadStatus === "error" ? "error" : ""}`}
-									onClick={handleCopyEncryptedPayload}
-								>
-									{copyPayloadStatus === "copied" ? "Copied" : copyPayloadStatus === "error" ? "Error" : "Copy JSON"}
-								</button>
-								<button type="button" className="ghost button-inline" onClick={handleDownloadEncryptedPayload}>
-									Download JSON
-								</button>
-							</div>
-							<pre>{JSON.stringify(encryptedPayload, null, 2)}</pre>
-						</section>
-					)}
+								</div>
+								<p className="hint">Ciphertext downloaded automatically with only the metadata needed for decryption.</p>
+								<div className="result-actions">
+									<button
+										type="button"
+										className={`secondary button-inline copy-state ${copyPayloadStatus === "copied" ? "copied" : copyPayloadStatus === "error" ? "error" : ""}`}
+										onClick={handleCopyEncryptedPayload}
+									>
+										{copyPayloadStatus === "copied" ? "Copied" : copyPayloadStatus === "error" ? "Error" : "Copy JSON"}
+									</button>
+									<button type="button" className="ghost button-inline" onClick={handleDownloadEncryptedPayload}>
+										Download ciphertext
+									</button>
+								</div>
+							</section>
+						)}
 				</>
 			);
 		}

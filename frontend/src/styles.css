@@ -527,6 +527,32 @@ h3 {
 	margin-bottom: 12px;
 }
 
+.progress-row {
+	margin-top: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.progress-bar {
+	position: relative;
+	width: 100%;
+	height: 8px;
+	border-radius: 999px;
+	background: rgba(148, 163, 184, 0.2);
+	overflow: hidden;
+	border: 1px solid var(--border);
+}
+
+.progress-fill {
+	position: absolute;
+	inset: 0;
+	width: 40%;
+	background: linear-gradient(90deg, rgba(56, 189, 248, 0.9), rgba(14, 165, 233, 0.9));
+	border-radius: inherit;
+	animation: progressSlide 1.1s ease-in-out infinite;
+}
+
 @keyframes fadeIn {
 	from {
 		opacity: 0;
@@ -564,6 +590,18 @@ h3 {
 	to {
 		opacity: 0;
 		transform: translateY(8px) scale(0.97);
+	}
+}
+
+@keyframes progressSlide {
+	0% {
+		transform: translateX(-100%);
+	}
+	50% {
+		transform: translateX(0);
+	}
+	100% {
+		transform: translateX(200%);
 	}
 }
 
