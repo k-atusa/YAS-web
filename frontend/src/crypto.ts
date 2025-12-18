@@ -3,7 +3,15 @@ import type { AccountPayload, EncryptedPrivateKey, KdfParameters } from "./types
 const encoder = new TextEncoder();
 
 function toBase64(buffer: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000; // prevent call stack overflow for large buffers
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    // apply handles typed arrays without spreading the entire buffer at once
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
 }
 
 function fromBase64(base64: string): ArrayBuffer {
