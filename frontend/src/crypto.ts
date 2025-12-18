@@ -6,8 +6,32 @@ function toBase64(buffer: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)));
 }
 
+function fromBase64(base64: string): ArrayBuffer {
+  const normalized = base64.replace(/[^A-Za-z0-9+/=]/g, "");
+  const binary = atob(normalized);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
 function toArrayBufferFromString(data: string): ArrayBuffer {
   return encoder.encode(data);
+}
+
+function pemToArrayBuffer(pem: string, type: "PUBLIC" | "PRIVATE" = "PUBLIC"): ArrayBuffer {
+  const normalized = pem.replace(/\r/g, "");
+  const headerRegex = new RegExp(`-*\\s*BEGIN\\s+${type}\\s+KEY\\s*-*`, "i");
+  const footerRegex = new RegExp(`-*\\s*END\\s+${type}\\s+KEY\\s*-*`, "i");
+  const headerMatch = headerRegex.exec(normalized);
+  const startIndex = headerMatch ? headerMatch.index + headerMatch[0].length : 0;
+  const afterHeader = normalized.slice(startIndex);
+  const footerMatch = footerRegex.exec(afterHeader);
+  const bodySection = footerMatch ? afterHeader.slice(0, footerMatch.index) : afterHeader;
+  const base64 = bodySection.replace(/[^A-Za-z0-9+/=]/g, "");
+  return fromBase64(base64);
 }
 
 async function exportKey(key: CryptoKey, format: "spki" | "pkcs8"): Promise<string> {
@@ -99,4 +123,41 @@ export async function buildAccountPayload(
     kdf,
     notes,
   };
+}
+
+export async function importPublicKeyFromPem(pem: string): Promise<CryptoKey> {
+  const buffer = pemToArrayBuffer(pem, "PUBLIC");
+  return crypto.subtle.importKey(
+    "spki",
+    buffer,
+    {
+      name: "RSA-OAEP",
+      hash: "SHA-256",
+    },
+    true,
+    ["encrypt"]
+  );
+}
+
+export async function encryptForPublicKey(data: ArrayBuffer, publicKeyPem: string): Promise<{
+  cipherText: string;
+  iv: string;
+  encryptedKey: string;
+}> {
+  const publicKey = await importPublicKeyFromPem(publicKeyPem);
+  const aesKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipherBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, data);
+  const rawAesKey = await crypto.subtle.exportKey("raw", aesKey);
+  const encryptedKeyBuffer = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, rawAesKey);
+
+  return {
+    cipherText: toBase64(cipherBuffer),
+    iv: toBase64(iv.buffer),
+    encryptedKey: toBase64(encryptedKeyBuffer),
+  };
+}
+
+export function encodeUtf8(data: string): ArrayBuffer {
+  return toArrayBufferFromString(data);
 }
