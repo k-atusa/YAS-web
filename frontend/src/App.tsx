@@ -182,6 +182,7 @@ function App() {
 	const [storedAccount, setStoredAccount] = useState<AccountRecord | null>(null);
 	const [showKeySection, setShowKeySection] = useState(true);
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
+	const [copyPrivateStatus, setCopyPrivateStatus] = useState<"idle" | "copied" | "error">("idle");
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
 	const [contactsLoading, setContactsLoading] = useState(false);
 	const [contactForm, setContactForm] = useState({ contactUsername: "", publicKey: "", notes: "" });
@@ -294,6 +295,7 @@ function App() {
 		setShowKeySection(true);
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
+		setCopyPrivateStatus("idle");
 
 		if (!usernameSnapshot) {
 			return () => {
@@ -357,6 +359,19 @@ function App() {
 		}
 	}
 
+	async function handleCopyPrivateKey(value?: string) {
+		if (!value) return;
+		try {
+			await navigator.clipboard.writeText(value);
+			setCopyPrivateStatus("copied");
+			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
+		} catch (err) {
+			console.error(err);
+			setCopyPrivateStatus("error");
+			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
+		}
+	}
+
 	async function handleSignup(e: React.FormEvent) {
 		e.preventDefault();
 		if (!canLogin) return;
@@ -384,6 +399,7 @@ function App() {
 		setUsername("");
 		setStoredAccount(null);
 		setShowKeySection(true);
+		setCopyPrivateStatus("idle");
 		setContacts([]);
 		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
 		setContactError(null);
@@ -825,6 +841,7 @@ function App() {
 			const { publicKeyPem, privateKeyPem } = await generateRsaKeyPair();
 			setPublicKeyPem(publicKeyPem);
 			setPrivateKeyPem(privateKeyPem);
+			setCopyPrivateStatus("idle");
 			setStatus("Key pair ready. Keep the private key encrypted only.");
 		} catch (err) {
 			console.error(err);
@@ -850,6 +867,7 @@ function App() {
 			setStatus("Stored encrypted key");
 			setShowKeySection(false);
 			setPrivateKeyPem("");
+			setCopyPrivateStatus("idle");
 			setPassphrase("");
 		} catch (err) {
 			console.error(err);
@@ -865,6 +883,7 @@ function App() {
 		setShowKeySection(true);
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
+		setCopyPrivateStatus("idle");
 		setPassphrase("");
 		setNotes("");
 		setStatus(null);
@@ -1047,7 +1066,18 @@ function App() {
 								<div>
 									<h3>Private key (plaintext)
 									</h3>
-									<pre>{privateKeyPem || "(generate a key pair)"}</pre>
+									<div className="copy-block">
+										{privateKeyPem && (
+											<button
+												type="button"
+												className={copyPrivateStatus === "copied" ? "copy-button copied" : "copy-button"}
+												onClick={() => handleCopyPrivateKey(privateKeyPem)}
+											>
+												{copyPrivateStatus === "copied" ? "Copied" : copyPrivateStatus === "error" ? "Error" : "Copy"}
+											</button>
+										)}
+										<pre>{privateKeyPem || "(generate a key pair)"}</pre>
+									</div>
 								</div>
 							</div>
 							<p className="hint">Private key is encrypted in-browser with AES-GCM using PBKDF2-derived key.</p>
