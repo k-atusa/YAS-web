@@ -206,6 +206,7 @@ function App() {
 	const [lastEncryptionSummary, setLastEncryptionSummary] = useState<{ recipient: string; payloadDescription: string } | null>(null);
 	const [decryptPayloadInput, setDecryptPayloadInput] = useState("");
 	const [decryptPayloadFile, setDecryptPayloadFile] = useState<File | null>(null);
+	const [isDecryptFileDragActive, setIsDecryptFileDragActive] = useState(false);
 	const [decryptPassphrase, setDecryptPassphrase] = useState("");
 	const [decryptPrivateKeyInput, setDecryptPrivateKeyInput] = useState("");
 	const [decryptBusy, setDecryptBusy] = useState(false);
@@ -399,6 +400,7 @@ function App() {
 		setLastEncryptionSummary(null);
 		setDecryptPayloadInput("");
 		setDecryptPayloadFile(null);
+		setIsDecryptFileDragActive(false);
 		setDecryptPassphrase("");
 		setDecryptPrivateKeyInput("");
 		setDecryptBusy(false);
@@ -538,9 +540,48 @@ function App() {
 		setIsFileDragActive(false);
 	}
 
+	function handleDecryptDragEnter(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		if (decryptBusy) return;
+		setIsDecryptFileDragActive(true);
+	}
+
+	function handleDecryptDragOver(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		if (decryptBusy) return;
+		event.dataTransfer.dropEffect = "copy";
+		if (!isDecryptFileDragActive) {
+			setIsDecryptFileDragActive(true);
+		}
+	}
+
+	function handleDecryptDragLeave(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		const nextTarget = event.relatedTarget as Node | null;
+		if (nextTarget && event.currentTarget.contains(nextTarget)) {
+			return;
+		}
+		setIsDecryptFileDragActive(false);
+	}
+
+	function handleDecryptFileDrop(event: React.DragEvent<HTMLDivElement>) {
+		event.preventDefault();
+		setIsDecryptFileDragActive(false);
+		if (decryptBusy) return;
+		const droppedFile = event.dataTransfer.files?.[0];
+		if (droppedFile) {
+			setDecryptPayloadFile(droppedFile);
+			setDecryptPayloadInput("");
+			setDecryptStatus(null);
+			setDecryptError(null);
+			setDecryptedResult(null);
+		}
+	}
+
 	function resetDecryptForm() {
 		setDecryptPayloadInput("");
 		setDecryptPayloadFile(null);
+		setIsDecryptFileDragActive(false);
 		setDecryptPassphrase("");
 		setDecryptPrivateKeyInput("");
 		setDecryptStatus(null);
@@ -555,6 +596,7 @@ function App() {
 		setDecryptStatus(null);
 		setDecryptError(null);
 		setDecryptedResult(null);
+		setIsDecryptFileDragActive(false);
 		event.target.value = "";
 	}
 
@@ -1303,15 +1345,51 @@ function App() {
 					/>
 
 					<div className="file-picker">
-						<label className="label" htmlFor="decrypt-file">Or upload ciphertext (.json)</label>
-						<input id="decrypt-file" type="file" accept="application/json" onChange={handleDecryptFileChange} disabled={decryptBusy} />
+						<div
+							className={isDecryptFileDragActive ? "file-dropzone drag-active" : "file-dropzone"}
+							onDragEnter={handleDecryptDragEnter}
+							onDragOver={handleDecryptDragOver}
+							onDragLeave={handleDecryptDragLeave}
+							onDrop={handleDecryptFileDrop}
+							aria-disabled={decryptBusy}
+						>
+							<input
+								id="decrypt-file"
+								type="file"
+								accept="application/json"
+								onChange={handleDecryptFileChange}
+								disabled={decryptBusy}
+								className="visually-hidden"
+							/>
+							<label htmlFor="decrypt-file">
+								<div className="drop-graphic" aria-hidden="true">
+									<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+										<rect x="7" y="23" width="26" height="10" rx="3" stroke="#38bdf8" strokeWidth="1.6" opacity="0.7" />
+										<path d="M20 7v18" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" />
+										<path d="M15 18l5 5 5-5" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+									</svg>
+								</div>
+								<strong>Drag & drop ciphertext JSON</strong>
+								<span className="drop-highlight">Drop your encrypted .json here or click to browse.</span>
+								<span className="muted">We parse and decrypt entirely in your browser.</span>
+							</label>
+						</div>
+
 						{decryptPayloadFile && (
 							<div className="file-info">
 								<div>
 									<strong>{decryptPayloadFile.name}</strong>
 									<p className="muted">{formatBytes(decryptPayloadFile.size)} · {decryptPayloadFile.type || "application/json"}</p>
 								</div>
-								<button type="button" className="secondary button-inline" onClick={() => setDecryptPayloadFile(null)} disabled={decryptBusy}>
+								<button
+									type="button"
+									className="secondary button-inline"
+									onClick={() => {
+										setDecryptPayloadFile(null);
+										setIsDecryptFileDragActive(false);
+									}}
+									disabled={decryptBusy}
+								>
 									Remove
 								</button>
 							</div>
