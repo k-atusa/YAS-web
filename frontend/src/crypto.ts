@@ -1,6 +1,7 @@
 import type { AccountPayload, EncryptedPrivateKey, KdfParameters } from "./types";
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 function toBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -12,6 +13,10 @@ function toBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
   }
   return btoa(binary);
+}
+
+function toUtf8String(buffer: ArrayBuffer): string {
+  return decoder.decode(buffer);
 }
 
 function fromBase64(base64: string): ArrayBuffer {
@@ -26,7 +31,7 @@ function fromBase64(base64: string): ArrayBuffer {
 }
 
 function toArrayBufferFromString(data: string): ArrayBuffer {
-  return encoder.encode(data);
+  return encoder.encode(data).buffer;
 }
 
 function pemToArrayBuffer(pem: string, type: "PUBLIC" | "PRIVATE" = "PUBLIC"): ArrayBuffer {
@@ -50,6 +55,20 @@ async function exportKey(key: CryptoKey, format: "spki" | "pkcs8"): Promise<stri
   return `-----BEGIN ${type} KEY-----\n${wrapped}\n-----END ${type} KEY-----`;
 }
 
+async function importPrivateKeyFromPem(pem: string): Promise<CryptoKey> {
+  const buffer = pemToArrayBuffer(pem, "PRIVATE");
+  return crypto.subtle.importKey(
+    "pkcs8",
+    buffer,
+    {
+      name: "RSA-OAEP",
+      hash: "SHA-256",
+    },
+    true,
+    ["decrypt"]
+  );
+}
+
 export async function generateRsaKeyPair(): Promise<{ publicKeyPem: string; privateKeyPem: string }> {
   const keyPair = await crypto.subtle.generateKey(
     {
@@ -69,10 +88,11 @@ export async function generateRsaKeyPair(): Promise<{ publicKeyPem: string; priv
 
 async function deriveKey(passphrase: string, salt: Uint8Array, iterations = 310000, keyLength = 32): Promise<CryptoKey> {
   const baseKey = await crypto.subtle.importKey("raw", toArrayBufferFromString(passphrase), "PBKDF2", false, ["deriveKey"]);
+  const saltBuffer = salt.buffer as ArrayBuffer;
   return crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
+      salt: saltBuffer,
       iterations,
       hash: "SHA-256",
     },
@@ -147,10 +167,14 @@ export async function importPublicKeyFromPem(pem: string): Promise<CryptoKey> {
   );
 }
 
-export async function encryptForPublicKey(data: ArrayBuffer, publicKeyPem: string): Promise<{
+export async function encryptForPublicKey(data: ArrayBuffer, publicKeyPem: string, metadataBuffer?: ArrayBuffer): Promise<{
   cipherText: string;
   iv: string;
   encryptedKey: string;
+  metadata?: {
+    cipherText: string;
+    iv: string;
+  };
 }> {
   const publicKey = await importPublicKeyFromPem(publicKeyPem);
   const aesKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
@@ -159,13 +183,70 @@ export async function encryptForPublicKey(data: ArrayBuffer, publicKeyPem: strin
   const rawAesKey = await crypto.subtle.exportKey("raw", aesKey);
   const encryptedKeyBuffer = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, rawAesKey);
 
+  let metadataResult: { cipherText: string; iv: string } | undefined;
+  if (metadataBuffer) {
+    const metaIv = crypto.getRandomValues(new Uint8Array(12));
+    const metaCipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv: metaIv }, aesKey, metadataBuffer);
+    metadataResult = {
+      cipherText: toBase64(metaCipher),
+      iv: toBase64(metaIv.buffer),
+    };
+  }
+
   return {
     cipherText: toBase64(cipherBuffer),
     iv: toBase64(iv.buffer),
     encryptedKey: toBase64(encryptedKeyBuffer),
+    metadata: metadataResult,
   };
+}
+
+export async function decryptForPrivateKey(envelope: {
+  encryption: { iv: string; cipherText: string };
+  wrappedKey: { cipherText: string };
+  payload?: { meta?: { iv: string; cipherText: string } };
+}, privateKeyPem: string): Promise<{ data: ArrayBuffer; metadata?: ArrayBuffer }> {
+  const iv = new Uint8Array(fromBase64(envelope.encryption.iv));
+  const cipher = fromBase64(envelope.encryption.cipherText);
+  const wrappedKey = fromBase64(envelope.wrappedKey.cipherText);
+
+  const privateKey = await importPrivateKeyFromPem(privateKeyPem);
+  const aesKeyBuffer = await crypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, wrappedKey);
+  const aesKey = await crypto.subtle.importKey("raw", aesKeyBuffer, { name: "AES-GCM" }, false, ["decrypt"]);
+  const plainBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aesKey, cipher);
+
+  let metadataBuffer: ArrayBuffer | undefined;
+  if (envelope.payload?.meta) {
+    const metaIv = new Uint8Array(fromBase64(envelope.payload.meta.iv));
+    const metaCipher = fromBase64(envelope.payload.meta.cipherText);
+    metadataBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv: metaIv }, aesKey, metaCipher);
+  }
+
+  return { data: plainBuffer, metadata: metadataBuffer };
 }
 
 export function encodeUtf8(data: string): ArrayBuffer {
   return toArrayBufferFromString(data);
+}
+
+export function decodeUtf8(buffer: ArrayBuffer): string {
+  return toUtf8String(buffer);
+}
+
+export async function decryptPrivateKey(
+  encrypted: EncryptedPrivateKey,
+  kdf: KdfParameters,
+  passphrase: string
+): Promise<string> {
+  if (kdf.algorithm !== "PBKDF2") {
+    throw new Error(`Unsupported KDF: ${kdf.algorithm}`);
+  }
+  const salt = new Uint8Array(fromBase64(kdf.salt));
+  const iterations = kdf.iterations ?? 310000;
+  const keyLength = kdf.keyLength ?? 32;
+  const aesKey = await deriveKey(passphrase, salt, iterations, keyLength);
+  const iv = new Uint8Array(fromBase64(encrypted.iv));
+  const cipher = fromBase64(encrypted.cipherText);
+  const plainBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aesKey, cipher);
+  return decoder.decode(plainBuffer);
 }
