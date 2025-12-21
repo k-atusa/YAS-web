@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import fs from "node:fs";
+import path from "node:path";
 import accountsRouter from "./routes/accounts";
 import authRouter from "./routes/auth";
 import contactsRouter from "./routes/contacts";
@@ -25,6 +27,20 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/accounts", accountsRouter);
 app.use("/api/contacts", contactsRouter);
+
+const resolvedFrontendDir = path.resolve(process.env.FRONTEND_DIST || path.join(process.cwd(), "public"));
+if (fs.existsSync(resolvedFrontendDir)) {
+  app.use(express.static(resolvedFrontendDir));
+
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api/")) {
+      return next();
+    }
+    res.sendFile(path.join(resolvedFrontendDir, "index.html"));
+  });
+} else {
+  console.warn(`Frontend assets not found at ${resolvedFrontendDir}. Serving API only.`);
+}
 
 async function start() {
   try {
