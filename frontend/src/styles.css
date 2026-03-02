@@ -748,3 +748,35 @@ h3 {
 		font-size: 11px;
 	}
 }
+
+/* WebAuthn and utility styles */
+.mt-2 {
+	margin-top: 12px;
+}
+
+.success-text {
+	color: var(--success);
+	font-size: 12px;
+}
+
+button.secondary {
+	background: transparent;
+	border: 1px solid var(--border);
+	color: var(--accent);
+	padding: 8px 16px;
+	border-radius: 6px;
+	cursor: pointer;
+	font-family: inherit;
+	font-size: 14px;
+	transition: all 0.2s;
+}
+
+button.secondary:hover:not(:disabled) {
+	border-color: var(--accent);
+	background: rgba(56, 189, 248, 0.1);
+}
+
+button.secondary:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}

@@ -8,6 +8,7 @@ import path from "node:path";
 import accountsRouter from "./routes/accounts";
 import authRouter from "./routes/auth";
 import contactsRouter from "./routes/contacts";
+import webauthnRouter from "./routes/webauthn";
 import { connectToDatabase } from "./db";
 
 const app = express();
@@ -27,6 +28,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/accounts", accountsRouter);
 app.use("/api/contacts", contactsRouter);
+app.use("/api/webauthn", webauthnRouter);
 
 const resolvedFrontendDir = path.resolve(process.env.FRONTEND_DIST || path.join(process.cwd(), "public"));
 if (fs.existsSync(resolvedFrontendDir)) {

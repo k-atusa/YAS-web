@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@noble/curves": "^2.0.1",
+    "@simplewebauthn/browser": "^13.2.2",
     "@types/random-words": "^1.1.4",
     "argon2-wasm": "^0.9.0",
     "js-sha3": "^0.9.3",

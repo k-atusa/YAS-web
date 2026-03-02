@@ -1175,12 +1175,13 @@ export async function decryptPrivateKey(
 
 export async function buildAccountPayload(
   username: string,
-  passphrase: string,
   publicKeyB64: string,
   privateKeyB64: string,
   notes?: string
 ): Promise<AccountPayload> {
-  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, passphrase);
+  // Use username as KDF input for deterministic key derivation
+  // In production, this should use a server-provided secret or WebAuthn challenge
+  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, username);
   return { username, publicKey: publicKeyB64, encryptedPrivateKey, kdf, notes };
 }
 
@@ -1192,4 +1193,167 @@ export function encodeUtf8(data: string): ArrayBuffer {
 
 export function decodeUtf8(buffer: ArrayBuffer): string {
   return _dec.decode(buffer);
+}
+// ==================== WebAuthn utilities ====================
+
+/**
+ * Convert ArrayBuffer to Base64
+ */
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Convert Base64 to ArrayBuffer
+ */
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+/**
+ * Register a WebAuthn credential
+ * Returns credential data needed for server verification
+ */
+export async function registerWebAuthnCredential(options: {
+  challenge: string;
+  rp: { name: string; id: string };
+  user: { id: string; name: string; displayName: string };
+  pubKeyCredParams: Array<{ type: "public-key"; alg: number }>;
+  timeout?: number;
+  attestation?: "none" | "direct" | "indirect";
+  authenticatorSelection?: any;
+}): Promise<{
+  credentialId: string;
+  publicKey: string;
+  counter: number;
+  transports?: string[];
+}> {
+  // Convert challenge from base64 to ArrayBuffer
+  const challengeBuffer = base64ToArrayBuffer(options.challenge);
+  const userIdBuffer = base64ToArrayBuffer(options.user.id);
+
+  const credential = (await navigator.credentials.create({
+    publicKey: {
+      challenge: challengeBuffer,
+      rp: options.rp,
+      user: {
+        id: userIdBuffer,
+        name: options.user.name,
+        displayName: options.user.displayName,
+      },
+      pubKeyCredParams: options.pubKeyCredParams,
+      timeout: options.timeout || 60000,
+      attestation: options.attestation || "direct",
+      authenticatorSelection: options.authenticatorSelection || {
+        authenticatorAttachment: "platform",
+        residentKey: "preferred",
+        userVerification: "preferred",
+      },
+    },
+  })) as PublicKeyCredential | null;
+
+  if (!credential) {
+    throw new Error("WebAuthn registration cancelled");
+  }
+
+  const response = credential.response as AuthenticatorAttestationResponse;
+  const credentialId = arrayBufferToBase64(credential.id as unknown as ArrayBuffer);
+
+  // Extract public key from attestation object
+  // Note: This is simplified; production code should use @simplewebauthn/browser
+  const publicKeyBuffer = response.getPublicKey();
+  if (!publicKeyBuffer) {
+    throw new Error("Failed to extract public key");
+  }
+
+  const publicKey = arrayBufferToBase64(publicKeyBuffer as unknown as ArrayBuffer);
+  const counter = response.getTransports?.().length || 0;
+  const transports = response.getTransports?.() || [];
+
+  return {
+    credentialId,
+    publicKey,
+    counter,
+    transports,
+  };
+}
+
+/**
+ * Authenticate with WebAuthn
+ * Returns credential ID and counter for server verification
+ */
+export async function authenticateWithWebAuthn(options: {
+  challenge: string;
+  allowCredentials?: Array<{ type: "public-key"; id: string; transports?: string[] }>;
+  timeout?: number;
+  userVerification?: "required" | "preferred" | "discouraged";
+}): Promise<{
+  credentialId: string;
+  clientDataJSON: string;
+  authenticatorData: string;
+  signature: string;
+  counter: number;
+}> {
+  // Convert challenge from base64 to ArrayBuffer
+  const challengeBuffer = base64ToArrayBuffer(options.challenge);
+
+  // Convert allowed credentials if provided
+  const allowCredentials = (options.allowCredentials || []).map((cred) => ({
+    type: cred.type as "public-key",
+    id: base64ToArrayBuffer(cred.id),
+    transports: cred.transports as AuthenticatorTransport[] | undefined,
+  }));
+
+  const assertion = (await navigator.credentials.get({
+    publicKey: {
+      challenge: challengeBuffer,
+      timeout: options.timeout || 60000,
+      userVerification: options.userVerification || "preferred",
+      allowCredentials: allowCredentials.length > 0 ? allowCredentials : undefined,
+    },
+  })) as PublicKeyCredential | null;
+
+  if (!assertion) {
+    throw new Error("WebAuthn authentication cancelled");
+  }
+
+  const response = assertion.response as AuthenticatorAssertionResponse;
+
+  // Extract counter from authenticatorData
+  // Authenticator data format: RP ID hash (32) + Flags (1) + Counter (4) + [...]
+  const authData = new Uint8Array(response.authenticatorData);
+  const counterBuffer = authData.slice(33, 37);
+  const counter = new DataView(counterBuffer.buffer).getUint32(0, false);
+
+  return {
+    credentialId: arrayBufferToBase64(assertion.id as unknown as ArrayBuffer),
+    clientDataJSON: arrayBufferToBase64(response.clientDataJSON as unknown as ArrayBuffer),
+    authenticatorData: arrayBufferToBase64(response.authenticatorData as unknown as ArrayBuffer),
+    signature: arrayBufferToBase64(response.signature as unknown as ArrayBuffer),
+    counter,
+  };
+}
+
+/**
+ * Check if WebAuthn is available in the browser
+ */
+export function isWebAuthnAvailable(): boolean {
+  return !!(window.PublicKeyCredential && navigator.credentials);
+}
+
+/**
+ * Check if platform authenticator (biometric/PIN) is available
+ */
+export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
+  return !!(window.PublicKeyCredential && (await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()));
 }

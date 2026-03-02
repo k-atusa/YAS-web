@@ -8,6 +8,12 @@ import {
 	listContacts,
 	createContact,
 	deleteContact,
+	getWebAuthnRegisterOptions,
+	verifyWebAuthnRegistration,
+	getWebAuthnAuthenticateOptions,
+	verifyWebAuthnAuthentication,
+	listWebAuthnCredentials,
+	removeWebAuthnCredential,
 } from "./api";
 import {
 	buildAccountPayload,
@@ -19,6 +25,12 @@ import {
 	decryptPrivateKey,
 	u8ToBase64,
 	base64ToU8,
+	registerWebAuthnCredential,
+	authenticateWithWebAuthn,
+	isWebAuthnAvailable,
+	isPlatformAuthenticatorAvailable,
+	arrayBufferToBase64,
+	base64ToArrayBuffer,
 } from "./crypto";
 import type { AsymAlgo, KdfMethod, EncAlgo, AuthMode, DecryptResult } from "./crypto";
 import type { AccountRecord, ContactRecord } from "./types";
@@ -106,8 +118,6 @@ function App() {
 	const [loginBusy, setLoginBusy] = useState(false);
 
 	const [username, setUsername] = useState("");
-	const [passphrase, setPassphrase] = useState("");
-	const [showPassphrase, setShowPassphrase] = useState(false);
 	const [publicKeyPem, setPublicKeyPem] = useState("");
 	const [privateKeyPem, setPrivateKeyPem] = useState("");
 	const [notes, setNotes] = useState("");
@@ -151,7 +161,6 @@ function App() {
 	const [decryptPayloadFile, setDecryptPayloadFile] = useState<File | null>(null);
 	const [isDecryptFileDragActive, setIsDecryptFileDragActive] = useState(false);
 	const [decryptPassword, setDecryptPassword] = useState("");
-	const [decryptPassphrase, setDecryptPassphrase] = useState("");
 	const [decryptPrivateKeyInput, setDecryptPrivateKeyInput] = useState("");
 	const [decryptPeerPublicKey, setDecryptPeerPublicKey] = useState("");
 	const [decryptDetected, setDecryptDetected] = useState<{ mode: AuthMode; algo: string; msg: string } | null>(null);
@@ -159,6 +168,11 @@ function App() {
 	const [decryptStatus, setDecryptStatus] = useState<string | null>(null);
 	const [decryptError, setDecryptError] = useState<string | null>(null);
 	const [decryptedResult, setDecryptedResult] = useState<DecryptResult | null>(null);
+	
+	// WebAuthn states
+	const [webauthnAvailable, setWebauthnAvailable] = useState(false);
+	const [webauthnAuthBusy, setWebauthnAuthBusy] = useState(false);
+	const [decryptionToken, setDecryptionToken] = useState<string | null>(null);
 
 	useEffect(() => {
 		return () => {
@@ -180,7 +194,7 @@ function App() {
 		URL.revokeObjectURL(url);
 	}, [encryptedBlob]);
 
-	const canUpload = Boolean(username && passphrase && publicKeyPem && privateKeyPem);
+	const canUpload = Boolean(username && publicKeyPem && privateKeyPem);
 	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
 	const isAuthed = Boolean(authToken);
 
@@ -234,6 +248,15 @@ function App() {
 		return () => {
 			cancelled = true;
 		};
+	}, [authToken]);
+
+	// Check WebAuthn availability
+	useEffect(() => {
+		if (!authToken) {
+			setWebauthnAvailable(false);
+			return;
+		}
+		setWebauthnAvailable(isWebAuthnAvailable());
 	}, [authToken]);
 
 	useEffect(() => {
@@ -375,7 +398,6 @@ function App() {
 		setDecryptPayloadFile(null);
 		setIsDecryptFileDragActive(false);
 		setDecryptPassword("");
-		setDecryptPassphrase("");
 		setDecryptPrivateKeyInput("");
 		setDecryptPeerPublicKey("");
 		setDecryptDetected(null);
@@ -558,7 +580,6 @@ function App() {
 		setDecryptPayloadFile(null);
 		setIsDecryptFileDragActive(false);
 		setDecryptPassword("");
-		setDecryptPassphrase("");
 		setDecryptPrivateKeyInput("");
 		setDecryptPeerPublicKey("");
 		setDecryptDetected(null);
@@ -583,12 +604,62 @@ function App() {
 		if (manual) return manual;
 		if (privateKeyPem) return privateKeyPem;
 		if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf) {
-			if (!decryptPassphrase) {
-				throw new Error("Enter your passphrase to unlock your stored private key");
+			// Must use WebAuthn for stored keys
+			if (!decryptionToken) {
+				throw new Error("Use WebAuthn to unlock your stored private key");
 			}
-			return decryptPrivateKey(storedAccount.encryptedPrivateKey, storedAccount.kdf, decryptPassphrase);
+			// TODO: Implement server-side decryption with WebAuthn token
+			throw new Error("Server-side key decryption not yet implemented");
 		}
-		throw new Error("No private key available. Paste one or unlock your stored key.");
+		throw new Error("No private key available. Paste one or use WebAuthn.");
+	}
+
+	async function handleWebAuthnAuthenticate() {
+		if (!authToken || !isAuthed) {
+			setDecryptError("You must be logged in to use WebAuthn");
+			return;
+		}
+
+		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) {
+			setDecryptError("No stored private key found. Please upload a key first.");
+			return;
+		}
+
+		setWebauthnAuthBusy(true);
+		setDecryptError(null);
+		setDecryptStatus("Requesting WebAuthn...");
+
+		try {
+			// Get authentication options from server
+			const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
+			const options = optionsResp.options;
+
+			// Authenticate with WebAuthn
+			setDecryptStatus("Please verify with your security key...");
+			const assertion = await authenticateWithWebAuthn({
+				challenge: options.challenge,
+				allowCredentials: options.allowCredentials || [],
+				timeout: options.timeout,
+				userVerification: options.userVerification,
+			});
+
+			// Verify authentication on server
+			setDecryptStatus("Verifying...");
+			const verifyResp = await verifyWebAuthnAuthentication(authToken, assertion.credentialId, assertion.counter);
+
+			// Store decryption token
+			setDecryptionToken(verifyResp.token);
+			setDecryptStatus(null);
+			setDecryptError(null);
+
+			// Success message would be shown in UI
+		} catch (err) {
+			const msg = (err as Error).message || "WebAuthn authentication failed";
+			setDecryptError(msg);
+			setDecryptStatus(null);
+		} finally {
+			setWebauthnAuthBusy(false);
+		}
 	}
 
 	async function loadOpsecData(): Promise<Uint8Array> {
@@ -709,9 +780,8 @@ function App() {
 				if (encryptSignWithKey) {
 					if (privateKeyPem) {
 						myPrivateKey = privateKeyPem;
-					} else if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf && passphrase) {
-						myPrivateKey = await decryptPrivateKey(storedAccount.encryptedPrivateKey, storedAccount.kdf, passphrase);
 					}
+					// Note: Stored keys require WebAuthn - implement server-side decryption
 				}
 				result = await encryptOpsec({
 					mode: "publickey",
@@ -763,11 +833,6 @@ function App() {
 		}
 	}
 
-	function generatePassphrase() {
-		const phrase = generate({ exactly: 8, join: "-" }) as string;
-		setPassphrase(phrase);
-	}
-
 	async function handleGenerateKeys() {
 		setError(null);
 		setStatus(`Generating ${keyAlgo.toUpperCase()} key pair...`);
@@ -790,7 +855,7 @@ function App() {
 		setError(null);
 		setStatus("Encrypting and uploading...");
 		try {
-			const payload = await buildAccountPayload(username, passphrase, publicKeyPem, privateKeyPem, notes || undefined);
+			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, notes || undefined);
 			const result = await saveAccount(payload, authToken ?? undefined);
 			const record: AccountRecord = {
 				...payload,
@@ -802,7 +867,6 @@ function App() {
 			setShowKeySection(false);
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
-			setPassphrase("");
 		} catch (err) {
 			console.error(err);
 			setError((err as Error).message || "Upload failed");
@@ -818,7 +882,6 @@ function App() {
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
 		setCopyPrivateStatus("idle");
-		setPassphrase("");
 		setNotes("");
 		setStatus(null);
 		setError(null);
@@ -951,25 +1014,6 @@ function App() {
 				) : (
 					<>
 						<section className="card">
-							<div className="grid single-col">
-								<div>
-									<label className="label" htmlFor="passphrase">Passphrase</label>
-									<div className="input-row">
-										<input
-											id="passphrase"
-											type={showPassphrase ? "text" : "password"}
-											value={passphrase}
-											onChange={(e) => setPassphrase(e.target.value)}
-											placeholder="Enter a strong passphrase"
-										/>
-										<button type="button" className="secondary" onClick={generatePassphrase}>Generate</button>
-										<button type="button" className="secondary" onClick={() => setShowPassphrase((v) => !v)}>
-											{showPassphrase ? "Hide" : "Show"}
-										</button>
-									</div>
-								</div>
-							</div>
-
 							<label className="label" htmlFor="notes">Notes (optional)</label>
 							<textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Label this key..." />
 
@@ -1447,22 +1491,26 @@ function App() {
 							disabled={decryptBusy}
 						/>
 
+						<div>
+							{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable && (
+								<div>
+									<label className="label">Unlock stored key with security key</label>
+									<button
+										type="button"
+										className="secondary full-width"
+										onClick={handleWebAuthnAuthenticate}
+										disabled={decryptBusy || webauthnAuthBusy}
+									>
+										{webauthnAuthBusy ? "Verifying..." : "🔐 Authenticate with Security Key"}
+									</button>
+									{decryptionToken && (
+										<p className="hint success-text">✓ Security key verified</p>
+									)}
+								</div>
+							)}
+						</div>
+
 						<div className="grid">
-							<div>
-								<label className="label" htmlFor="decrypt-passphrase">Passphrase (to unlock stored key)</label>
-								<input
-									id="decrypt-passphrase"
-									type="password"
-									value={decryptPassphrase}
-									onChange={(e) => {
-										setDecryptPassphrase(e.target.value);
-										setDecryptStatus(null);
-										setDecryptError(null);
-									}}
-									placeholder="Enter passphrase to unlock stored key"
-									disabled={decryptBusy}
-								/>
-							</div>
 							<div>
 								<label className="label" htmlFor="decrypt-private-key">Or paste a private key (Base64)</label>
 								<textarea

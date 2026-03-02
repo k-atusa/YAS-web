@@ -116,3 +116,116 @@ export async function deleteContact(id: string, token: string): Promise<void> {
     throw new Error(error.message || "Failed to delete contact");
   }
 }
+
+// ==================== WebAuthn API ====================
+
+export async function getWebAuthnRegisterOptions(token: string): Promise<any> {
+  const response = await fetch(`${API_BASE}/webauthn/register-options`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to get registration options");
+  }
+
+  return response.json();
+}
+
+export async function verifyWebAuthnRegistration(
+  token: string,
+  credentialId: string,
+  publicKey: string,
+  counter: number,
+  transports?: string[]
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/webauthn/register-verify`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      credentialId,
+      publicKey,
+      counter,
+      transports,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to verify credential");
+  }
+}
+
+export async function getWebAuthnAuthenticateOptions(token: string): Promise<any> {
+  const response = await fetch(`${API_BASE}/webauthn/authenticate-options`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (response.status === 400) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "WebAuthn not registered");
+  }
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to get authentication options");
+  }
+
+  return response.json();
+}
+
+export async function verifyWebAuthnAuthentication(
+  token: string,
+  credentialId: string,
+  counter: number
+): Promise<{ token: string; expiresAt: string }> {
+  const response = await fetch(`${API_BASE}/webauthn/authenticate-verify`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      credentialId,
+      counter,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to verify authentication");
+  }
+
+  return response.json();
+}
+
+export async function listWebAuthnCredentials(token: string): Promise<Array<{ id: string; transports: string[] }>> {
+  const response = await fetch(`${API_BASE}/webauthn/credentials`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to list credentials");
+  }
+
+  return response.json().then((data) => data.credentials);
+}
+
+export async function removeWebAuthnCredential(token: string, credentialId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/webauthn/credentials/${encodeURIComponent(credentialId)}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to remove credential");
+  }
+}
+
