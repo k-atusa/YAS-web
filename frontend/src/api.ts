@@ -67,6 +67,10 @@ export async function listContacts(token: string): Promise<ContactRecord[]> {
     headers: { Authorization: `Bearer ${token}` },
   });
 
+  if (response.status === 401) {
+    throw new Error("TOKEN_EXPIRED");
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to fetch contacts");
@@ -85,6 +89,10 @@ export async function createContact(payload: ContactPayload, token: string): Pro
     body: JSON.stringify(payload),
   });
 
+  if (response.status === 401) {
+    throw new Error("TOKEN_EXPIRED");
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to save contact");
@@ -98,6 +106,10 @@ export async function deleteContact(id: string, token: string): Promise<void> {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
+
+  if (response.status === 401) {
+    throw new Error("TOKEN_EXPIRED");
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));

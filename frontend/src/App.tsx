@@ -9,24 +9,21 @@ import {
 	createContact,
 	deleteContact,
 } from "./api";
-import { buildAccountPayload, generateRsaKeyPair, encryptForPublicKey, encodeUtf8, decryptForPrivateKey, decryptPrivateKey, decodeUtf8 } from "./crypto";
+import {
+	buildAccountPayload,
+	generateKeyPair,
+	encryptOpsec,
+	decryptOpsecPw,
+	decryptOpsecPub,
+	detectAuthMode,
+	decryptPrivateKey,
+	u8ToBase64,
+	base64ToU8,
+} from "./crypto";
+import type { AsymAlgo, KdfMethod, EncAlgo, AuthMode, DecryptResult } from "./crypto";
 import type { AccountRecord, ContactRecord } from "./types";
 
 type IconProps = { active?: boolean };
-
-function extractPublicKeyBody(pem: string | undefined | null): string | null {
-	if (!pem) return null;
-	const normalized = pem.replace(/\r/g, "");
-	const headerRegex = /-*\s*BEGIN\s+PUBLIC\s+KEY\s*-*/i;
-	const footerRegex = /-*\s*END\s+PUBLIC\s+KEY\s*-*/i;
-	const headerMatch = headerRegex.exec(normalized);
-	const startIndex = headerMatch ? headerMatch.index + headerMatch[0].length : 0;
-	const afterHeader = normalized.slice(startIndex);
-	const footerMatch = footerRegex.exec(afterHeader);
-	const bodySection = footerMatch ? afterHeader.slice(0, footerMatch.index) : afterHeader;
-	const stripped = bodySection.replace(/[^A-Za-z0-9+/=]/g, "");
-	return stripped.trim() || null;
-}
 
 function formatBytes(bytes: number): string {
 	if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -99,67 +96,6 @@ function IconUnlock({ active }: IconProps) {
 
 type Tab = "keys" | "address-book" | "encrypt" | "decrypt";
 
-type EncryptedEnvelope = {
-	schema: string;
-	payload: {
-		type: "text" | "file";
-		meta?: {
-			algorithm: string;
-			iv: string;
-			cipherText: string;
-		};
-	};
-	encryption: {
-		algorithm: string;
-		iv: string;
-		cipherText: string;
-	};
-	wrappedKey: {
-		algorithm: string;
-		cipherText: string;
-	};
-};
-
-type EncryptedPayloadMetadata =
-	| {
-		type: "text";
-		encoding: string;
-		length: number;
-		createdAt: string;
-	}
-	| {
-		type: "file";
-		fileName: string;
-		mimeType: string;
-		size: number;
-		modifiedAt?: string;
-	};
-
-type DecryptedTextResult = {
-	type: "text";
-	text: string;
-	metadata?: EncryptedPayloadMetadata;
-};
-
-type DecryptedFileResult = {
-	type: "file";
-	blob: Blob;
-	fileName: string;
-	mimeType: string;
-	metadata?: EncryptedPayloadMetadata;
-};
-
-function downloadEncryptedEnvelope(payload: EncryptedEnvelope) {
-	const json = JSON.stringify(payload, null, 2);
-	const blob = new Blob([json], { type: "application/json" });
-	const url = URL.createObjectURL(blob);
-	const link = document.createElement("a");
-	link.href = url;
-	link.download = `yas-ciphertext-${Date.now()}.json`;
-	link.click();
-	URL.revokeObjectURL(url);
-}
-
 function App() {
 	const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem("authToken"));
 	const [authUsername, setAuthUsername] = useState<string | null>(() => localStorage.getItem("authUsername"));
@@ -194,26 +130,35 @@ function App() {
 	const [editingContactMeta, setEditingContactMeta] = useState<{ id: string; username: string } | null>(null);
 	const [contactModalError, setContactModalError] = useState<string | null>(null);
 	const closeModalTimer = useRef<number | null>(null);
+	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("ecc1");
+	const [encryptAuthMode, setEncryptAuthMode] = useState<AuthMode>("password");
+	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("pbk1");
+	const [encryptEncAlgo, setEncryptEncAlgo] = useState<EncAlgo>("gcm1");
+	const [encryptAsymAlgo, setEncryptAsymAlgo] = useState<AsymAlgo>("ecc1");
+	const [encryptPassword, setEncryptPassword] = useState("");
 	const [encryptRecipientId, setEncryptRecipientId] = useState<string>("");
+	const [encryptMsg, setEncryptMsg] = useState("");
+	const [encryptSmsg, setEncryptSmsg] = useState("");
 	const [encryptMode, setEncryptMode] = useState<"text" | "file">("text");
-	const [encryptPlaintext, setEncryptPlaintext] = useState("");
 	const [encryptFile, setEncryptFile] = useState<File | null>(null);
 	const [isFileDragActive, setIsFileDragActive] = useState(false);
+	const [encryptSignWithKey, setEncryptSignWithKey] = useState(false);
 	const [encryptBusy, setEncryptBusy] = useState(false);
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
-	const [encryptedPayload, setEncryptedPayload] = useState<EncryptedEnvelope | null>(null);
-	const [copyPayloadStatus, setCopyPayloadStatus] = useState<"idle" | "copied" | "error">("idle");
-	const [lastEncryptionSummary, setLastEncryptionSummary] = useState<{ recipient: string; payloadDescription: string } | null>(null);
+	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
 	const [decryptPayloadInput, setDecryptPayloadInput] = useState("");
 	const [decryptPayloadFile, setDecryptPayloadFile] = useState<File | null>(null);
 	const [isDecryptFileDragActive, setIsDecryptFileDragActive] = useState(false);
+	const [decryptPassword, setDecryptPassword] = useState("");
 	const [decryptPassphrase, setDecryptPassphrase] = useState("");
 	const [decryptPrivateKeyInput, setDecryptPrivateKeyInput] = useState("");
+	const [decryptPeerPublicKey, setDecryptPeerPublicKey] = useState("");
+	const [decryptDetected, setDecryptDetected] = useState<{ mode: AuthMode; algo: string; msg: string } | null>(null);
 	const [decryptBusy, setDecryptBusy] = useState(false);
 	const [decryptStatus, setDecryptStatus] = useState<string | null>(null);
 	const [decryptError, setDecryptError] = useState<string | null>(null);
-	const [decryptedResult, setDecryptedResult] = useState<DecryptedTextResult | DecryptedFileResult | null>(null);
+	const [decryptedResult, setDecryptedResult] = useState<DecryptResult | null>(null);
 
 	useEffect(() => {
 		return () => {
@@ -225,9 +170,15 @@ function App() {
 	}, []);
 
 	useEffect(() => {
-		if (!encryptedPayload) return;
-		downloadEncryptedEnvelope(encryptedPayload);
-	}, [encryptedPayload]);
+		if (!encryptedBlob) return;
+		const blob = new Blob([encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = `encrypted-${Date.now()}.bin`;
+		link.click();
+		URL.revokeObjectURL(url);
+	}, [encryptedBlob]);
 
 	const canUpload = Boolean(username && passphrase && publicKeyPem && privateKeyPem);
 	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
@@ -263,9 +214,15 @@ function App() {
 					setContacts(items);
 				}
 			} catch (err) {
+				const errMsg = (err as Error).message || "Failed to load contacts";
 				console.error(err);
+				if (errMsg === "TOKEN_EXPIRED") {
+					// Token expired, auto-logout
+					handleSignOut();
+					return;
+				}
 				if (!cancelled) {
-					setContactError((err as Error).message || "Failed to load contacts");
+					setContactError(errMsg);
 				}
 			} finally {
 				if (!cancelled) {
@@ -406,19 +363,22 @@ function App() {
 		forceCloseContactModal();
 		setEncryptRecipientId("");
 		setEncryptMode("text");
-		setEncryptPlaintext("");
+		setEncryptSmsg("");
+		setEncryptMsg("");
+		setEncryptPassword("");
 		setEncryptFile(null);
 		setIsFileDragActive(false);
 		setEncryptStatus(null);
 		setEncryptError(null);
-		setEncryptedPayload(null);
-		setCopyPayloadStatus("idle");
-		setLastEncryptionSummary(null);
+		setEncryptedBlob(null);
 		setDecryptPayloadInput("");
 		setDecryptPayloadFile(null);
 		setIsDecryptFileDragActive(false);
+		setDecryptPassword("");
 		setDecryptPassphrase("");
 		setDecryptPrivateKeyInput("");
+		setDecryptPeerPublicKey("");
+		setDecryptDetected(null);
 		setDecryptBusy(false);
 		setDecryptStatus(null);
 		setDecryptError(null);
@@ -480,9 +440,12 @@ function App() {
 	}
 
 	function resetEncryptionForm() {
-		setEncryptPlaintext("");
+		setEncryptSmsg("");
+		setEncryptMsg("");
+		setEncryptPassword("");
 		applySelectedEncryptFile(null);
 		setIsFileDragActive(false);
+		setEncryptedBlob(null);
 	}
 
 	function handleEncryptionModeChange(mode: "text" | "file") {
@@ -492,33 +455,29 @@ function App() {
 			applySelectedEncryptFile(null);
 			setIsFileDragActive(false);
 		} else {
-			setEncryptPlaintext("");
+			setEncryptSmsg("");
 		}
 		setEncryptStatus(null);
 		setEncryptError(null);
-		setEncryptedPayload(null);
-		setCopyPayloadStatus("idle");
-		setLastEncryptionSummary(null);
+		setEncryptedBlob(null);
 	}
 
 	function applySelectedEncryptFile(file: File | null) {
 		setEncryptFile(file);
 		setEncryptStatus(null);
 		setEncryptError(null);
-		setEncryptedPayload(null);
-		setCopyPayloadStatus("idle");
-		setLastEncryptionSummary(null);
+		setEncryptedBlob(null);
 	}
 
 	function handleFileDragEnter(event: React.DragEvent<HTMLDivElement>) {
 		event.preventDefault();
-		if (encryptBusy || contacts.length === 0) return;
+		if (encryptBusy) return;
 		setIsFileDragActive(true);
 	}
 
 	function handleFileDragOver(event: React.DragEvent<HTMLDivElement>) {
 		event.preventDefault();
-		if (encryptBusy || contacts.length === 0) return;
+		if (encryptBusy) return;
 		event.dataTransfer.dropEffect = "copy";
 		if (!isFileDragActive) {
 			setIsFileDragActive(true);
@@ -537,7 +496,7 @@ function App() {
 	function handleFileDrop(event: React.DragEvent<HTMLDivElement>) {
 		event.preventDefault();
 		setIsFileDragActive(false);
-		if (encryptBusy || contacts.length === 0) return;
+		if (encryptBusy) return;
 		const droppedFile = event.dataTransfer.files?.[0];
 		if (droppedFile) {
 			applySelectedEncryptFile(droppedFile);
@@ -598,8 +557,11 @@ function App() {
 		setDecryptPayloadInput("");
 		setDecryptPayloadFile(null);
 		setIsDecryptFileDragActive(false);
+		setDecryptPassword("");
 		setDecryptPassphrase("");
 		setDecryptPrivateKeyInput("");
+		setDecryptPeerPublicKey("");
+		setDecryptDetected(null);
 		setDecryptStatus(null);
 		setDecryptError(null);
 		setDecryptedResult(null);
@@ -616,7 +578,7 @@ function App() {
 		event.target.value = "";
 	}
 
-	async function resolvePrivateKeyPem(): Promise<string> {
+	async function resolvePrivateKeyB64(): Promise<string> {
 		const manual = decryptPrivateKeyInput.trim();
 		if (manual) return manual;
 		if (privateKeyPem) return privateKeyPem;
@@ -629,45 +591,19 @@ function App() {
 		throw new Error("No private key available. Paste one or unlock your stored key.");
 	}
 
-	async function loadEnvelopeFromInput(): Promise<EncryptedEnvelope> {
-		let raw = decryptPayloadInput.trim();
+	async function loadOpsecData(): Promise<Uint8Array> {
 		if (decryptPayloadFile) {
-			raw = await decryptPayloadFile.text();
+			return new Uint8Array(await decryptPayloadFile.arrayBuffer());
 		}
+		const raw = decryptPayloadInput.trim();
 		if (!raw) {
-			throw new Error("Paste ciphertext JSON or upload a file");
+			throw new Error("Paste Base64 ciphertext or upload a file");
 		}
-		let parsed: unknown;
 		try {
-			parsed = JSON.parse(raw);
-		} catch (err) {
-			throw new Error("Invalid JSON format");
+			return base64ToU8(raw);
+		} catch {
+			throw new Error("Invalid Base64 format");
 		}
-		const candidate = parsed as Partial<EncryptedEnvelope>;
-		if (!candidate?.encryption?.cipherText || !candidate?.encryption?.iv || !candidate?.wrappedKey?.cipherText) {
-			throw new Error("Missing required encryption fields");
-		}
-		const payloadType = candidate.payload?.type === "file" ? "file" : "text";
-		const payloadMeta = candidate.payload?.meta && candidate.payload.meta.cipherText && candidate.payload.meta.iv
-			? {
-				algorithm: candidate.payload.meta.algorithm || "AES-GCM",
-				iv: candidate.payload.meta.iv,
-				cipherText: candidate.payload.meta.cipherText,
-			}
-			: undefined;
-		return {
-			schema: candidate.schema || "yas.hybrid.v1",
-			payload: { type: payloadType, meta: payloadMeta },
-			encryption: {
-				algorithm: candidate.encryption.algorithm || "AES-GCM",
-				iv: candidate.encryption.iv,
-				cipherText: candidate.encryption.cipherText,
-			},
-			wrappedKey: {
-				algorithm: candidate.wrappedKey.algorithm || "RSA-OAEP",
-				cipherText: candidate.wrappedKey.cipherText,
-			},
-		};
 	}
 
 	async function handleDecryptSubmit(e: React.FormEvent) {
@@ -677,21 +613,25 @@ function App() {
 		setDecryptedResult(null);
 		try {
 			setDecryptBusy(true);
+			setDecryptStatus("Loading data...");
+			const dataU8 = await loadOpsecData();
+
+			// Detect auth mode
+			const info = detectAuthMode(dataU8);
+			setDecryptDetected(info);
+
 			setDecryptStatus("Decrypting...");
-			const envelope = await loadEnvelopeFromInput();
-			const privatePem = await resolvePrivateKeyPem();
-			const { data: plainBuffer, metadata: metaBuffer } = await decryptForPrivateKey(envelope, privatePem);
-			const metadata = metaBuffer ? (JSON.parse(decodeUtf8(metaBuffer)) as EncryptedPayloadMetadata) : null;
-			if (envelope.payload.type === "text") {
-				const textMetadata = metadata?.type === "text" ? metadata : undefined;
-				setDecryptedResult({ type: "text", text: decodeUtf8(plainBuffer), metadata: textMetadata });
+
+			let result: DecryptResult;
+			if (info.mode === "password") {
+				if (!decryptPassword) throw new Error("Enter the encryption password");
+				result = await decryptOpsecPw(dataU8, decryptPassword);
 			} else {
-				const fileMetadata = metadata?.type === "file" ? metadata : undefined;
-				const mimeType = fileMetadata?.mimeType || "application/octet-stream";
-				const fileName = fileMetadata?.fileName || "yas-decrypted.bin";
-				const blob = new Blob([plainBuffer], { type: mimeType });
-				setDecryptedResult({ type: "file", blob, fileName, mimeType, metadata: fileMetadata });
+				const priB64 = await resolvePrivateKeyB64();
+				const peerPub = decryptPeerPublicKey.trim() || undefined;
+				result = await decryptOpsecPub(dataU8, priB64, peerPub);
 			}
+			setDecryptedResult(result);
 			setDecryptStatus("Decrypted successfully");
 		} catch (err) {
 			console.error(err);
@@ -703,130 +643,124 @@ function App() {
 		}
 	}
 
-	function handleDownloadDecryptedFile() {
-		if (!decryptedResult || decryptedResult.type !== "file") return;
-		const url = URL.createObjectURL(decryptedResult.blob);
+	function handleDownloadDecryptedFile(name: string, data: Uint8Array) {
+		const blob = new Blob([data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
+		const url = URL.createObjectURL(blob);
 		const link = document.createElement("a");
 		link.href = url;
-		link.download = decryptedResult.fileName || `yas-decrypted-${Date.now()}.bin`;
+		link.download = name;
 		link.click();
 		URL.revokeObjectURL(url);
 	}
 
 	async function handleEncryptSubmit(e: React.FormEvent) {
 		e.preventDefault();
-		const recipient = contacts.find((contact) => contact.id === encryptRecipientId);
-		if (!recipient) {
-			setEncryptError("Select a contact to encrypt for");
-			return;
-		}
+		setEncryptStatus(null);
+		setEncryptError(null);
+		setEncryptedBlob(null);
 
-		let payloadBuffer: ArrayBuffer | null = null;
-		const payloadMeta: EncryptedEnvelope["payload"] = { type: encryptMode };
-		let metadataObj: EncryptedPayloadMetadata | null = null;
-		try {
-			if (encryptMode === "text") {
-				if (!encryptPlaintext) {
-					setEncryptError("Enter text to encrypt");
-					return;
-				}
-				payloadBuffer = encodeUtf8(encryptPlaintext);
-				metadataObj = {
-					type: "text",
-					encoding: "utf-8",
-					length: encryptPlaintext.length,
-					createdAt: new Date().toISOString(),
-				};
-			} else {
-				if (!encryptFile) {
-					setEncryptError("Select a file to encrypt");
-					return;
-				}
-				payloadBuffer = await encryptFile.arrayBuffer();
-				metadataObj = {
-					type: "file",
-					fileName: encryptFile.name || "payload.bin",
-					mimeType: encryptFile.type || "application/octet-stream",
-					size: encryptFile.size,
-					modifiedAt: new Date(encryptFile.lastModified || Date.now()).toISOString(),
-				};
+		// Validate based on auth mode
+		if (encryptAuthMode === "password") {
+			if (!encryptPassword) {
+				setEncryptError("Enter a password");
+				return;
 			}
-		} catch (fileError) {
-			console.error(fileError);
-			setEncryptError("Failed to read input data");
-			return;
+		} else {
+			const recipient = contacts.find((c) => c.id === encryptRecipientId);
+			if (!recipient) {
+				setEncryptError("Select a contact (recipient)");
+				return;
+			}
 		}
 
-		if (!payloadBuffer) {
-			setEncryptError("Nothing to encrypt");
-			return;
+		// Validate data
+		if (encryptMode === "text") {
+			if (!encryptSmsg) {
+				setEncryptError("Enter a secure message to encrypt");
+				return;
+			}
+		} else {
+			if (!encryptFile) {
+				setEncryptError("Select a file to encrypt");
+				return;
+			}
 		}
 
 		try {
 			setEncryptBusy(true);
 			setEncryptStatus("Encrypting...");
-			setEncryptError(null);
-			setCopyPayloadStatus("idle");
-			const metadataBuffer = metadataObj ? encodeUtf8(JSON.stringify(metadataObj)) : undefined;
-			const hybrid = await encryptForPublicKey(payloadBuffer, recipient.publicKey, metadataBuffer);
-			if (hybrid.metadata) {
-				payloadMeta.meta = {
-					algorithm: "AES-GCM",
-					iv: hybrid.metadata.iv,
-					cipherText: hybrid.metadata.cipherText,
-				};
-			}
-			const envelope: EncryptedEnvelope = {
-				schema: "yas.hybrid.v1",
-				payload: payloadMeta,
-				encryption: {
-					algorithm: "AES-GCM",
-					iv: hybrid.iv,
-					cipherText: hybrid.cipherText,
-				},
-				wrappedKey: {
-					algorithm: "RSA-OAEP",
-					cipherText: hybrid.encryptedKey,
-				},
-			};
-			setEncryptedPayload(envelope);
-			let payloadDescription: string;
-			if (metadataObj?.type === "file") {
-				payloadDescription = `${metadataObj.fileName} (${formatBytes(metadataObj.size)})`;
+
+			const files = encryptMode === "file" && encryptFile ? [encryptFile] : undefined;
+
+			let result: Uint8Array;
+			if (encryptAuthMode === "password") {
+				result = await encryptOpsec({
+					mode: "password",
+					kdfMethod: encryptKdfMethod,
+					password: encryptPassword,
+					encAlgo: encryptEncAlgo,
+					smsg: encryptSmsg || undefined,
+					msg: encryptMsg || undefined,
+					files,
+				});
 			} else {
-				const length = metadataObj?.length ?? encryptPlaintext.length;
-				payloadDescription = `${length} chars`;
+				const recipient = contacts.find((c) => c.id === encryptRecipientId)!;
+				let myPrivateKey: string | undefined;
+				if (encryptSignWithKey) {
+					if (privateKeyPem) {
+						myPrivateKey = privateKeyPem;
+					} else if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf && passphrase) {
+						myPrivateKey = await decryptPrivateKey(storedAccount.encryptedPrivateKey, storedAccount.kdf, passphrase);
+					}
+				}
+				result = await encryptOpsec({
+					mode: "publickey",
+					asymAlgo: encryptAsymAlgo,
+					peerPublicKey: recipient.publicKey,
+					myPrivateKey,
+					encAlgo: encryptEncAlgo,
+					smsg: encryptSmsg || undefined,
+					msg: encryptMsg || undefined,
+					files,
+				});
 			}
-			setLastEncryptionSummary({ recipient: recipient.contactUsername, payloadDescription });
-			const label = encryptMode === "file" ? "file" : "text";
-			setEncryptStatus(`Encrypted ${label} for ${recipient.contactUsername}`);
+
+			setEncryptedBlob(result);
+
+			// For text-only mode (no files), also show base64
+			if (encryptMode === "text") {
+				setEncryptStatus(`Encrypted (${result.length} bytes). Download started.`);
+			} else {
+				setEncryptStatus(`Encrypted file (${formatBytes(result.length)}). Download started.`);
+			}
 		} catch (err) {
 			console.error(err);
-			setEncryptError((err as Error).message || "Failed to encrypt data");
+			setEncryptError((err as Error).message || "Failed to encrypt");
 			setEncryptStatus(null);
-			setEncryptedPayload(null);
-			setLastEncryptionSummary(null);
+			setEncryptedBlob(null);
 		} finally {
 			setEncryptBusy(false);
 		}
 	}
 
-	async function handleCopyEncryptedPayload() {
-		if (!encryptedPayload) return;
-		try {
-			await navigator.clipboard.writeText(JSON.stringify(encryptedPayload, null, 2));
-			setCopyPayloadStatus("copied");
-			setTimeout(() => setCopyPayloadStatus("idle"), 2000);
-		} catch (err) {
-			console.error(err);
-			setCopyPayloadStatus("error");
-			setTimeout(() => setCopyPayloadStatus("idle"), 2000);
-		}
+	function handleDownloadEncryptedBlob() {
+		if (!encryptedBlob) return;
+		const blob = new Blob([encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = `encrypted-${Date.now()}.bin`;
+		link.click();
+		URL.revokeObjectURL(url);
 	}
 
-	function handleDownloadEncryptedPayload() {
-		if (!encryptedPayload) return;
-		downloadEncryptedEnvelope(encryptedPayload);
+	async function handleCopyEncryptedBase64() {
+		if (!encryptedBlob) return;
+		try {
+			await navigator.clipboard.writeText(u8ToBase64(encryptedBlob));
+		} catch (err) {
+			console.error(err);
+		}
 	}
 
 	function generatePassphrase() {
@@ -836,11 +770,11 @@ function App() {
 
 	async function handleGenerateKeys() {
 		setError(null);
-		setStatus("Generating RSA-4096 key pair...");
+		setStatus(`Generating ${keyAlgo.toUpperCase()} key pair...`);
 		try {
-			const { publicKeyPem, privateKeyPem } = await generateRsaKeyPair();
-			setPublicKeyPem(publicKeyPem);
-			setPrivateKeyPem(privateKeyPem);
+			const { publicKey, privateKey } = await generateKeyPair(keyAlgo);
+			setPublicKeyPem(publicKey);
+			setPrivateKeyPem(privateKey);
 			setCopyPrivateStatus("idle");
 			setStatus("Key pair ready. Keep the private key encrypted only.");
 		} catch (err) {
@@ -895,9 +829,8 @@ function App() {
 		if (!authToken) return;
 		const trimmedUsername = contactForm.contactUsername.trim();
 		const trimmedKey = contactForm.publicKey.trim();
-		const selfPublicKeyBody = extractPublicKeyBody(storedAccount?.publicKey || publicKeyPem);
-		const targetKeyBody = extractPublicKeyBody(trimmedKey);
-		if (selfPublicKeyBody && targetKeyBody && selfPublicKeyBody === targetKeyBody) {
+		const selfKey = storedAccount?.publicKey || publicKeyPem;
+		if (selfKey && trimmedKey && selfKey === trimmedKey) {
 			setContactModalError("This public key already belongs to you");
 			return;
 		}
@@ -925,12 +858,20 @@ function App() {
 				try {
 					await deleteContact(editingContactMeta.id, authToken);
 				} catch (deleteErr) {
+					if ((deleteErr as Error).message === "TOKEN_EXPIRED") {
+						handleSignOut();
+						return;
+					}
 					console.error(deleteErr);
 					setContactError((deleteErr as Error).message || "Failed to remove old contact");
 				}
 			}
 			closeContactModal();
 		} catch (err) {
+			if ((err as Error).message === "TOKEN_EXPIRED") {
+				handleSignOut();
+				return;
+			}
 			console.error(err);
 			setContactModalError((err as Error).message || "Failed to save contact");
 		} finally {
@@ -946,31 +887,28 @@ function App() {
 			await deleteContact(id, authToken);
 			setContacts((prev) => prev.filter((contact) => contact.id !== id));
 		} catch (err) {
+			if ((err as Error).message === "TOKEN_EXPIRED") {
+				handleSignOut();
+				return;
+			}
 			console.error(err);
 			setContactError((err as Error).message || "Failed to delete contact");
 		}
 	}
 
-	function renderDecryptedMetadata(meta: EncryptedPayloadMetadata) {
-		const rows = meta.type === "text"
-			? [
-					{ label: "Encoding", value: meta.encoding },
-					{ label: "Length", value: `${meta.length} chars` },
-					{ label: "Captured", value: formatTimestamp(meta.createdAt) },
-				]
-			: [
-					{ label: "File name", value: meta.fileName },
-					{ label: "Type", value: meta.mimeType },
-					{ label: "Size", value: formatBytes(meta.size) },
-					{ label: "Modified", value: formatTimestamp(meta.modifiedAt ?? null) },
-				];
+	function renderDecryptedInfo(result: DecryptResult) {
+		const rows: { label: string; value: string | undefined }[] = [];
+		if (result.msg) rows.push({ label: "Public message", value: result.msg });
+		if (result.smsg) rows.push({ label: "Secure message", value: result.smsg });
+		if (result.files.length > 0) rows.push({ label: "Files", value: `${result.files.length} file(s)` });
+		if (result.verified !== undefined) rows.push({ label: "Signature", value: result.verified ? "Valid" : "INVALID" });
 		return (
 			<div className="meta-grid">
 				{rows.map((row) =>
 					row.value ? (
 						<div key={row.label}>
 							<span className="summary-label">{row.label}</span>
-							<p>{row.value}</p>
+							<p style={{ whiteSpace: "pre-wrap" }}>{row.value}</p>
 						</div>
 					) : null
 				)}
@@ -1035,8 +973,14 @@ function App() {
 							<label className="label" htmlFor="notes">Notes (optional)</label>
 							<textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Label this key..." />
 
+							<label className="label" htmlFor="key-algo">Key algorithm</label>
+							<select id="key-algo" value={keyAlgo} onChange={(e) => setKeyAlgo(e.target.value as AsymAlgo)}>
+								<option value="ecc1">Curve448 (X448 + Ed448)</option>
+								<option value="rsa1">RSA-2048</option>
+							</select>
+
 							<div className="actions">
-								<button onClick={handleGenerateKeys} className="secondary">Generate RSA key pair</button>
+								<button onClick={handleGenerateKeys} className="secondary">Generate key pair</button>
 								<button onClick={handleUpload} disabled={!canUpload || busy}>
 									{busy ? "Working..." : "Encrypt and upload"}
 								</button>
@@ -1089,37 +1033,105 @@ function App() {
 
 		if (tab === "encrypt") {
 			const hasContacts = contacts.length > 0;
-			const disableEncrypt = !encryptRecipientId || encryptBusy || (encryptMode === "text" ? !encryptPlaintext : !encryptFile);
+			const canEncrypt = encryptAuthMode === "password"
+				? (encryptPassword && !encryptBusy && (encryptMode === "text" ? !!encryptSmsg : !!encryptFile))
+				: (!!encryptRecipientId && !encryptBusy && (encryptMode === "text" ? !!encryptSmsg : !!encryptFile));
 
 			return (
 				<>
 					<section className="card">
 						<h2>Encrypt data</h2>
-						<p className="hint">Use hybrid RSA-OAEP + AES-GCM so only the selected contact can recover the payload.</p>
-						{!hasContacts && !contactsLoading && <div className="status info">Add a contact first to enable encryption.</div>}
+						<p className="hint">YAS2 Opsec encryption — supports password-based or public-key modes with AES-GCM.</p>
+
 						<form className="form-vertical" onSubmit={handleEncryptSubmit}>
-							<label className="label" htmlFor="encrypt-contact">Recipient</label>
-							<select
-								id="encrypt-contact"
-								value={encryptRecipientId}
-								onChange={(e) => {
-									setEncryptRecipientId(e.target.value);
-									setEncryptStatus(null);
-									setEncryptError(null);
-									setEncryptedPayload(null);
-									setCopyPayloadStatus("idle");
-									setLastEncryptionSummary(null);
-								}}
-								disabled={!hasContacts || encryptBusy}
-							>
-								<option value="">Select a contact</option>
-								{contacts.map((contact) => (
-									<option key={contact.id} value={contact.id}>
-										{contact.contactUsername}
-									</option>
-								))}
+							{/* Auth mode selector */}
+							<label className="label">Authentication mode</label>
+							<div className="segment-control" role="tablist" aria-label="Auth mode">
+								<button
+									type="button"
+									className={encryptAuthMode === "password" ? "segment-option active" : "segment-option"}
+									onClick={() => { setEncryptAuthMode("password"); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
+								>
+									Password
+								</button>
+								<button
+									type="button"
+									className={encryptAuthMode === "publickey" ? "segment-option active" : "segment-option"}
+									onClick={() => { setEncryptAuthMode("publickey"); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
+								>
+									Public key
+								</button>
+							</div>
+
+							{/* Password-mode fields */}
+							{encryptAuthMode === "password" && (
+								<>
+									<label className="label" htmlFor="encrypt-password">Password</label>
+									<input
+										id="encrypt-password"
+										type="password"
+										value={encryptPassword}
+										onChange={(e) => { setEncryptPassword(e.target.value); setEncryptError(null); }}
+										placeholder="Encryption password"
+									/>
+									<label className="label" htmlFor="encrypt-kdf">Key derivation</label>
+									<select id="encrypt-kdf" value={encryptKdfMethod} onChange={(e) => setEncryptKdfMethod(e.target.value as KdfMethod)}>
+										<option value="arg1">Argon2id (recommended)</option>
+										<option value="pbk1">PBKDF2-SHA512</option>
+									</select>
+								</>
+							)}
+
+							{/* Public-key-mode fields */}
+							{encryptAuthMode === "publickey" && (
+								<>
+									{!hasContacts && !contactsLoading && <div className="status info">Add a contact first to enable public key encryption.</div>}
+									<label className="label" htmlFor="encrypt-contact">Recipient</label>
+									<select
+										id="encrypt-contact"
+										value={encryptRecipientId}
+										onChange={(e) => { setEncryptRecipientId(e.target.value); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
+										disabled={!hasContacts || encryptBusy}
+									>
+										<option value="">Select a contact</option>
+										{contacts.map((c) => (
+											<option key={c.id} value={c.id}>{c.contactUsername}</option>
+										))}
+									</select>
+									<label className="label" htmlFor="encrypt-asym">Asymmetric algorithm</label>
+									<select id="encrypt-asym" value={encryptAsymAlgo} onChange={(e) => setEncryptAsymAlgo(e.target.value as AsymAlgo)}>
+										<option value="ecc1">Curve448 (X448 + Ed448)</option>
+										<option value="rsa1">RSA-2048 (OAEP + PKCS1v1.5)</option>
+									</select>
+									<label className="label">
+										<input
+											type="checkbox"
+											checked={encryptSignWithKey}
+											onChange={(e) => setEncryptSignWithKey(e.target.checked)}
+										/>{" "}
+										Sign with my private key
+									</label>
+								</>
+							)}
+
+							{/* Encryption algorithm */}
+							<label className="label" htmlFor="encrypt-enc-algo">Encryption algorithm</label>
+							<select id="encrypt-enc-algo" value={encryptEncAlgo} onChange={(e) => setEncryptEncAlgo(e.target.value as EncAlgo)}>
+								<option value="gcm1">AES-GCM (single block)</option>
+								<option value="gcmx1">AES-GCM chunked (large files)</option>
 							</select>
 
+							{/* Public message */}
+							<label className="label" htmlFor="encrypt-msg">Public message (optional, visible without decrypt)</label>
+							<input
+								id="encrypt-msg"
+								type="text"
+								value={encryptMsg}
+								onChange={(e) => setEncryptMsg(e.target.value)}
+								placeholder="Short public note"
+							/>
+
+							{/* Payload mode selector */}
 							<div className="segment-control" role="tablist" aria-label="Payload type">
 								<button
 									type="button"
@@ -1138,20 +1150,15 @@ function App() {
 							</div>
 
 							{encryptMode === "text" ? (
-								<textarea
-									id="plaintext"
-									value={encryptPlaintext}
-									onChange={(e) => {
-										setEncryptPlaintext(e.target.value);
-										setEncryptStatus(null);
-										setEncryptError(null);
-										setEncryptedPayload(null);
-										setCopyPayloadStatus("idle");
-										setLastEncryptionSummary(null);
-									}}
-									placeholder="Write the message to encrypt"
-									disabled={!hasContacts}
-								/>
+								<>
+									<label className="label" htmlFor="encrypt-smsg">Secure message (encrypted)</label>
+									<textarea
+										id="encrypt-smsg"
+										value={encryptSmsg}
+										onChange={(e) => { setEncryptSmsg(e.target.value); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
+										placeholder="Write the secret message to encrypt"
+									/>
+								</>
 							) : (
 								<div className="file-picker">
 									<div
@@ -1160,13 +1167,13 @@ function App() {
 										onDragOver={handleFileDragOver}
 										onDragLeave={handleFileDragLeave}
 										onDrop={handleFileDrop}
-										aria-disabled={!hasContacts || encryptBusy}
+										aria-disabled={encryptBusy}
 									>
 										<input
 											id="encrypt-file"
 											type="file"
 											onChange={handleEncryptFileChange}
-											disabled={!hasContacts || encryptBusy}
+											disabled={encryptBusy}
 											className="visually-hidden"
 										/>
 										<label htmlFor="encrypt-file">
@@ -1198,7 +1205,7 @@ function App() {
 							)}
 
 							<div className="actions">
-								<button type="submit" disabled={!hasContacts || disableEncrypt}>{encryptBusy ? "Encrypting..." : "Encrypt"}</button>
+								<button type="submit" disabled={!canEncrypt}>{encryptBusy ? "Encrypting..." : "Encrypt"}</button>
 								<button type="button" className="secondary" onClick={resetEncryptionForm} disabled={encryptBusy}>
 									Reset
 								</button>
@@ -1217,39 +1224,33 @@ function App() {
 						{encryptError && <div className="status error">{encryptError}</div>}
 					</section>
 
-						{encryptedPayload && (
-							<section className="card">
-								<div className="encrypt-summary">
-									{lastEncryptionSummary?.recipient && (
-										<div>
-											<span className="summary-label">Recipient</span>
-											<p>{lastEncryptionSummary.recipient}</p>
-										</div>
-									)}
-									<div>
-										<span className="summary-label">Payload</span>
-										<p>{lastEncryptionSummary?.payloadDescription || (encryptedPayload.payload.type === "text" ? "Text" : "Binary data")}</p>
-									</div>
-									<div>
-										<span className="summary-label">Algorithm</span>
-										<p>AES-GCM + RSA-OAEP</p>
-									</div>
+					{encryptedBlob && (
+						<section className="card">
+							<div className="encrypt-summary">
+								<div>
+									<span className="summary-label">Mode</span>
+									<p>{encryptAuthMode === "password" ? "Password" : "Public key"}</p>
 								</div>
-								<p className="hint">Ciphertext downloaded automatically with only the metadata needed for decryption.</p>
-								<div className="result-actions">
-									<button
-										type="button"
-										className={`secondary button-inline copy-state ${copyPayloadStatus === "copied" ? "copied" : copyPayloadStatus === "error" ? "error" : ""}`}
-										onClick={handleCopyEncryptedPayload}
-									>
-										{copyPayloadStatus === "copied" ? "Copied" : copyPayloadStatus === "error" ? "Error" : "Copy JSON"}
-									</button>
-									<button type="button" className="ghost button-inline" onClick={handleDownloadEncryptedPayload}>
-										Download ciphertext
-									</button>
+								<div>
+									<span className="summary-label">Size</span>
+									<p>{formatBytes(encryptedBlob.length)}</p>
 								</div>
-							</section>
-						)}
+								<div>
+									<span className="summary-label">Algorithm</span>
+									<p>{encryptEncAlgo === "gcmx1" ? "AES-GCM chunked" : "AES-GCM"}</p>
+								</div>
+							</div>
+							<p className="hint">Download the encrypted binary or copy as Base64.</p>
+							<div className="result-actions">
+								<button type="button" className="secondary button-inline" onClick={handleCopyEncryptedBase64}>
+									Copy Base64
+								</button>
+								<button type="button" className="ghost button-inline" onClick={handleDownloadEncryptedBlob}>
+									Download .bin
+								</button>
+							</div>
+						</section>
+					)}
 				</>
 			);
 		}
@@ -1336,7 +1337,7 @@ function App() {
 										id="contact-public-key"
 										value={contactForm.publicKey}
 										onChange={(e) => setContactForm((prev) => ({ ...prev, publicKey: e.target.value }))}
-										placeholder="-----BEGIN PUBLIC KEY-----"
+										placeholder="Base64-encoded public key"
 										required
 									/>
 									<div className="modal-actions">
@@ -1355,146 +1356,183 @@ function App() {
 		}
 
 		return (
-			<section className="card">
-				<h2>Decrypt</h2>
-				<p className="hint">Paste or upload ciphertext JSON, unlock your private key (passphrase or PEM), and decrypt locally.</p>
-				<form className="form-vertical" onSubmit={handleDecryptSubmit}>
-					<label className="label" htmlFor="decrypt-json">Ciphertext JSON</label>
-					<textarea
-						id="decrypt-json"
-						placeholder='{"schema":"yas.hybrid.v1",...}'
-						value={decryptPayloadInput}
-						onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-							setDecryptPayloadInput(e.target.value);
-							setDecryptPayloadFile(null);
-							setDecryptStatus(null);
-							setDecryptError(null);
-							setDecryptedResult(null);
-						}}
-						disabled={decryptBusy}
-					/>
+			<>
+				<section className="card">
+					<h2>Decrypt</h2>
+					<p className="hint">Paste Base64 ciphertext or upload an encrypted binary, then decrypt locally.</p>
+					<form className="form-vertical" onSubmit={handleDecryptSubmit}>
+						<label className="label" htmlFor="decrypt-base64">Ciphertext (Base64)</label>
+						<textarea
+							id="decrypt-base64"
+							placeholder="Paste Base64-encoded ciphertext..."
+							value={decryptPayloadInput}
+							onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+								setDecryptPayloadInput(e.target.value);
+								setDecryptPayloadFile(null);
+								setDecryptStatus(null);
+								setDecryptError(null);
+								setDecryptedResult(null);
+								setDecryptDetected(null);
+							}}
+							disabled={decryptBusy}
+						/>
 
-					<div className="file-picker">
-						<div
-							className={isDecryptFileDragActive ? "file-dropzone drag-active" : "file-dropzone"}
-							onDragEnter={handleDecryptDragEnter}
-							onDragOver={handleDecryptDragOver}
-							onDragLeave={handleDecryptDragLeave}
-							onDrop={handleDecryptFileDrop}
-							aria-disabled={decryptBusy}
-						>
-							<input
-								id="decrypt-file"
-								type="file"
-								accept="application/json"
-								onChange={handleDecryptFileChange}
-								disabled={decryptBusy}
-								className="visually-hidden"
-							/>
-							<label htmlFor="decrypt-file">
-								<div className="drop-graphic" aria-hidden="true">
-									<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-										<rect x="7" y="23" width="26" height="10" rx="3" stroke="#38bdf8" strokeWidth="1.6" opacity="0.7" />
-										<path d="M20 7v18" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" />
-										<path d="M15 18l5 5 5-5" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-									</svg>
+						<div className="file-picker">
+							<div
+								className={isDecryptFileDragActive ? "file-dropzone drag-active" : "file-dropzone"}
+								onDragEnter={handleDecryptDragEnter}
+								onDragOver={handleDecryptDragOver}
+								onDragLeave={handleDecryptDragLeave}
+								onDrop={handleDecryptFileDrop}
+								aria-disabled={decryptBusy}
+							>
+								<input
+									id="decrypt-file"
+									type="file"
+									onChange={handleDecryptFileChange}
+									disabled={decryptBusy}
+									className="visually-hidden"
+								/>
+								<label htmlFor="decrypt-file">
+									<div className="drop-graphic" aria-hidden="true">
+										<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+											<rect x="7" y="23" width="26" height="10" rx="3" stroke="#38bdf8" strokeWidth="1.6" opacity="0.7" />
+											<path d="M20 7v18" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" />
+											<path d="M15 18l5 5 5-5" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+										</svg>
+									</div>
+									<strong>Drag & drop encrypted .bin file</strong>
+									<span className="drop-highlight">Drop your encrypted binary here or click to browse.</span>
+									<span className="muted">We parse and decrypt entirely in your browser.</span>
+								</label>
+							</div>
+
+							{decryptPayloadFile && (
+								<div className="file-info">
+									<div>
+										<strong>{decryptPayloadFile.name}</strong>
+										<p className="muted">{formatBytes(decryptPayloadFile.size)} · {decryptPayloadFile.type || "application/octet-stream"}</p>
+									</div>
+									<button
+										type="button"
+										className="secondary button-inline"
+										onClick={() => {
+											setDecryptPayloadFile(null);
+											setIsDecryptFileDragActive(false);
+										}}
+										disabled={decryptBusy}
+									>
+										Remove
+									</button>
 								</div>
-								<strong>Drag & drop ciphertext JSON</strong>
-								<span className="drop-highlight">Drop your encrypted .json here or click to browse.</span>
-								<span className="muted">We parse and decrypt entirely in your browser.</span>
-							</label>
+							)}
 						</div>
 
-						{decryptPayloadFile && (
-							<div className="file-info">
-								<div>
-									<strong>{decryptPayloadFile.name}</strong>
-									<p className="muted">{formatBytes(decryptPayloadFile.size)} · {decryptPayloadFile.type || "application/json"}</p>
-								</div>
-								<button
-									type="button"
-									className="secondary button-inline"
-									onClick={() => {
-										setDecryptPayloadFile(null);
-										setIsDecryptFileDragActive(false);
-									}}
-									disabled={decryptBusy}
-								>
-									Remove
-								</button>
+						{/* Detected mode info */}
+						{decryptDetected && (
+							<div className="status info">
+								Detected mode: <strong>{decryptDetected.mode}</strong>
+								{decryptDetected.msg && <> — Public message: {decryptDetected.msg}</>}
 							</div>
 						)}
-					</div>
 
-					<div className="grid">
-						<div>
-							<label className="label" htmlFor="decrypt-passphrase">Passphrase (to unlock stored key)</label>
-							<input
-								id="decrypt-passphrase"
-								type="password"
-								value={decryptPassphrase}
-								onChange={(e) => {
-									setDecryptPassphrase(e.target.value);
-									setDecryptStatus(null);
-									setDecryptError(null);
-								}}
-								placeholder="Enter passphrase to unlock stored key"
-								disabled={decryptBusy}
-							/>
-						</div>
-						<div>
-							<label className="label" htmlFor="decrypt-private-key">Or paste a private key (PEM)</label>
-							<textarea
-								id="decrypt-private-key"
-								value={decryptPrivateKeyInput}
-								onChange={(e) => {
-									setDecryptPrivateKeyInput(e.target.value);
-									setDecryptStatus(null);
-									setDecryptError(null);
-								}}
-								placeholder="-----BEGIN PRIVATE KEY-----"
-								disabled={decryptBusy}
-							/>
-							<p className="hint">If provided, this overrides stored keys and passphrase unlocking.</p>
-						</div>
-					</div>
+						{/* Password field (for password-mode decryption) */}
+						<label className="label" htmlFor="decrypt-password">Password (for password-mode)</label>
+						<input
+							id="decrypt-password"
+							type="password"
+							value={decryptPassword}
+							onChange={(e) => { setDecryptPassword(e.target.value); setDecryptError(null); }}
+							placeholder="Enter the encryption password"
+							disabled={decryptBusy}
+						/>
 
-					<div className="actions">
-						<button type="submit" disabled={decryptBusy}>{decryptBusy ? "Decrypting..." : "Decrypt"}</button>
-						<button type="button" className="secondary" onClick={resetDecryptForm} disabled={decryptBusy}>
-							Reset
-						</button>
-					</div>
-
-					{decryptBusy && (
-						<div className="progress-row" role="status" aria-live="polite">
-							<div className="progress-bar">
-								<div className="progress-fill" />
+						<div className="grid">
+							<div>
+								<label className="label" htmlFor="decrypt-passphrase">Passphrase (to unlock stored key)</label>
+								<input
+									id="decrypt-passphrase"
+									type="password"
+									value={decryptPassphrase}
+									onChange={(e) => {
+										setDecryptPassphrase(e.target.value);
+										setDecryptStatus(null);
+										setDecryptError(null);
+									}}
+									placeholder="Enter passphrase to unlock stored key"
+									disabled={decryptBusy}
+								/>
 							</div>
-							<span className="muted">Decrypting payload...</span>
+							<div>
+								<label className="label" htmlFor="decrypt-private-key">Or paste a private key (Base64)</label>
+								<textarea
+									id="decrypt-private-key"
+									value={decryptPrivateKeyInput}
+									onChange={(e) => {
+										setDecryptPrivateKeyInput(e.target.value);
+										setDecryptStatus(null);
+										setDecryptError(null);
+									}}
+									placeholder="Base64-encoded private key"
+									disabled={decryptBusy}
+								/>
+								<p className="hint">If provided, this overrides stored keys and passphrase unlocking.</p>
+							</div>
 						</div>
-					)}
-				</form>
-				{decryptStatus && <div className="status success">{decryptStatus}</div>}
-				{decryptError && <div className="status error">{decryptError}</div>}
+
+						<label className="label" htmlFor="decrypt-peer-pubkey">Peer public key (optional, for signature verification)</label>
+						<textarea
+							id="decrypt-peer-pubkey"
+							value={decryptPeerPublicKey}
+							onChange={(e) => setDecryptPeerPublicKey(e.target.value)}
+							placeholder="Base64-encoded sender's public key (for verifying signatures)"
+							disabled={decryptBusy}
+						/>
+
+						<div className="actions">
+							<button type="submit" disabled={decryptBusy}>{decryptBusy ? "Decrypting..." : "Decrypt"}</button>
+							<button type="button" className="secondary" onClick={resetDecryptForm} disabled={decryptBusy}>
+								Reset
+							</button>
+						</div>
+
+						{decryptBusy && (
+							<div className="progress-row" role="status" aria-live="polite">
+								<div className="progress-bar">
+									<div className="progress-fill" />
+								</div>
+								<span className="muted">Decrypting payload...</span>
+							</div>
+						)}
+					</form>
+					{decryptStatus && <div className="status success">{decryptStatus}</div>}
+					{decryptError && <div className="status error">{decryptError}</div>}
+				</section>
 
 				{decryptedResult && (
 					<section className="card">
 						<h3>Decryption result</h3>
-						{decryptedResult.metadata && renderDecryptedMetadata(decryptedResult.metadata)}
-						{decryptedResult.type === "text" ? (
-							<pre>{decryptedResult.text}</pre>
-						) : (
-							<>
-								<p className="hint">Ready to restore {decryptedResult.fileName} ({decryptedResult.mimeType}).</p>
-								<div className="result-actions">
-									<button type="button" onClick={handleDownloadDecryptedFile}>Download original file</button>
-								</div>
-							</>
+						{renderDecryptedInfo(decryptedResult)}
+
+						{decryptedResult.files.length > 0 && (
+							<div className="file-list">
+								<h4>Extracted files</h4>
+								{decryptedResult.files.map((f, i) => (
+									<div key={i} className="file-info">
+										<div>
+											<strong>{f.name}</strong>
+											<p className="muted">{formatBytes(f.data.length)}</p>
+										</div>
+										<button type="button" className="secondary button-inline" onClick={() => handleDownloadDecryptedFile(f.name, f.data)}>
+											Download
+										</button>
+									</div>
+								))}
+							</div>
 						)}
 					</section>
 				)}
-			</section>
+			</>
 		);
 	}
 
@@ -1582,8 +1620,8 @@ function App() {
 			: tab === "address-book"
 			? "Keep recipients' public keys organized so you can encrypt to the right person every time."
 			: tab === "encrypt"
-			? "Use hybrid RSA-OAEP + AES-GCM: choose a contact, encrypt locally, and share only ciphertext."
-			: "Paste ciphertext and KDF metadata, derive your AES key from your passphrase, and decrypt without leaving the browser.";
+			? "YAS2 Opsec encryption: password-based (Argon2id/PBKDF2) or public-key (Curve448/RSA-2048) with AES-GCM."
+			: "Decrypt YAS2 Opsec ciphertext locally — paste Base64 or upload a .bin file.";
 
 	return (
 		<div className="page">
