@@ -164,6 +164,8 @@ function App() {
 	const [decryptPassword, setDecryptPassword] = useState("");
 	const [decryptPrivateKeyInput, setDecryptPrivateKeyInput] = useState("");
 	const [decryptPeerPublicKey, setDecryptPeerPublicKey] = useState("");
+	const [decryptPeerKeySource, setDecryptPeerKeySource] = useState<"contact" | "manual">("contact");
+	const [decryptSelectedContactId, setDecryptSelectedContactId] = useState("");
 	const [decryptDetected, setDecryptDetected] = useState<{ mode: AuthMode; algo: string; msg: string } | null>(null);
 	const [decryptBusy, setDecryptBusy] = useState(false);
 	const [decryptStatus, setDecryptStatus] = useState<string | null>(null);
@@ -562,6 +564,16 @@ function App() {
 		setIsDecryptFileDragActive(false);
 	}
 
+	async function tryAutoDetect(data: Uint8Array) {
+		try {
+			const info = detectAuthMode(data);
+			setDecryptDetected(info);
+			setDecryptError(null);
+		} catch {
+			setDecryptDetected(null);
+		}
+	}
+
 	function handleDecryptFileDrop(event: React.DragEvent<HTMLDivElement>) {
 		event.preventDefault();
 		setIsDecryptFileDragActive(false);
@@ -573,6 +585,7 @@ function App() {
 			setDecryptStatus(null);
 			setDecryptError(null);
 			setDecryptedResult(null);
+			droppedFile.arrayBuffer().then((buf) => tryAutoDetect(new Uint8Array(buf)));
 		}
 	}
 
@@ -583,6 +596,8 @@ function App() {
 		setDecryptPassword("");
 		setDecryptPrivateKeyInput("");
 		setDecryptPeerPublicKey("");
+		setDecryptPeerKeySource("contact");
+		setDecryptSelectedContactId("");
 		setDecryptDetected(null);
 		setDecryptStatus(null);
 		setDecryptError(null);
@@ -598,6 +613,11 @@ function App() {
 		setDecryptedResult(null);
 		setIsDecryptFileDragActive(false);
 		event.target.value = "";
+		if (file) {
+			file.arrayBuffer().then((buf) => tryAutoDetect(new Uint8Array(buf)));
+		} else {
+			setDecryptDetected(null);
+		}
 	}
 
 	async function resolvePrivateKeyB64(): Promise<string> {
@@ -736,8 +756,8 @@ function App() {
 			setDecryptStatus("Loading data...");
 			const dataU8 = await loadOpsecData();
 
-			// Detect auth mode
-			const info = detectAuthMode(dataU8);
+			// Use already-detected mode, or detect now
+			const info = decryptDetected ?? detectAuthMode(dataU8);
 			setDecryptDetected(info);
 
 			setDecryptStatus("Decrypting...");
@@ -1202,13 +1222,13 @@ function App() {
 										<option value="ecc1">Curve448 (X448 + Ed448)</option>
 										<option value="rsa1">RSA-2048 (OAEP + PKCS1v1.5)</option>
 									</select>
-									<label className="label">
+									<label className="checkbox-label">
 										<input
 											type="checkbox"
 											checked={encryptSignWithKey}
 											onChange={(e) => setEncryptSignWithKey(e.target.checked)}
-										/>{" "}
-										Sign with my private key
+										/>
+										<span>Sign with my private key</span>
 									</label>
 								</>
 							)}
@@ -1466,12 +1486,21 @@ function App() {
 							placeholder="Paste Base64-encoded ciphertext..."
 							value={decryptPayloadInput}
 							onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-								setDecryptPayloadInput(e.target.value);
+								const val = e.target.value;
+								setDecryptPayloadInput(val);
 								setDecryptPayloadFile(null);
 								setDecryptStatus(null);
 								setDecryptError(null);
 								setDecryptedResult(null);
-								setDecryptDetected(null);
+								if (val.trim()) {
+									try {
+										tryAutoDetect(base64ToU8(val.trim()));
+									} catch {
+										setDecryptDetected(null);
+									}
+								} else {
+									setDecryptDetected(null);
+								}
 							}}
 							disabled={decryptBusy}
 						/>
@@ -1530,67 +1559,123 @@ function App() {
 						{/* Detected mode info */}
 						{decryptDetected && (
 							<div className="status info">
-								Detected mode: <strong>{decryptDetected.mode}</strong>
-								{decryptDetected.msg && <> — Public message: {decryptDetected.msg}</>}
+								Detected mode: <strong>{decryptDetected.mode === "password" ? "🔑 Password" : "🔐 Public Key"}</strong>
+								{decryptDetected.msg && (
+									<div className="detected-message">
+										<span className="detected-message-label">Public message:</span>
+										<pre className="detected-message-body">{decryptDetected.msg}</pre>
+									</div>
+								)}
 							</div>
 						)}
 
-						{/* Password field (for password-mode decryption) */}
-						<label className="label" htmlFor="decrypt-password">Password (for password-mode)</label>
-						<input
-							id="decrypt-password"
-							type="password"
-							value={decryptPassword}
-							onChange={(e) => { setDecryptPassword(e.target.value); setDecryptError(null); }}
-							placeholder="Enter the encryption password"
-							disabled={decryptBusy}
-						/>
+						{/* === PASSWORD MODE === */}
+						{(!decryptDetected || decryptDetected.mode === "password") && (
+							<>
+								{decryptDetected?.mode === "password" && (
+									<>
+										<label className="label" htmlFor="decrypt-password">Password</label>
+										<input
+											id="decrypt-password"
+											type="password"
+											value={decryptPassword}
+											onChange={(e) => { setDecryptPassword(e.target.value); setDecryptError(null); }}
+											placeholder="Enter the encryption password"
+											disabled={decryptBusy}
+											autoFocus
+										/>
+									</>
+								)}
+							</>
+						)}
 
-						<div>
-							{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable && (
+						{/* === PUBLIC KEY MODE === */}
+						{decryptDetected?.mode === "publickey" && (
+							<>
+								{/* WebAuthn or private key */}
+								{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable && (
+									<div>
+										<label className="label">Unlock stored key with security key</label>
+										<button
+											type="button"
+											className="secondary full-width"
+											onClick={handleWebAuthnAuthenticate}
+											disabled={decryptBusy || webauthnAuthBusy}
+										>
+											{webauthnAuthBusy ? "Verifying..." : "🔐 Authenticate with Security Key"}
+										</button>
+										{decryptionToken && (
+											<p className="hint success-text">✓ Security key verified</p>
+										)}
+									</div>
+								)}
+
 								<div>
-									<label className="label">Unlock stored key with security key</label>
+									<label className="label" htmlFor="decrypt-private-key">Private key (Base64)</label>
+									<textarea
+										id="decrypt-private-key"
+										value={decryptPrivateKeyInput}
+										onChange={(e) => {
+											setDecryptPrivateKeyInput(e.target.value);
+											setDecryptStatus(null);
+											setDecryptError(null);
+										}}
+										placeholder="Paste Base64-encoded private key (overrides stored key)"
+										disabled={decryptBusy}
+									/>
+								</div>
+
+								{/* Peer public key: contact selection or manual */}
+								<label className="label">Sender's public key (for signature verification)</label>
+								<div className="tab-row compact">
 									<button
 										type="button"
-										className="secondary full-width"
-										onClick={handleWebAuthnAuthenticate}
-										disabled={decryptBusy || webauthnAuthBusy}
+										className={decryptPeerKeySource === "contact" ? "tab-btn active" : "tab-btn"}
+										onClick={() => setDecryptPeerKeySource("contact")}
 									>
-										{webauthnAuthBusy ? "Verifying..." : "🔐 Authenticate with Security Key"}
+										From contacts
 									</button>
-									{decryptionToken && (
-										<p className="hint success-text">✓ Security key verified</p>
-									)}
+									<button
+										type="button"
+										className={decryptPeerKeySource === "manual" ? "tab-btn active" : "tab-btn"}
+										onClick={() => setDecryptPeerKeySource("manual")}
+									>
+										Manual input
+									</button>
 								</div>
-							)}
-						</div>
 
-						<div className="grid">
-							<div>
-								<label className="label" htmlFor="decrypt-private-key">Or paste a private key (Base64)</label>
-								<textarea
-									id="decrypt-private-key"
-									value={decryptPrivateKeyInput}
-									onChange={(e) => {
-										setDecryptPrivateKeyInput(e.target.value);
-										setDecryptStatus(null);
-										setDecryptError(null);
-									}}
-									placeholder="Base64-encoded private key"
-									disabled={decryptBusy}
-								/>
-								<p className="hint">If provided, this overrides stored keys and passphrase unlocking.</p>
-							</div>
-						</div>
-
-						<label className="label" htmlFor="decrypt-peer-pubkey">Peer public key (optional, for signature verification)</label>
-						<textarea
-							id="decrypt-peer-pubkey"
-							value={decryptPeerPublicKey}
-							onChange={(e) => setDecryptPeerPublicKey(e.target.value)}
-							placeholder="Base64-encoded sender's public key (for verifying signatures)"
-							disabled={decryptBusy}
-						/>
+								{decryptPeerKeySource === "contact" ? (
+									<select
+										value={decryptSelectedContactId}
+										onChange={(e) => {
+											const id = e.target.value;
+											setDecryptSelectedContactId(id);
+											const contact = contacts.find((c) => c.id === id);
+											setDecryptPeerPublicKey(contact?.publicKey ?? "");
+										}}
+										disabled={decryptBusy || contacts.length === 0}
+									>
+										<option value="">{contacts.length === 0 ? "No contacts saved" : "Select a contact..."}</option>
+										{contacts.map((c) => (
+											<option key={c.id} value={c.id}>
+												{c.contactUsername}{c.notes ? ` — ${c.notes}` : ""}
+											</option>
+										))}
+									</select>
+								) : (
+									<textarea
+										id="decrypt-peer-pubkey"
+										value={decryptPeerPublicKey}
+										onChange={(e) => {
+											setDecryptPeerPublicKey(e.target.value);
+											setDecryptSelectedContactId("");
+										}}
+										placeholder="Paste sender's Base64-encoded public key"
+										disabled={decryptBusy}
+									/>
+								)}
+							</>
+						)}
 
 						<div className="actions">
 							<button type="submit" disabled={decryptBusy}>{decryptBusy ? "Decrypting..." : "Decrypt"}</button>
