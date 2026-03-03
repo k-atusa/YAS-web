@@ -229,3 +229,20 @@ export async function removeWebAuthnCredential(token: string, credentialId: stri
   }
 }
 
+export async function decryptStoredPrivateKey(username: string, token: string): Promise<{ privateKey: string }> {
+  const response = await fetch(`${API_BASE}/accounts/decrypt`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ username }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "Failed to decrypt private key");
+  }
+
+  return response.json();
+}

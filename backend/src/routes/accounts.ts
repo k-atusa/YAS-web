@@ -1,5 +1,6 @@
 import { Router, Response } from "express";
 import { z } from "zod";
+import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "crypto";
 import { AccountModel } from "../models/Account";
 import type { AccountPayload } from "../types/crypto";
 import { requireAuth, AuthenticatedRequest } from "../middleware/requireAuth";
@@ -152,6 +153,96 @@ router.get("/:id", async (req, res) => {
 	} catch (error) {
 		console.error("Lookup failed", error);
 		return res.status(500).json({ message: "Failed to fetch account" });
+	}
+});
+
+/**
+ * POST /accounts/decrypt
+ * Decrypt a stored private key using WebAuthn decryption token
+ * Requires authentication (WebAuthn verified)
+ */
+router.post("/decrypt", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+	console.log("[accounts/decrypt] Request received with user:", req.user);
+
+	const schema = z.object({
+		username: z.string().min(1),
+	});
+
+	const parsed = schema.safeParse(req.body);
+	if (!parsed.success) {
+		console.error("[accounts/decrypt] Invalid payload:", parsed.error);
+		return res.status(400).json({ message: "Invalid payload" });
+	}
+
+	try {
+		const userId = req.user?.sub;
+		if (!userId) {
+			return res.status(401).json({ message: "Unauthorized" });
+		}
+
+		const { username } = parsed.data;
+
+		// Find account
+		const account = await AccountModel.findOne({ username });
+		if (!account) {
+			return res.status(404).json({ message: "Account not found" });
+		}
+
+		// Decrypt private key using username as passphrase
+		// This uses the same deterministic KDF as frontend
+		if (!account.kdf || account.kdf.algorithm !== "PBKDF2") {
+			return res.status(400).json({ message: "Only PBKDF2 encryption is supported" });
+		}
+
+		try {
+			const salt = Buffer.from(account.kdf.salt, "base64");
+			const iterations = account.kdf.iterations ?? 310000;
+			const keyLength = account.kdf.keyLength ?? 32;
+			// Frontend stores hash as "SHA-256", Node.js needs "sha256"
+			const rawHash = account.kdf.hash ?? "SHA-256";
+			const hash = rawHash.toLowerCase().replace("-", "");
+
+			// Derive key using PBKDF2 (same as frontend deriveStorageKey)
+			const aesKey = pbkdf2Sync(Buffer.from(username, "utf-8"), salt, iterations, keyLength, hash);
+
+			// Decrypt AES-GCM
+			const iv = Buffer.from(account.encryptedPrivateKey.iv, "base64");
+			const rawCipherText = Buffer.from(account.encryptedPrivateKey.cipherText, "base64");
+
+			// Web Crypto AES-GCM appends the 16-byte auth tag to the ciphertext
+			// We need to split them for Node.js crypto
+			const AUTH_TAG_LENGTH = 16;
+			let cipherText: Buffer;
+			let authTag: Buffer;
+
+			if (account.encryptedPrivateKey.authTag) {
+				// Auth tag stored separately
+				cipherText = rawCipherText;
+				authTag = Buffer.from(account.encryptedPrivateKey.authTag, "base64");
+			} else {
+				// Auth tag appended to ciphertext (Web Crypto default)
+				cipherText = rawCipherText.subarray(0, rawCipherText.length - AUTH_TAG_LENGTH);
+				authTag = rawCipherText.subarray(rawCipherText.length - AUTH_TAG_LENGTH);
+			}
+
+			const decipher = createDecipheriv("aes-256-gcm", aesKey, iv);
+			decipher.setAuthTag(authTag);
+
+			const decrypted = Buffer.concat([
+				decipher.update(cipherText),
+				decipher.final(),
+			]);
+
+			const privateKeyB64 = decrypted.toString("utf-8");
+
+			return res.json({ privateKey: privateKeyB64 });
+		} catch (decryptError) {
+			console.error("Decryption failed:", decryptError);
+			return res.status(400).json({ message: "Decryption failed - invalid credentials or corrupted data" });
+		}
+	} catch (error) {
+		console.error("Decrypt route failed", error);
+		return res.status(500).json({ message: "Failed to decrypt private key" });
 	}
 });
 

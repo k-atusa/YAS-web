@@ -14,6 +14,7 @@ import {
 	verifyWebAuthnAuthentication,
 	listWebAuthnCredentials,
 	removeWebAuthnCredential,
+	decryptStoredPrivateKey,
 } from "./api";
 import {
 	buildAccountPayload,
@@ -608,10 +609,57 @@ function App() {
 			if (!decryptionToken) {
 				throw new Error("Use WebAuthn to unlock your stored private key");
 			}
-			// TODO: Implement server-side decryption with WebAuthn token
-			throw new Error("Server-side key decryption not yet implemented");
+			// Decrypt using server-side decryption with WebAuthn token
+			console.log("[resolvePrivateKeyB64] Using decryption token:", decryptionToken?.substring(0, 50) + "...");
+			const result = await decryptStoredPrivateKey(storedAccount.username, decryptionToken);
+			return result.privateKey;
 		}
 		throw new Error("No private key available. Paste one or use WebAuthn.");
+	}
+
+	async function startWebAuthnRegistration() {
+		if (!authToken) {
+			setError("Must be logged in to register WebAuthn");
+			return;
+		}
+
+		try {
+			// Get registration options from server
+			const optionsResp = await getWebAuthnRegisterOptions(authToken);
+			const options = optionsResp.options;
+
+			// Create credential with WebAuthn
+			setStatus("Please interact with your security key...");
+			const registration = await registerWebAuthnCredential({
+				challenge: options.challenge,
+				rp: options.rp,
+				user: options.user,
+				pubKeyCredParams: options.pubKeyCredParams,
+				timeout: options.timeout,
+				attestation: options.attestation,
+				authenticatorSelection: options.authenticatorSelection,
+			});
+
+			// Verify credential on server
+			setStatus("Verifying WebAuthn credential...");
+			await verifyWebAuthnRegistration(
+				authToken,
+				registration.credentialId,
+				registration.publicKey,
+				registration.counter,
+				registration.transports
+			);
+
+			setStatus("✅ WebAuthn credential registered successfully!");
+			setError(null);
+			setTimeout(() => setStatus(null), 3000);
+		} catch (err) {
+			const msg = (err as Error).message || "WebAuthn registration failed";
+			if (msg !== "WebAuthn registration cancelled") {
+				setError(`WebAuthn setup: ${msg}`);
+			}
+			setStatus(null);
+		}
 	}
 
 	async function handleWebAuthnAuthenticate() {
@@ -648,6 +696,7 @@ function App() {
 			const verifyResp = await verifyWebAuthnAuthentication(authToken, assertion.credentialId, assertion.counter);
 
 			// Store decryption token
+			console.log("[WebAuthn] Decryption token received:", verifyResp.token?.substring(0, 50) + "...");
 			setDecryptionToken(verifyResp.token);
 			setDecryptStatus(null);
 			setDecryptError(null);
@@ -867,6 +916,12 @@ function App() {
 			setShowKeySection(false);
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
+
+			// Auto-register WebAuthn if user is logged in
+			if (authToken && (await isWebAuthnAvailable())) {
+				setStatus("Setting up WebAuthn for secure access...");
+				setTimeout(() => startWebAuthnRegistration(), 500);
+			}
 		} catch (err) {
 			console.error(err);
 			setError((err as Error).message || "Upload failed");

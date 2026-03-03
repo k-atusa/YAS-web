@@ -22,6 +22,7 @@ function resolveSecret() {
 export function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header || !header.toLowerCase().startsWith("bearer ")) {
+    console.log("[requireAuth] Missing or invalid Authorization header");
     return res.status(401).json({ message: "Unauthorized" });
   }
 
@@ -30,9 +31,11 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
 
   try {
     const payload = jwt.verify(token, secret) as AuthPayload;
+    console.log("[requireAuth] Token verified successfully, sub:", payload.sub);
     req.user = payload;
     return next();
   } catch (error) {
+    console.error("[requireAuth] Token verification failed:", (error as Error).message);
     return res.status(401).json({ message: "Invalid token" });
   }
 }

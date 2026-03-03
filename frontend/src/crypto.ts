@@ -1267,7 +1267,20 @@ export async function registerWebAuthnCredential(options: {
   }
 
   const response = credential.response as AuthenticatorAttestationResponse;
-  const credentialId = arrayBufferToBase64(credential.id as unknown as ArrayBuffer);
+  
+  // Convert credential ID to base64 - handle both rawId and id
+  let credentialId = "";
+  if ("rawId" in credential && credential.rawId) {
+    credentialId = arrayBufferToBase64(credential.rawId as ArrayBuffer);
+  } else if (credential.id) {
+    // Fallback: convert id to Uint8Array first, then to base64
+    const idArray = new Uint8Array(credential.id as unknown as ArrayBuffer);
+    credentialId = arrayBufferToBase64(idArray as unknown as ArrayBuffer);
+  }
+
+  if (!credentialId) {
+    throw new Error("Failed to extract credential ID");
+  }
 
   // Extract public key from attestation object
   // Note: This is simplified; production code should use @simplewebauthn/browser
@@ -1277,7 +1290,10 @@ export async function registerWebAuthnCredential(options: {
   }
 
   const publicKey = arrayBufferToBase64(publicKeyBuffer as unknown as ArrayBuffer);
-  const counter = response.getTransports?.().length || 0;
+  
+  // Counter is always 0 at registration time
+  // (actual counter increments are tracked during authentication)
+  const counter = 0;
   const transports = response.getTransports?.() || [];
 
   return {
@@ -1331,12 +1347,31 @@ export async function authenticateWithWebAuthn(options: {
 
   // Extract counter from authenticatorData
   // Authenticator data format: RP ID hash (32) + Flags (1) + Counter (4) + [...]
+  // Counter is big-endian (network byte order)
   const authData = new Uint8Array(response.authenticatorData);
-  const counterBuffer = authData.slice(33, 37);
-  const counter = new DataView(counterBuffer.buffer).getUint32(0, false);
+  const counterBytes = authData.slice(33, 37);
+  
+  // Manually convert big-endian bytes to uint32
+  const counter = (counterBytes[0] << 24) | (counterBytes[1] << 16) | (counterBytes[2] << 8) | counterBytes[3];
+  
+  console.log(`[WebAuthn] Counter extracted: ${counter} from bytes [${Array.from(counterBytes).join(', ')}]`);
+
+  // Convert credential ID to base64 - handle both rawId and id
+  let credentialId = "";
+  if ("rawId" in assertion && assertion.rawId) {
+    credentialId = arrayBufferToBase64(assertion.rawId as ArrayBuffer);
+  } else if (assertion.id) {
+    // Fallback: convert id to Uint8Array first, then to base64
+    const idArray = new Uint8Array(assertion.id as unknown as ArrayBuffer);
+    credentialId = arrayBufferToBase64(idArray as unknown as ArrayBuffer);
+  }
+
+  if (!credentialId) {
+    throw new Error("Failed to extract credential ID");
+  }
 
   return {
-    credentialId: arrayBufferToBase64(assertion.id as unknown as ArrayBuffer),
+    credentialId,
     clientDataJSON: arrayBufferToBase64(response.clientDataJSON as unknown as ArrayBuffer),
     authenticatorData: arrayBufferToBase64(response.authenticatorData as unknown as ArrayBuffer),
     signature: arrayBufferToBase64(response.signature as unknown as ArrayBuffer),

@@ -4,6 +4,7 @@
  */
 
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 
 /**
  * Generate a random challenge for WebAuthn
@@ -75,23 +76,29 @@ export function isValidBase64(str: string): boolean {
 }
 
 /**
- * Create a temporary token for key unwrapping after WebAuthn auth
+ * Create a temporary JWT token for key decryption after WebAuthn auth
  * This token allows the client to decrypt the private key
  */
 export function generateDecryptionToken(userId: string, expirySeconds = 300): { token: string; expiresAt: Date } {
   const expiresAt = new Date(Date.now() + expirySeconds * 1000);
-  const payload = JSON.stringify({ sub: userId, type: "decrypt", iat: Date.now(), exp: expiresAt.getTime() });
-  const token = Buffer.from(payload).toString("base64");
+
+  // Get JWT secret (same as requireAuth middleware)
+  const secret = process.env.JWT_SECRET || "dev-secret";
+
+  const payload = { sub: userId, type: "decrypt" };
+  const token = jwt.sign(payload, secret, { expiresIn: expirySeconds });
+
   return { token, expiresAt };
 }
 
 /**
- * Verify a decryption token
+ * Verify a decryption token (deprecated - use requireAuth middleware instead)
  */
 export function verifyDecryptionToken(token: string): { userId: string } | null {
   try {
-    const payload = JSON.parse(Buffer.from(token, "base64").toString("utf-8"));
-    if (payload.type !== "decrypt" || payload.exp < Date.now()) {
+    const secret = process.env.JWT_SECRET || "dev-secret";
+    const payload = jwt.verify(token, secret) as any;
+    if (payload.type !== "decrypt") {
       return null;
     }
     return { userId: payload.sub };

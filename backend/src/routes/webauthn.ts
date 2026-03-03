@@ -1,7 +1,7 @@
-import { Router, Request, Response } from "express";
+import { Router, Response } from "express";
 import { z } from "zod";
 import { UserModel } from "../models/User";
-import { requireAuth } from "../middleware/requireAuth";
+import { requireAuth, AuthenticatedRequest } from "../middleware/requireAuth";
 import {
   generateChallenge,
   generateRegistrationOptions,
@@ -17,9 +17,12 @@ const router = Router();
  * Get options for WebAuthn credential registration
  * Requires authentication
  */
-router.post("/register-options", requireAuth, async (req: Request, res: Response) => {
+router.post("/register-options", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const user = await UserModel.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -44,33 +47,41 @@ router.post("/register-options", requireAuth, async (req: Request, res: Response
  * Verify WebAuthn credential registration
  * Requires authentication
  */
-router.post("/register-verify", requireAuth, async (req: Request, res: Response) => {
+router.post("/register-verify", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const schema = z.object({
-    credentialId: z.string(),
-    publicKey: z.string(),
+    credentialId: z.string().min(1, "credentialId cannot be empty"),
+    publicKey: z.string().min(1, "publicKey cannot be empty"),
     counter: z.number().int().nonnegative(),
     transports: z.array(z.string()).optional(),
   });
 
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ message: "Invalid payload" });
+    return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid payload" });
   }
 
   try {
-    const userId = (req as any).userId;
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const user = await UserModel.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const { credentialId, publicKey, counter, transports } = parsed.data;
+
     // Verify credential is valid base64
-    if (!isValidBase64(parsed.data.credentialId) || !isValidBase64(parsed.data.publicKey)) {
-      return res.status(400).json({ message: "Invalid credential format" });
+    if (!isValidBase64(credentialId)) {
+      return res.status(400).json({ message: "credentialId must be valid base64" });
+    }
+    if (!isValidBase64(publicKey)) {
+      return res.status(400).json({ message: "publicKey must be valid base64" });
     }
 
     // Check if credential already registered
-    if (user.webauthnCredentials?.some((c) => c.id === parsed.data.credentialId)) {
+    if (user.webauthnCredentials?.some((c) => c.id === credentialId)) {
       return res.status(409).json({ message: "Credential already registered" });
     }
 
@@ -78,11 +89,14 @@ router.post("/register-verify", requireAuth, async (req: Request, res: Response)
     if (!user.webauthnCredentials) {
       user.webauthnCredentials = [];
     }
+
+    console.log(`[WebAuthn] Registering credential with initial counter: ${counter}`);
+
     user.webauthnCredentials.push({
-      id: parsed.data.credentialId,
-      publicKey: parsed.data.publicKey,
-      counter: parsed.data.counter,
-      transports: parsed.data.transports,
+      id: credentialId,
+      publicKey,
+      counter,
+      transports,
     });
 
     // Clear challenge
@@ -101,9 +115,12 @@ router.post("/register-verify", requireAuth, async (req: Request, res: Response)
  * Get options for WebAuthn authentication
  * Requires authentication (user already logged in)
  */
-router.post("/authenticate-options", requireAuth, async (req: Request, res: Response) => {
+router.post("/authenticate-options", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const user = await UserModel.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -132,7 +149,7 @@ router.post("/authenticate-options", requireAuth, async (req: Request, res: Resp
  * Verify WebAuthn authentication and return decryption token
  * Requires authentication (user already logged in)
  */
-router.post("/authenticate-verify", requireAuth, async (req: Request, res: Response) => {
+router.post("/authenticate-verify", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const schema = z.object({
     credentialId: z.string(),
     counter: z.number().int().nonnegative(),
@@ -144,7 +161,10 @@ router.post("/authenticate-verify", requireAuth, async (req: Request, res: Respo
   }
 
   try {
-    const userId = (req as any).userId;
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const user = await UserModel.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -156,12 +176,20 @@ router.post("/authenticate-verify", requireAuth, async (req: Request, res: Respo
       return res.status(400).json({ message: "Credential not found" });
     }
 
+    console.log(
+      `Counter verification: stored=${credential.counter}, received=${parsed.data.counter}, check=${
+        credential.counter > 0 && parsed.data.counter <= credential.counter
+      }`
+    );
+
     // Verify counter is increasing (prevent cloning)
-    if (parsed.data.counter <= credential.counter) {
+    // On first use, credential.counter is 0, so any positive counter is valid
+    // For subsequent uses, new counter must be strictly greater than previous
+    if (credential.counter > 0 && parsed.data.counter <= credential.counter) {
       return res.status(400).json({ message: "Invalid counter (possible cloned authenticator)" });
     }
 
-    // Update counter
+    // Update counter to the new value
     credential.counter = parsed.data.counter;
 
     // Clear challenge
@@ -183,9 +211,12 @@ router.post("/authenticate-verify", requireAuth, async (req: Request, res: Respo
  * List user's registered WebAuthn credentials
  * Requires authentication
  */
-router.get("/credentials", requireAuth, async (req: Request, res: Response) => {
+router.get("/credentials", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const user = await UserModel.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -209,9 +240,12 @@ router.get("/credentials", requireAuth, async (req: Request, res: Response) => {
  * Remove a registered WebAuthn credential
  * Requires authentication
  */
-router.delete("/credentials/:credentialId", requireAuth, async (req: Request, res: Response) => {
+router.delete("/credentials/:credentialId", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const userId = (req as any).userId;
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     const { credentialId } = req.params;
 
     const user = await UserModel.findById(userId);
