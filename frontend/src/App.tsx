@@ -175,6 +175,7 @@ function App() {
 	const [isDecryptFileDragActive, setIsDecryptFileDragActive] = useState(false);
 	const [decryptPassword, setDecryptPassword] = useState("");
 	const [decryptPrivateKeyInput, setDecryptPrivateKeyInput] = useState("");
+	const [decryptPrivateKeySource, setDecryptPrivateKeySource] = useState<"security" | "manual">("security");
 	const [decryptPeerPublicKey, setDecryptPeerPublicKey] = useState("");
 	const [decryptPeerKeySource, setDecryptPeerKeySource] = useState<"contact" | "manual">("contact");
 	const [decryptSelectedContactId, setDecryptSelectedContactId] = useState("");
@@ -433,6 +434,7 @@ function App() {
 		setIsDecryptFileDragActive(false);
 		setDecryptPassword("");
 		setDecryptPrivateKeyInput("");
+		setDecryptPrivateKeySource("security");
 		setDecryptPeerPublicKey("");
 		setDecryptDetected(null);
 		setDecryptBusy(false);
@@ -771,6 +773,7 @@ function App() {
 		setIsDecryptFileDragActive(false);
 		setDecryptPassword("");
 		setDecryptPrivateKeyInput("");
+		setDecryptPrivateKeySource("security");
 		setDecryptPeerPublicKey("");
 		setDecryptPeerKeySource("contact");
 		setDecryptSelectedContactId("");
@@ -833,7 +836,7 @@ function App() {
 				let myPrivateKey: string | undefined;
 				if (encryptSignWithKey && privateKeyPem) myPrivateKey = privateKeyPem;
 				result = await encryptOpsec({
-					mode: "publickey", asymAlgo: encryptAsymAlgo, peerPublicKey: recipient.publicKey,
+					mode: "publickey", asymAlgo: encryptAsymAlgo!, peerPublicKey: recipient.publicKey,
 					myPrivateKey, encAlgo: encryptEncAlgo, smsg: encryptSmsg || undefined, msg: encryptMsg || undefined, files,
 				});
 			}
@@ -1421,12 +1424,30 @@ function App() {
 			if (decryptedResult.msg) rows.push({ label: "공개 메시지", value: decryptedResult.msg });
 			if (decryptedResult.smsg) rows.push({ label: "비밀 메시지", value: decryptedResult.smsg });
 			if (decryptedResult.files.length > 0) rows.push({ label: "파일", value: `${decryptedResult.files.length}개` });
-			if (decryptedResult.verified !== undefined) rows.push({ label: "서명 검증", value: decryptedResult.verified ? "유효 ✓" : "유효하지 않음 ✗" });
 
 			return (
 				<>
 					<h2 className="section-title">복호화 결과</h2>
+					<br />
 					{decryptStatus && <div className="status-bar success">{decryptStatus}</div>}
+					
+					{/* Signature verification result */}
+					{decryptedResult.verified === true && (
+						<div className="status-bar success" style={{ marginBottom: 12 }}>
+							✓ 서명 검증 성공 - 발신자의 신원이 확인되었습니다
+						</div>
+					)}
+					{decryptedResult.verified === false && decryptedResult.verifyError && (
+						<div className="status-bar error" style={{ marginBottom: 12 }}>
+							✗ 서명 검증 실패: {decryptedResult.verifyError}
+						</div>
+					)}
+					{decryptedResult.verifyError && decryptedResult.verified !== false && (
+						<div className="status-bar error" style={{ marginBottom: 12 }}>
+							⚠ {decryptedResult.verifyError}
+						</div>
+					)}
+
 					<div className="card">
 						{rows.map((r) => (
 							<div key={r.label} style={{ marginBottom: 14 }}>
@@ -1434,6 +1455,16 @@ function App() {
 								<p style={{ whiteSpace: "pre-wrap", marginTop: 4, fontSize: 15, fontWeight: 500 }}>{r.value}</p>
 							</div>
 						))}
+						
+						{/* Show signature status in result */}
+						<div style={{ marginBottom: 0, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+							<span className="result-label">서명 상태</span>
+							<p style={{ whiteSpace: "pre-wrap", marginTop: 4, fontSize: 15, fontWeight: 500 }}>
+								{decryptedResult.verified === true && "✓ 유효 (발신자 확인됨)"}
+								{decryptedResult.verified === false && "✗ 유효하지 않음 (경고)"}
+								{decryptedResult.verified === undefined && "- 공개키 미제공"}
+							</p>
+						</div>
 					</div>
 
 					{decryptedResult.files.length > 0 && (
@@ -1460,7 +1491,7 @@ function App() {
 
 		return (
 			<div className="view-animate" key={`dec-step-${decryptStep}`}>
-				{renderStepDots(2, decryptStep)}
+				{decryptDetected?.mode === "publickey" ? renderStepDots(3, decryptStep) : renderStepDots(2, decryptStep)}
 
 				{decryptStep === 1 && (
 					<>
@@ -1524,7 +1555,7 @@ function App() {
 				{decryptStep === 2 && (
 					<>
 						<h2 className="section-title">복호화 설정</h2>
-
+						<br />
 						{decryptDetected && (
 							<div className="card mb-3">
 								<div className="result-grid">
@@ -1561,57 +1592,47 @@ function App() {
 							</div>
 						)}
 
-						{/* Public key mode */}
+						{/* Public key mode - Private key input */}
 						{decryptDetected?.mode === "publickey" && (
 							<>
-								{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable && (
-									<div className="form-group">
-										<label className="form-label">저장된 키 잠금 해제</label>
-										<button className="btn btn-secondary btn-full" onClick={handleWebAuthnAuthenticate} disabled={decryptBusy || webauthnAuthBusy}>
-											{webauthnAuthBusy ? "인증 중..." : "🔐 보안 키로 인증"}
-										</button>
-										{decryptionToken && <p className="text-hint mt-1" style={{ color: "var(--success)" }}>✓ 보안 키 인증 완료</p>}
-									</div>
-								)}
-
 								<div className="form-group">
-									<label className="form-label">개인키 (Base64)</label>
-									<textarea
-										value={decryptPrivateKeyInput}
-										onChange={(e) => { setDecryptPrivateKeyInput(e.target.value); setDecryptError(null); }}
-										placeholder="Base64로 인코딩된 개인키 (저장된 키 사용 시 생략 가능)"
-										disabled={decryptBusy}
-									/>
-								</div>
-
-								<div className="form-group">
-									<label className="form-label">발신자의 공개키 (서명 검증용, 선택)</label>
+									<label className="form-label">개인키</label>
 									<div className="tab-toggle mb-2">
-										<button className={decryptPeerKeySource === "contact" ? "active" : ""} onClick={() => setDecryptPeerKeySource("contact")}>연락처에서</button>
-										<button className={decryptPeerKeySource === "manual" ? "active" : ""} onClick={() => setDecryptPeerKeySource("manual")}>직접 입력</button>
-									</div>
-									{decryptPeerKeySource === "contact" ? (
-										<select
-											value={decryptSelectedContactId}
-											onChange={(e) => {
-												const id = e.target.value;
-												setDecryptSelectedContactId(id);
-												const contact = contacts.find((c) => c.id === id);
-												setDecryptPeerPublicKey(contact?.publicKey ?? "");
+										<button 
+											className={decryptPrivateKeySource === "security" ? "active" : ""} 
+											onClick={() => {
+												if (storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable) {
+													setDecryptPrivateKeySource("security");
+												} else {
+													setDecryptPrivateKeySource("manual");
+												}
 											}}
-											disabled={decryptBusy || contacts.length === 0}
 										>
-											<option value="">{contacts.length === 0 ? "저장된 연락처 없음" : "연락처 선택..."}</option>
-											{contacts.map((c) => (
-												<option key={c.id} value={c.id}>{c.contactUsername}{c.notes ? ` — ${c.notes}` : ""}</option>
-											))}
-										</select>
+											보안 키로 인증
+										</button>
+										<button className={decryptPrivateKeySource === "manual" ? "active" : ""} onClick={() => setDecryptPrivateKeySource("manual")}>직접 입력</button>
+									</div>
+									
+									{decryptPrivateKeySource === "security" ? (
+										<>
+											{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable ? (
+												<>
+													<button className="btn btn-secondary btn-full" onClick={handleWebAuthnAuthenticate} disabled={decryptBusy || webauthnAuthBusy}>
+														{webauthnAuthBusy ? "인증 중..." : "🔐 보안 키로 인증"}
+													</button>
+													{decryptionToken && <p className="text-hint mt-3" style={{ color: "var(--success)" }}>✓ 보안 키 인증 완료</p>}
+												</>
+											) : (
+												<p className="text-hint">저장된 키가 없거나 WebAuthn이 불가능합니다. 직접 입력을 사용하세요.</p>
+											)}
+										</>
 									) : (
 										<textarea
-											value={decryptPeerPublicKey}
-											onChange={(e) => { setDecryptPeerPublicKey(e.target.value); setDecryptSelectedContactId(""); }}
-											placeholder="Base64로 인코딩된 공개키"
+											value={decryptPrivateKeyInput}
+											onChange={(e) => { setDecryptPrivateKeyInput(e.target.value); setDecryptError(null); }}
+											placeholder="Base64로 인코딩된 개인키"
 											disabled={decryptBusy}
+											autoFocus
 										/>
 									)}
 								</div>
@@ -1624,7 +1645,64 @@ function App() {
 
 						<div className="btn-row">
 							<button className="btn btn-ghost" onClick={() => setDecryptStep(1)}>이전</button>
-							<button className="btn btn-primary" disabled={decryptBusy} onClick={handleDecryptSubmit}>
+							<button className="btn btn-primary" disabled={decryptBusy || (decryptDetected?.mode === "publickey" && decryptPrivateKeySource === "manual" && !decryptPrivateKeyInput.trim()) || (decryptDetected?.mode === "publickey" && decryptPrivateKeySource === "security" && !decryptionToken) || (decryptDetected?.mode === "password" && !decryptPassword)} onClick={() => {
+								if (decryptDetected?.mode === "publickey") {
+									setDecryptStep(3);
+								} else {
+									handleDecryptSubmit();
+								}
+							}}>
+								{decryptDetected?.mode === "publickey" ? "다음" : "복호화"}
+							</button>
+						</div>
+					</>
+				)}
+
+				{decryptStep === 3 && decryptDetected?.mode === "publickey" && (
+					<>
+						<h2 className="section-title">서명 검증</h2>
+						<p className="section-desc">발신자의 공개키를 입력하여 서명을 검증할 수 있습니다 (선택).</p>
+
+						<div className="form-group">
+							<label className="form-label">발신자의 공개키</label>
+							<div className="tab-toggle mb-2">
+								<button className={decryptPeerKeySource === "contact" ? "active" : ""} onClick={() => setDecryptPeerKeySource("contact")}>연락처에서</button>
+								<button className={decryptPeerKeySource === "manual" ? "active" : ""} onClick={() => setDecryptPeerKeySource("manual")}>직접 입력</button>
+							</div>
+							{decryptPeerKeySource === "contact" ? (
+								<select
+									value={decryptSelectedContactId}
+									onChange={(e) => {
+										const id = e.target.value;
+										setDecryptSelectedContactId(id);
+										const contact = contacts.find((c) => c.id === id);
+										setDecryptPeerPublicKey(contact?.publicKey ?? "");
+									}}
+									disabled={decryptBusy || contacts.length === 0}
+								>
+									<option value="">{contacts.length === 0 ? "저장된 연락처 없음" : "연락처 선택..."}</option>
+									{contacts.map((c) => (
+										<option key={c.id} value={c.id}>{c.contactUsername}{c.notes ? ` — ${c.notes}` : ""}</option>
+									))}
+								</select>
+							) : (
+								<textarea
+									value={decryptPeerPublicKey}
+									onChange={(e) => { setDecryptPeerPublicKey(e.target.value); setDecryptSelectedContactId(""); }}
+									placeholder="Base64로 인코딩된 공개키 (선택)"
+									disabled={decryptBusy}
+								/>
+							)}
+							<span className="form-hint">서명 검증이 필요하지 않으면 비워도 됩니다</span>
+						</div>
+
+						{decryptStatus && <div className="status-bar info">{decryptStatus}</div>}
+						{decryptError && <div className="status-bar error">{decryptError}</div>}
+						{decryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
+
+						<div className="btn-row">
+							<button className="btn btn-ghost" onClick={() => setDecryptStep(2)}>이전</button>
+							<button className="btn btn-primary" disabled={decryptBusy || (decryptPrivateKeySource === "manual" && !decryptPrivateKeyInput.trim()) || (decryptPrivateKeySource === "security" && !decryptionToken)} onClick={handleDecryptSubmit}>
 								{decryptBusy ? "복호화 중..." : "복호화"}
 							</button>
 						</div>

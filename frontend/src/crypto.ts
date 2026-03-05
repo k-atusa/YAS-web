@@ -862,7 +862,9 @@ class Opsec {
     if (this._headAlgo !== "rsa1" && this._headAlgo !== "ecc1")
       throw new Error(`Unsupported method: ${this._headAlgo}`);
     const am = new AsymMaster(this._headAlgo);
-    await am.loadkey(publicBytes, privateBytes);
+
+    // Load only private key for decryption first
+    await am.loadkey(null, privateBytes);
 
     let decHead: Uint8Array;
     if (this._headAlgo === "rsa1") {
@@ -874,8 +876,9 @@ class Opsec {
     }
     this._unwrapHead(decHead);
 
-    // Verify signature
+    // Load public key and verify signature separately
     if (publicBytes !== null && this._sign.length > 0) {
+      await am.loadkey(publicBytes, null);
       let s: Uint8Array = new Uint8Array(0);
       if (this.bodyKey.length > 0) s = this.bodyKey;
       else if (this.smsg !== "") s = strToU8(this.smsg);
@@ -920,6 +923,7 @@ export interface DecryptResult {
   smsg: string;
   files: { name: string; data: Uint8Array }[];
   verified?: boolean;
+  verifyError?: string;
 }
 
 // ==================== App-level Encrypt / Decrypt ====================
@@ -1045,11 +1049,29 @@ export async function decryptOpsecPub(
   ops.view(hdr);
   const myPri = base64ToU8(myPrivateKey);
   const peerPub = peerPublicKey ? base64ToU8(peerPublicKey) : null;
-  await ops.decpub(myPri, peerPub);
 
-  const hasSignature = ops._sign.length > 0;
-  const verified = peerPub && hasSignature ? true : undefined; // If we get here, verification passed (decpub throws on failure)
-  const result: DecryptResult = { msg: ops.msg, smsg: ops.smsg, files: [], verified };
+  // First: decrypt (private key only)
+  // Then: verify signature separately (peer public key)
+  let verified: boolean | undefined;
+  let verifyError: string | undefined;
+  try {
+    await ops.decpub(myPri, peerPub);
+    const hasSignature = ops._sign.length > 0;
+    verified = peerPub && hasSignature ? true : undefined;
+  } catch (err) {
+    // If decryption itself fails (no peer key case would also fail), re-throw
+    // If only verification fails, try again without peer key to get decrypted data
+    try {
+      await ops.decpub(myPri, null);
+      // Decryption succeeded without verification — verification was the problem
+      verified = false;
+      verifyError = (err as Error).message || "서명 검증에 실패했습니다";
+    } catch {
+      // Decryption itself failed — throw original error
+      throw err;
+    }
+  }
+  const result: DecryptResult = { msg: ops.msg, smsg: ops.smsg, files: [], verified, verifyError };
 
   if (ops.size >= 0) {
     const sm = new SymMaster(ops.bodyAlgo, ops.bodyKey);
