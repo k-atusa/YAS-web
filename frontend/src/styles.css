@@ -368,6 +368,69 @@ button {
 	font-size: 13px;
 	font-weight: 600;
 	color: var(--text-sub);
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.help-icon-wrapper {
+	display: inline-flex;
+	align-items: center;
+	position: relative;
+}
+
+.form-label svg.help-icon {
+	display: inline-block;
+	margin-left: 4px;
+	color: var(--text-sub);
+	cursor: help;
+	transition: color 0.15s;
+	flex-shrink: 0;
+}
+
+.form-label svg.help-icon:hover {
+	color: var(--text);
+}
+
+.tooltip {
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	margin-bottom: 8px;
+	background: var(--text);
+	color: var(--bg);
+	padding: 8px 12px;
+	border-radius: 6px;
+	font-size: 12px;
+	line-height: 1.4;
+	white-space: normal;
+	max-width: 280px;
+	min-width: 200px;
+	z-index: 1000;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	animation: tooltipIn 0.2s ease-out;
+}
+
+.tooltip::after {
+	content: '';
+	position: absolute;
+	top: 100%;
+	left: 8px;
+	width: 6px;
+	height: 6px;
+	background: var(--text);
+	transform: rotate(45deg);
+}
+
+@keyframes tooltipIn {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 .form-hint {

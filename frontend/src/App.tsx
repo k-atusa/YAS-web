@@ -196,8 +196,10 @@ function App() {
 	const navEncryptRef = useRef<HTMLButtonElement>(null);
 	const navDecryptRef = useRef<HTMLButtonElement>(null);
 	const [pressedTab, setPressedTab] = useState<Tab | null>(null);
+	/* Tooltip */
+	const [showUsernameTooltip, setShowUsernameTooltip] = useState(false);
 
-	/* ─── Effects ─── */
+	/* ─── Effects ──── */
 
 	useEffect(() => {
 		return () => {
@@ -1638,12 +1640,38 @@ function App() {
 						<h3 className="modal-title">{contactModalMode === "add" ? "연락처 추가" : "연락처 수정"}</h3>
 						<form onSubmit={handleContactSubmit}>
 							<div className="form-group">
-								<label className="form-label">사용자 이름</label>
+								<label className="form-label">
+									사용자 이름
+									<div className="help-icon-wrapper">
+										<svg
+											className="help-icon"
+											width="16"
+											height="16"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											strokeWidth="2"
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											onMouseEnter={() => setShowUsernameTooltip(true)}
+											onMouseLeave={() => setShowUsernameTooltip(false)}
+											onClick={() => setShowUsernameTooltip(!showUsernameTooltip)}
+										>
+											<circle cx="12" cy="12" r="10" />
+											<path d="M12 16v-4M12 8h.01" />
+										</svg>
+										{showUsernameTooltip && (
+											<div className="tooltip">
+												상대방의 실제 계정 아이디일 필요는 없으며, 내가 알아볼 수 있는 이름으로 설정하면 됩니다.
+											</div>
+										)}
+									</div>
+								</label>
 								<input
 									type="text"
 									value={contactForm.contactUsername}
 									onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
-									placeholder="상대방 아이디"
+									placeholder="이름"
 									required
 								/>
 							</div>
