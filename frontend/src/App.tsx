@@ -50,6 +50,18 @@ function truncateKey(key: string): string {
 	return `${key.slice(0, 6)}…${key.slice(-6)}`;
 }
 
+function detectPublicKeyAlgo(publicKeyB64: string): AsymAlgo {
+	try {
+		const u8 = base64ToU8(publicKeyB64);
+		// Curve448 public key is exactly 113 bytes
+		if (u8.length === 113) return "ecc1";
+		// RSA public key is typically 290+ bytes
+		return "rsa1";
+	} catch {
+		return "ecc1"; // Default to ecc1
+	}
+}
+
 /* ─── Icons ─── */
 
 function IconContacts({ active }: { active?: boolean }) {
@@ -142,7 +154,7 @@ function App() {
 	const [encryptAuthMode, setEncryptAuthMode] = useState<AuthMode>("password");
 	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("arg1");
 	const [encryptEncAlgo, setEncryptEncAlgo] = useState<EncAlgo>("gcm1");
-	const [encryptAsymAlgo, setEncryptAsymAlgo] = useState<AsymAlgo>("ecc1");
+	const [encryptAsymAlgo, setEncryptAsymAlgo] = useState<AsymAlgo | null>(null);
 	const [encryptPassword, setEncryptPassword] = useState("");
 	const [encryptRecipientId, setEncryptRecipientId] = useState<string>("");
 	const [encryptMsg, setEncryptMsg] = useState("");
@@ -198,6 +210,7 @@ function App() {
 	const [pressedTab, setPressedTab] = useState<Tab | null>(null);
 	/* Tooltip */
 	const [showUsernameTooltip, setShowUsernameTooltip] = useState(false);
+	const [showSigningTooltip, setShowSigningTooltip] = useState(false);
 
 	/* ─── Effects ──── */
 
@@ -667,7 +680,7 @@ function App() {
 		setEncryptError(null);
 		setEncryptKdfMethod("arg1");
 		setEncryptEncAlgo("gcm1");
-		setEncryptAsymAlgo("ecc1");
+		setEncryptAsymAlgo(null);
 		setEncryptRecipientId("");
 		setEncryptSignWithKey(false);
 	}
@@ -1093,10 +1106,16 @@ function App() {
 					</div>
 					<div className="form-group">
 						<label className="form-label">키 알고리즘</label>
-						<select value={keyAlgo} onChange={(e) => setKeyAlgo(e.target.value as AsymAlgo)}>
-							<option value="ecc1">Curve448 (추천)</option>
-							<option value="rsa1">RSA-2048</option>
-						</select>
+						<div className="option-cards">
+							<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
+								<span className="option-title">Curve448</span>
+								<span className="option-desc">높은 보안 강도 (추천)</span>
+							</button>
+							<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setKeyAlgo("rsa1")}>
+								<span className="option-title">RSA-2048</span>
+								<span className="option-desc">호환성 우선</span>
+							</button>
+						</div>
 					</div>
 					<div className="btn-row">
 						<button className="btn btn-secondary" onClick={handleGenerateKeys}>키 쌍 생성</button>
@@ -1162,7 +1181,9 @@ function App() {
 							</div>
 						</div>
 						<div className="btn-row">
-							<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>Base64 복사</button>
+							{encryptedBlob.length < 10240 && (
+								<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>Base64 복사</button>
+							)}
 							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>파일 다운로드</button>
 						</div>
 					</div>
@@ -1229,7 +1250,19 @@ function App() {
 						<p className="section-desc">암호화된 데이터를 받을 사람을 선택하세요.</p>
 						<div className="form-group">
 							<label className="form-label">수신자</label>
-							<select value={encryptRecipientId} onChange={(e) => setEncryptRecipientId(e.target.value)}>
+							<select value={encryptRecipientId} onChange={(e) => {
+								const value = e.target.value;
+								setEncryptRecipientId(value);
+								if (value) {
+									const selected = contacts.find((c) => c.id === value);
+									if (selected) {
+										const detectedAlgo = detectPublicKeyAlgo(selected.publicKey);
+										setEncryptAsymAlgo(detectedAlgo);
+									}
+								} else {
+									setEncryptAsymAlgo(null);
+								}
+							}}>
 								<option value="">연락처에서 선택...</option>
 								{contacts.map((c) => (
 									<option key={c.id} value={c.id}>{c.contactUsername}</option>
@@ -1240,19 +1273,54 @@ function App() {
 						<div className="form-group">
 							<label className="form-label">비대칭 알고리즘</label>
 							<div className="option-cards">
-								<button className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setEncryptAsymAlgo("ecc1")}>
+								<button
+									className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`}
+									disabled
+								>
 									<span className="option-title">Curve448</span>
 									<span className="option-desc">높은 보안 강도 (추천)</span>
+									{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
 								</button>
-								<button className={`option-card ${encryptAsymAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setEncryptAsymAlgo("rsa1")}>
+								<button
+									className={`option-card ${encryptAsymAlgo === "rsa1" ? "selected" : ""}`}
+									disabled
+								>
 									<span className="option-title">RSA-2048</span>
 									<span className="option-desc">호환성 우선</span>
+									{encryptAsymAlgo === "rsa1" && <span className="option-badge">자동 선택</span>}
 								</button>
 							</div>
+							<span className="form-hint">상대방의 공개키 형식에 따라 자동으로 선택됩니다</span>
 						</div>
 						<label className="checkbox-row">
 							<input type="checkbox" checked={encryptSignWithKey} onChange={(e) => setEncryptSignWithKey(e.target.checked)} />
-							<span className="checkbox-text">내 개인키로 서명하기</span>
+							<div className="checkbox-label-with-help">
+								<span className="checkbox-text">내 개인키로 서명하기</span>
+								<div className="help-icon-wrapper">
+									<svg
+										className="help-icon"
+										width="14"
+										height="14"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										strokeWidth="2"
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										onMouseEnter={() => setShowSigningTooltip(true)}
+										onMouseLeave={() => setShowSigningTooltip(false)}
+										onClick={() => setShowSigningTooltip(!showSigningTooltip)}
+									>
+										<circle cx="12" cy="12" r="10" />
+										<path d="M12 16v-4M12 8h.01" />
+									</svg>
+									{showSigningTooltip && (
+										<div className="tooltip">
+											내 개인키로 암호문에 서명하여 상대방은 이것이 진짜 나로부터 온 메시지임을 확인할 수 있어요.
+										</div>
+									)}
+								</div>
+							</div>
 						</label>
 						<div className="btn-row">
 							<button className="btn btn-ghost" onClick={() => setEncryptStep(1)}>이전</button>
