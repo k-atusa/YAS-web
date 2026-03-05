@@ -299,7 +299,7 @@ class AES1 {
       this._processed = data.length;
       return new Uint8Array(res);
     } catch {
-      throw new Error("Decryption failed (MAC check failed)");
+      throw new Error("복호화 실패 (데이터 손상 또는 잘못된 비밀번호)");
     }
   }
 
@@ -842,10 +842,10 @@ class Opsec {
 
     // Verify password
     const hash = genkey(mkey, vLbl, 32);
-    if (hash.length !== this._pwHash.length) throw new Error("Incorrect password");
+    if (hash.length !== this._pwHash.length) throw new Error("비밀번호가 일치하지 않습니다");
     let diff = 0;
     for (let i = 0; i < hash.length; i++) diff |= hash[i] ^ this._pwHash[i];
-    if (diff !== 0) throw new Error("Incorrect password");
+    if (diff !== 0) throw new Error("비밀번호가 일치하지 않습니다");
 
     // Decrypt header
     const hkey = genkey(mkey, kLbl, 44);
@@ -880,7 +880,7 @@ class Opsec {
       if (this.bodyKey.length > 0) s = this.bodyKey;
       else if (this.smsg !== "") s = strToU8(this.smsg);
       const ok = await am.verify(s, this._sign);
-      if (!ok) throw new Error(`${this._headAlgo.toUpperCase()} signature verification failed`);
+      if (!ok) throw new Error(`${this._headAlgo.toUpperCase()} 서명이 유효하지 않습니다`);
     }
   }
 }

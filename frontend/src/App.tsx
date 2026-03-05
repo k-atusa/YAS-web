@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import generate from "random-words";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
 	getAccountByUsername,
 	login as loginApi,
@@ -12,8 +11,6 @@ import {
 	verifyWebAuthnRegistration,
 	getWebAuthnAuthenticateOptions,
 	verifyWebAuthnAuthentication,
-	listWebAuthnCredentials,
-	removeWebAuthnCredential,
 	decryptStoredPrivateKey,
 } from "./api";
 import {
@@ -23,101 +20,97 @@ import {
 	decryptOpsecPw,
 	decryptOpsecPub,
 	detectAuthMode,
-	decryptPrivateKey,
 	u8ToBase64,
 	base64ToU8,
 	registerWebAuthnCredential,
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
 	isPlatformAuthenticatorAvailable,
-	arrayBufferToBase64,
-	base64ToArrayBuffer,
 } from "./crypto";
 import type { AsymAlgo, KdfMethod, EncAlgo, AuthMode, DecryptResult } from "./crypto";
 import type { AccountRecord, ContactRecord } from "./types";
 
-type IconProps = { active?: boolean };
+/* ─── Helpers ─── */
 
 function formatBytes(bytes: number): string {
-	if (!Number.isFinite(bytes) || bytes <= 0) {
-		return "0 B";
-	}
+	if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
 	const units = ["B", "KB", "MB", "GB", "TB"];
 	let value = bytes;
-	let unitIndex = 0;
-	while (value >= 1024 && unitIndex < units.length - 1) {
+	let idx = 0;
+	while (value >= 1024 && idx < units.length - 1) {
 		value /= 1024;
-		unitIndex += 1;
+		idx += 1;
 	}
-	const digits = value < 10 && unitIndex > 0 ? 1 : 0;
-	return `${value.toFixed(digits)} ${units[unitIndex]}`;
+	const digits = value < 10 && idx > 0 ? 1 : 0;
+	return `${value.toFixed(digits)} ${units[idx]}`;
 }
 
-function formatTimestamp(value?: string | number | null): string | null {
-	if (!value) return null;
-	const date = typeof value === "string" ? new Date(value) : new Date(value);
-	if (Number.isNaN(date.getTime())) {
-		return typeof value === "string" ? value : String(value);
-	}
-	return date.toLocaleString();
+function truncateKey(key: string): string {
+	if (key.length <= 15) return key;
+	return `${key.slice(0, 6)}…${key.slice(-6)}`;
 }
 
-function IconHome({ active }: IconProps) {
-	const stroke = active ? "#38bdf8" : "#94a3b8";
+/* ─── Icons ─── */
+
+function IconContacts({ active }: { active?: boolean }) {
+	const stroke = active ? "#fff" : "#888";
 	return (
-		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-			<path d="M3 10.5 12 3l9 7.5" />
-			<path d="M5 12v7.5a.5.5 0 0 0 .5.5H10v-5h4v5h4.5a.5.5 0 0 0 .5-.5V12" />
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+			<circle cx="9" cy="7" r="4" />
+			<path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+			<path d="M16 3.13a4 4 0 0 1 0 7.75" />
 		</svg>
 	);
 }
 
-function IconBook({ active }: IconProps) {
-	const stroke = active ? "#38bdf8" : "#94a3b8";
+function IconKey({ active }: { active?: boolean }) {
+	const stroke = active ? "#fff" : "#888";
 	return (
-		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-			<path d="M5 4h11a3 3 0 0 1 3 3v12" />
-			<path d="M5 20h11a3 3 0 0 0 3-3" />
-			<path d="M5 20a3 3 0 0 1 0-6h14" />
-			<path d="M9 8h6" />
-			<path d="M9 12h3" />
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<circle cx="8" cy="15" r="4" />
+			<path d="M11.3 11.7 20 3" />
+			<path d="M17 3h3v3" />
+			<path d="m17 7 3-3" />
 		</svg>
 	);
 }
 
-function IconLock({ active }: IconProps) {
-	const stroke = active ? "#38bdf8" : "#94a3b8";
+function IconEncrypt({ active }: { active?: boolean }) {
+	const stroke = active ? "#fff" : "#888";
 	return (
-		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-			<rect x="4" y="11" width="16" height="10" rx="2" />
-			<path d="M8 11V7a4 4 0 0 1 8 0v4" />
-			<path d="M12 15v2" />
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<rect x="3" y="11" width="18" height="11" rx="2" />
+			<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 		</svg>
 	);
 }
 
-function IconUnlock({ active }: IconProps) {
-	const stroke = active ? "#38bdf8" : "#94a3b8";
+function IconDecrypt({ active }: { active?: boolean }) {
+	const stroke = active ? "#fff" : "#888";
 	return (
-		<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-			<rect x="4" y="11" width="16" height="10" rx="2" />
-			<path d="M16 11V7a4 4 0 0 0-8 0" />
-			<path d="M12 15v2" />
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<rect x="3" y="11" width="18" height="11" rx="2" />
+			<path d="M7 11V7a5 5 0 0 1 9.9-1" />
 		</svg>
 	);
 }
 
-type Tab = "keys" | "address-book" | "encrypt" | "decrypt";
+/* ─── App ─── */
+
+type Tab = "contacts" | "keys" | "encrypt" | "decrypt";
 
 function App() {
+	/* Auth */
 	const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem("authToken"));
 	const [authUsername, setAuthUsername] = useState<string | null>(() => localStorage.getItem("authUsername"));
-	const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+	const [view, setView] = useState<"landing" | "login" | "signup">("landing");
 	const [loginUsername, setLoginUsername] = useState("");
 	const [loginPass, setLoginPass] = useState("");
 	const [loginPassConfirm, setLoginPassConfirm] = useState("");
 	const [loginBusy, setLoginBusy] = useState(false);
 
+	/* Key mgmt */
 	const [username, setUsername] = useState("");
 	const [publicKeyPem, setPublicKeyPem] = useState("");
 	const [privateKeyPem, setPrivateKeyPem] = useState("");
@@ -130,6 +123,9 @@ function App() {
 	const [showKeySection, setShowKeySection] = useState(true);
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
 	const [copyPrivateStatus, setCopyPrivateStatus] = useState<"idle" | "copied" | "error">("idle");
+	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("ecc1");
+
+	/* Contacts */
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
 	const [contactsLoading, setContactsLoading] = useState(false);
 	const [contactForm, setContactForm] = useState({ contactUsername: "", publicKey: "", notes: "" });
@@ -141,9 +137,10 @@ function App() {
 	const [editingContactMeta, setEditingContactMeta] = useState<{ id: string; username: string } | null>(null);
 	const [contactModalError, setContactModalError] = useState<string | null>(null);
 	const closeModalTimer = useRef<number | null>(null);
-	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("ecc1");
+
+	/* Encrypt */
 	const [encryptAuthMode, setEncryptAuthMode] = useState<AuthMode>("password");
-	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("pbk1");
+	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("arg1");
 	const [encryptEncAlgo, setEncryptEncAlgo] = useState<EncAlgo>("gcm1");
 	const [encryptAsymAlgo, setEncryptAsymAlgo] = useState<AsymAlgo>("ecc1");
 	const [encryptPassword, setEncryptPassword] = useState("");
@@ -158,6 +155,9 @@ function App() {
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
 	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
+	const [encryptStep, setEncryptStep] = useState(1);
+
+	/* Decrypt */
 	const [decryptPayloadInput, setDecryptPayloadInput] = useState("");
 	const [decryptPayloadFile, setDecryptPayloadFile] = useState<File | null>(null);
 	const [isDecryptFileDragActive, setIsDecryptFileDragActive] = useState(false);
@@ -171,11 +171,33 @@ function App() {
 	const [decryptStatus, setDecryptStatus] = useState<string | null>(null);
 	const [decryptError, setDecryptError] = useState<string | null>(null);
 	const [decryptedResult, setDecryptedResult] = useState<DecryptResult | null>(null);
-	
-	// WebAuthn states
+	const [decryptStep, setDecryptStep] = useState(1);
+
+	/* WebAuthn */
 	const [webauthnAvailable, setWebauthnAvailable] = useState(false);
 	const [webauthnAuthBusy, setWebauthnAuthBusy] = useState(false);
 	const [decryptionToken, setDecryptionToken] = useState<string | null>(null);
+
+	/* Theme */
+	const [themeMode, setThemeMode] = useState<"system" | "light" | "dark">(() => {
+		return (localStorage.getItem("themeMode") as "system" | "light" | "dark") || "system";
+	});
+	const [resolvedDark, setResolvedDark] = useState(() => {
+		const saved = localStorage.getItem("themeMode") || "system";
+		if (saved === "dark") return true;
+		if (saved === "light") return false;
+		return window.matchMedia("(prefers-color-scheme: dark)").matches;
+	});
+
+	/* Navigation refs */
+	const navInnerRef = useRef<HTMLDivElement>(null);
+	const navContactsRef = useRef<HTMLButtonElement>(null);
+	const navKeysRef = useRef<HTMLButtonElement>(null);
+	const navEncryptRef = useRef<HTMLButtonElement>(null);
+	const navDecryptRef = useRef<HTMLButtonElement>(null);
+	const [pressedTab, setPressedTab] = useState<Tab | null>(null);
+
+	/* ─── Effects ─── */
 
 	useEffect(() => {
 		return () => {
@@ -186,9 +208,69 @@ function App() {
 		};
 	}, []);
 
+	/* Theme sync */
+	useEffect(() => {
+		const mq = window.matchMedia("(prefers-color-scheme: dark)");
+		const handler = (e: MediaQueryListEvent) => {
+			if (themeMode === "system") setResolvedDark(e.matches);
+		};
+		mq.addEventListener("change", handler);
+		return () => mq.removeEventListener("change", handler);
+	}, [themeMode]);
+
+	useEffect(() => {
+		localStorage.setItem("themeMode", themeMode);
+		if (themeMode === "system") {
+			setResolvedDark(window.matchMedia("(prefers-color-scheme: dark)").matches);
+		} else {
+			setResolvedDark(themeMode === "dark");
+		}
+	}, [themeMode]);
+
+	useEffect(() => {
+		document.documentElement.setAttribute("data-theme", resolvedDark ? "dark" : "light");
+	}, [resolvedDark]);
+
+	/* Animate navigation pill position + squish */
+	const updateNavHighlight = () => {
+		const refMap: Record<Tab, React.RefObject<HTMLButtonElement | null>> = { contacts: navContactsRef, keys: navKeysRef, encrypt: navEncryptRef, decrypt: navDecryptRef };
+		const activeEl = refMap[tab]?.current;
+		const inner = navInnerRef.current;
+		if (!activeEl || !inner) return;
+
+		const size = activeEl.offsetWidth;
+		const activeX = activeEl.offsetLeft;
+		let x = activeX;
+		let w = size;
+
+		if (pressedTab && pressedTab !== tab) {
+			const pressedEl = refMap[pressedTab]?.current;
+			if (pressedEl) {
+				const pressedX = pressedEl.offsetLeft;
+				const distance = Math.abs(pressedX - activeX);
+				const stretch = Math.min(distance * 0.25, 22);
+				if (pressedX > activeX) {
+					w = size + stretch;
+				} else {
+					x = activeX - stretch;
+					w = size + stretch;
+				}
+			}
+		}
+
+		inner.style.setProperty('--nav-active-x', `${x}px`);
+		inner.style.setProperty('--nav-active-y', `${activeEl.offsetTop}px`);
+		inner.style.setProperty('--nav-active-w', `${w}px`);
+	};
+
+	useLayoutEffect(updateNavHighlight, [tab, pressedTab]);
+
 	useEffect(() => {
 		if (!encryptedBlob) return;
-		const blob = new Blob([encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
+		const blob = new Blob(
+			[encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer],
+			{ type: "application/octet-stream" }
+		);
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement("a");
 		link.href = url;
@@ -197,8 +279,8 @@ function App() {
 		URL.revokeObjectURL(url);
 	}, [encryptedBlob]);
 
+	const canLogin = Boolean(loginUsername && loginPass && (view === "login" || loginPass === loginPassConfirm));
 	const canUpload = Boolean(username && publicKeyPem && privateKeyPem);
-	const canLogin = Boolean(loginUsername && loginPass && (authMode === "login" || loginPass === loginPassConfirm));
 	const isAuthed = Boolean(authToken);
 
 	useEffect(() => {
@@ -215,101 +297,63 @@ function App() {
 		let cancelled = false;
 		async function loadContacts() {
 			if (!authToken) {
-				if (!cancelled) {
-					setContacts([]);
-					setContactsLoading(false);
-				}
+				if (!cancelled) { setContacts([]); setContactsLoading(false); }
 				return;
 			}
-			if (!cancelled) {
-				setContactsLoading(true);
-				setContactError(null);
-			}
+			if (!cancelled) { setContactsLoading(true); setContactError(null); }
 			try {
 				const items = await listContacts(authToken);
-				if (!cancelled) {
-					setContacts(items);
-				}
+				if (!cancelled) setContacts(items);
 			} catch (err) {
-				const errMsg = (err as Error).message || "Failed to load contacts";
-				console.error(err);
-				if (errMsg === "TOKEN_EXPIRED") {
-					// Token expired, auto-logout
-					handleSignOut();
-					return;
-				}
-				if (!cancelled) {
-					setContactError(errMsg);
-				}
+				const msg = (err as Error).message || "연락처 불러오기 실패";
+				if (msg === "TOKEN_EXPIRED") { handleSignOut(); return; }
+				if (!cancelled) setContactError(msg);
 			} finally {
-				if (!cancelled) {
-					setContactsLoading(false);
-				}
+				if (!cancelled) setContactsLoading(false);
 			}
 		}
 		loadContacts();
-		return () => {
-			cancelled = true;
-		};
+		return () => { cancelled = true; };
 	}, [authToken]);
 
-	// Check WebAuthn availability
 	useEffect(() => {
-		if (!authToken) {
-			setWebauthnAvailable(false);
-			return;
-		}
+		if (!authToken) { setWebauthnAvailable(false); return; }
 		setWebauthnAvailable(isWebAuthnAvailable());
 	}, [authToken]);
 
 	useEffect(() => {
-		if (authUsername) {
-			setUsername(authUsername);
-		} else {
-			setUsername("");
-		}
+		if (authUsername) setUsername(authUsername);
+		else setUsername("");
 	}, [authUsername]);
 
 	useEffect(() => {
 		let cancelled = false;
-		const usernameSnapshot = authUsername?.trim();
-
+		const snap = authUsername?.trim();
 		setStoredAccount(null);
 		setShowKeySection(true);
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
 		setCopyPrivateStatus("idle");
-
-		if (!usernameSnapshot) {
-			return () => {
-				cancelled = true;
-			};
-		}
+		if (!snap) return () => { cancelled = true; };
 
 		async function loadStored() {
 			try {
-				const record = await getAccountByUsername(usernameSnapshot as string);
-				if (!cancelled && authUsername === usernameSnapshot) {
+				const record = await getAccountByUsername(snap as string);
+				if (!cancelled && authUsername === snap) {
 					setStoredAccount(record);
 					setShowKeySection(!record);
-					if (record) {
-						setPublicKeyPem(record.publicKey);
-						setStatus(null);
-					}
+					if (record) { setPublicKeyPem(record.publicKey); setStatus(null); }
 				}
 			} catch (err) {
 				console.error(err);
-				if (!cancelled && authUsername === usernameSnapshot) {
-					setStoredAccount(null);
-					setShowKeySection(true);
-				}
+				if (!cancelled && authUsername === snap) { setStoredAccount(null); setShowKeySection(true); }
 			}
 		}
 		loadStored();
-		return () => {
-			cancelled = true;
-		};
+		return () => { cancelled = true; };
 	}, [authUsername]);
+
+	/* ─── Handlers ─── */
 
 	async function handleLogin(e: React.FormEvent) {
 		e.preventDefault();
@@ -322,36 +366,9 @@ function App() {
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
 		} catch (err) {
-			console.error(err);
-			setError((err as Error).message || "Login failed");
+			setError((err as Error).message || "로그인에 실패했습니다");
 		} finally {
 			setLoginBusy(false);
-		}
-	}
-
-	async function handleCopyPublicKey(value?: string) {
-		if (!value) return;
-		try {
-			await navigator.clipboard.writeText(value);
-			setCopyPublicStatus("copied");
-			setTimeout(() => setCopyPublicStatus("idle"), 2000);
-		} catch (err) {
-			console.error(err);
-			setCopyPublicStatus("error");
-			setTimeout(() => setCopyPublicStatus("idle"), 2000);
-		}
-	}
-
-	async function handleCopyPrivateKey(value?: string) {
-		if (!value) return;
-		try {
-			await navigator.clipboard.writeText(value);
-			setCopyPrivateStatus("copied");
-			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
-		} catch (err) {
-			console.error(err);
-			setCopyPrivateStatus("error");
-			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
 		}
 	}
 
@@ -366,10 +383,8 @@ function App() {
 			const result = await loginApi(loginUsername, loginPass);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
-			setAuthMode("login");
 		} catch (err) {
-			console.error(err);
-			setError((err as Error).message || "Signup failed");
+			setError((err as Error).message || "회원가입에 실패했습니다");
 		} finally {
 			setLoginBusy(false);
 		}
@@ -397,6 +412,7 @@ function App() {
 		setEncryptStatus(null);
 		setEncryptError(null);
 		setEncryptedBlob(null);
+		setEncryptStep(1);
 		setDecryptPayloadInput("");
 		setDecryptPayloadFile(null);
 		setIsDecryptFileDragActive(false);
@@ -408,22 +424,44 @@ function App() {
 		setDecryptStatus(null);
 		setDecryptError(null);
 		setDecryptedResult(null);
+		setDecryptStep(1);
+		setView("landing");
 	}
 
-	function reopenContactModal() {
-		if (closeModalTimer.current) {
-			window.clearTimeout(closeModalTimer.current);
-			closeModalTimer.current = null;
+	async function handleCopyPublicKey(value?: string) {
+		if (!value) return;
+		try {
+			await navigator.clipboard.writeText(value);
+			setCopyPublicStatus("copied");
+			setTimeout(() => setCopyPublicStatus("idle"), 2000);
+		} catch {
+			setCopyPublicStatus("error");
+			setTimeout(() => setCopyPublicStatus("idle"), 2000);
 		}
+	}
+
+	async function handleCopyPrivateKey(value?: string) {
+		if (!value) return;
+		try {
+			await navigator.clipboard.writeText(value);
+			setCopyPrivateStatus("copied");
+			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
+		} catch {
+			setCopyPrivateStatus("error");
+			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
+		}
+	}
+
+	/* ─── Contact modal helpers ─── */
+
+	function reopenContactModal() {
+		if (closeModalTimer.current) { window.clearTimeout(closeModalTimer.current); closeModalTimer.current = null; }
 		setContactModalClosing(false);
 		setContactModalOpen(true);
 	}
 
 	function forceCloseContactModal() {
-		if (closeModalTimer.current) {
-			window.clearTimeout(closeModalTimer.current);
-			closeModalTimer.current = null;
-		}
+		if (closeModalTimer.current) { window.clearTimeout(closeModalTimer.current); closeModalTimer.current = null; }
 		setContactModalClosing(false);
 		setContactModalOpen(false);
 		setContactModalMode("add");
@@ -444,25 +482,176 @@ function App() {
 		reopenContactModal();
 		setContactModalMode("edit");
 		setEditingContactMeta({ id: contact.id, username: contact.contactUsername });
-		setContactForm({
-			contactUsername: contact.contactUsername,
-			publicKey: contact.publicKey,
-			notes: contact.notes || "",
-		});
+		setContactForm({ contactUsername: contact.contactUsername, publicKey: contact.publicKey, notes: contact.notes || "" });
 		setContactModalError(null);
 	}
 
 	function closeContactModal() {
 		if (contactModalClosing) return;
-		if (closeModalTimer.current) {
-			window.clearTimeout(closeModalTimer.current);
-		}
+		if (closeModalTimer.current) window.clearTimeout(closeModalTimer.current);
 		setContactModalClosing(true);
-		closeModalTimer.current = window.setTimeout(() => {
-			forceCloseContactModal();
-			closeModalTimer.current = null;
-		}, 240);
+		closeModalTimer.current = window.setTimeout(() => { forceCloseContactModal(); closeModalTimer.current = null; }, 240);
 	}
+
+	async function handleContactSubmit(e: React.FormEvent) {
+		e.preventDefault();
+		if (!authToken) return;
+		const trimmedUsername = contactForm.contactUsername.trim();
+		const trimmedKey = contactForm.publicKey.trim();
+		const selfKey = storedAccount?.publicKey || publicKeyPem;
+		if (selfKey && trimmedKey && selfKey === trimmedKey) { setContactModalError("이 공개키는 이미 본인의 키입니다"); return; }
+		if (!trimmedUsername || !trimmedKey) { setContactModalError("사용자 이름과 공개키는 필수입니다"); return; }
+		setContactBusy(true);
+		setContactModalError(null);
+		try {
+			const payload = { contactUsername: trimmedUsername, publicKey: trimmedKey, notes: contactForm.notes.trim() || undefined };
+			const saved = await createContact(payload, authToken);
+			setContacts((prev) => {
+				const withoutSaved = prev.filter((c) => c.id !== saved.id);
+				const withoutOld = contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username
+					? withoutSaved.filter((c) => c.id !== editingContactMeta.id)
+					: withoutSaved;
+				return [saved, ...withoutOld];
+			});
+			if (contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username) {
+				try {
+					await deleteContact(editingContactMeta.id, authToken);
+				} catch (deleteErr) {
+					if ((deleteErr as Error).message === "TOKEN_EXPIRED") { handleSignOut(); return; }
+					console.error(deleteErr);
+					setContactError((deleteErr as Error).message || "이전 연락처 삭제 실패");
+				}
+			}
+			closeContactModal();
+		} catch (err) {
+			if ((err as Error).message === "TOKEN_EXPIRED") { handleSignOut(); return; }
+			setContactModalError((err as Error).message || "연락처 저장에 실패했습니다");
+		} finally {
+			setContactBusy(false);
+		}
+	}
+
+	async function handleDeleteContact(id: string) {
+		if (!authToken) return;
+		if (!window.confirm("이 연락처를 삭제하시겠습니까?")) return;
+		try {
+			await deleteContact(id, authToken);
+			setContacts((prev) => prev.filter((c) => c.id !== id));
+		} catch (err) {
+			if ((err as Error).message === "TOKEN_EXPIRED") { handleSignOut(); return; }
+			setContactError((err as Error).message || "연락처 삭제에 실패했습니다");
+		}
+	}
+
+	/* ─── Key generation ─── */
+
+	async function handleGenerateKeys() {
+		setError(null);
+		setStatus("키 쌍 생성 중...");
+		try {
+			const { publicKey, privateKey } = await generateKeyPair(keyAlgo);
+			setPublicKeyPem(publicKey);
+			setPrivateKeyPem(privateKey);
+			setCopyPrivateStatus("idle");
+			setStatus("키 쌍이 생성되었습니다. 개인키는 안전하게 보관하세요.");
+		} catch (err) {
+			console.error(err);
+			setError("키 쌍 생성에 실패했습니다");
+			setStatus(null);
+		}
+	}
+
+	async function handleUpload() {
+		if (!canUpload) return;
+		setBusy(true);
+		setError(null);
+		setStatus("암호화하여 업로드 중...");
+		try {
+			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, notes || undefined);
+			const result = await saveAccount(payload, authToken ?? undefined);
+			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			setStoredAccount(record);
+			setStatus("키가 안전하게 저장되었습니다");
+			setShowKeySection(false);
+			setPrivateKeyPem("");
+			setCopyPrivateStatus("idle");
+			if (authToken && (await isWebAuthnAvailable())) {
+				setStatus("보안 키 설정 중...");
+				setTimeout(() => startWebAuthnRegistration(), 500);
+			}
+		} catch (err) {
+			console.error(err);
+			setError((err as Error).message || "업로드에 실패했습니다");
+			setStatus(null);
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	function handleRegenerate() {
+		setStoredAccount(null);
+		setShowKeySection(true);
+		setPublicKeyPem("");
+		setPrivateKeyPem("");
+		setCopyPrivateStatus("idle");
+		setNotes("");
+		setStatus(null);
+		setError(null);
+	}
+
+	/* ─── WebAuthn ─── */
+
+	async function startWebAuthnRegistration() {
+		if (!authToken) { setError("로그인이 필요합니다"); return; }
+		try {
+			const optionsResp = await getWebAuthnRegisterOptions(authToken);
+			const options = optionsResp.options;
+			setStatus("보안 키를 사용하세요...");
+			const registration = await registerWebAuthnCredential({
+				challenge: options.challenge, rp: options.rp, user: options.user,
+				pubKeyCredParams: options.pubKeyCredParams, timeout: options.timeout,
+				attestation: options.attestation, authenticatorSelection: options.authenticatorSelection,
+			});
+			setStatus("보안 키 확인 중...");
+			await verifyWebAuthnRegistration(authToken, registration.credentialId, registration.publicKey, registration.counter, registration.transports);
+			setStatus("보안 키가 등록되었습니다!");
+			setError(null);
+			setTimeout(() => setStatus(null), 3000);
+		} catch (err) {
+			const msg = (err as Error).message || "보안 키 등록 실패";
+			if (msg !== "WebAuthn registration cancelled") setError(`보안 키 설정: ${msg}`);
+			setStatus(null);
+		}
+	}
+
+	async function handleWebAuthnAuthenticate() {
+		if (!authToken || !isAuthed) { setDecryptError("로그인이 필요합니다"); return; }
+		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) { setDecryptError("저장된 개인키가 없습니다."); return; }
+		setWebauthnAuthBusy(true);
+		setDecryptError(null);
+		setDecryptStatus("보안 키 요청 중...");
+		try {
+			const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
+			const options = optionsResp.options;
+			setDecryptStatus("보안 키로 인증하세요...");
+			const assertion = await authenticateWithWebAuthn({
+				challenge: options.challenge, allowCredentials: options.allowCredentials || [],
+				timeout: options.timeout, userVerification: options.userVerification,
+			});
+			setDecryptStatus("확인 중...");
+			const verifyResp = await verifyWebAuthnAuthentication(authToken, assertion.credentialId, assertion.counter);
+			setDecryptionToken(verifyResp.token);
+			setDecryptStatus(null);
+			setDecryptError(null);
+		} catch (err) {
+			setDecryptError((err as Error).message || "보안 키 인증 실패");
+			setDecryptStatus(null);
+		} finally {
+			setWebauthnAuthBusy(false);
+		}
+	}
+
+	/* ─── Encrypt helpers ─── */
 
 	function resetEncryptionForm() {
 		setEncryptSmsg("");
@@ -471,17 +660,21 @@ function App() {
 		applySelectedEncryptFile(null);
 		setIsFileDragActive(false);
 		setEncryptedBlob(null);
+		setEncryptStep(1);
+		setEncryptStatus(null);
+		setEncryptError(null);
+		setEncryptKdfMethod("arg1");
+		setEncryptEncAlgo("gcm1");
+		setEncryptAsymAlgo("ecc1");
+		setEncryptRecipientId("");
+		setEncryptSignWithKey(false);
 	}
 
 	function handleEncryptionModeChange(mode: "text" | "file") {
 		if (mode === encryptMode) return;
 		setEncryptMode(mode);
-		if (mode === "text") {
-			applySelectedEncryptFile(null);
-			setIsFileDragActive(false);
-		} else {
-			setEncryptSmsg("");
-		}
+		if (mode === "text") { applySelectedEncryptFile(null); setIsFileDragActive(false); }
+		else setEncryptSmsg("");
 		setEncryptStatus(null);
 		setEncryptError(null);
 		setEncryptedBlob(null);
@@ -494,73 +687,35 @@ function App() {
 		setEncryptedBlob(null);
 	}
 
-	function handleFileDragEnter(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
+	function handleFileDragEnter(e: React.DragEvent<HTMLDivElement>) { e.preventDefault(); if (!encryptBusy) setIsFileDragActive(true); }
+	function handleFileDragOver(e: React.DragEvent<HTMLDivElement>) { e.preventDefault(); if (!encryptBusy) { e.dataTransfer.dropEffect = "copy"; if (!isFileDragActive) setIsFileDragActive(true); } }
+	function handleFileDragLeave(e: React.DragEvent<HTMLDivElement>) {
+		e.preventDefault();
+		const next = e.relatedTarget as Node | null;
+		if (next && e.currentTarget.contains(next)) return;
+		setIsFileDragActive(false);
+	}
+	function handleFileDrop(e: React.DragEvent<HTMLDivElement>) {
+		e.preventDefault(); setIsFileDragActive(false);
 		if (encryptBusy) return;
-		setIsFileDragActive(true);
+		const f = e.dataTransfer.files?.[0];
+		if (f) applySelectedEncryptFile(f);
 	}
-
-	function handleFileDragOver(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
-		if (encryptBusy) return;
-		event.dataTransfer.dropEffect = "copy";
-		if (!isFileDragActive) {
-			setIsFileDragActive(true);
-		}
-	}
-
-	function handleFileDragLeave(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
-		const nextTarget = event.relatedTarget as Node | null;
-		if (nextTarget && event.currentTarget.contains(nextTarget)) {
-			return;
-		}
+	function handleEncryptFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+		const f = e.target.files?.[0] ?? null;
+		applySelectedEncryptFile(f);
 		setIsFileDragActive(false);
+		e.target.value = "";
 	}
 
-	function handleFileDrop(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
-		setIsFileDragActive(false);
-		if (encryptBusy) return;
-		const droppedFile = event.dataTransfer.files?.[0];
-		if (droppedFile) {
-			applySelectedEncryptFile(droppedFile);
-		}
-	}
+	/* ─── Decrypt helpers ─── */
 
-	function handleEncryptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-		const file = event.target.files?.[0] ?? null;
-		applySelectedEncryptFile(file);
-		setIsFileDragActive(false);
-		event.target.value = "";
-	}
-
-	function clearSelectedFile() {
-		applySelectedEncryptFile(null);
-		setIsFileDragActive(false);
-	}
-
-	function handleDecryptDragEnter(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
-		if (decryptBusy) return;
-		setIsDecryptFileDragActive(true);
-	}
-
-	function handleDecryptDragOver(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
-		if (decryptBusy) return;
-		event.dataTransfer.dropEffect = "copy";
-		if (!isDecryptFileDragActive) {
-			setIsDecryptFileDragActive(true);
-		}
-	}
-
-	function handleDecryptDragLeave(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
-		const nextTarget = event.relatedTarget as Node | null;
-		if (nextTarget && event.currentTarget.contains(nextTarget)) {
-			return;
-		}
+	function handleDecryptDragEnter(e: React.DragEvent<HTMLDivElement>) { e.preventDefault(); if (!decryptBusy) setIsDecryptFileDragActive(true); }
+	function handleDecryptDragOver(e: React.DragEvent<HTMLDivElement>) { e.preventDefault(); if (!decryptBusy) { e.dataTransfer.dropEffect = "copy"; if (!isDecryptFileDragActive) setIsDecryptFileDragActive(true); } }
+	function handleDecryptDragLeave(e: React.DragEvent<HTMLDivElement>) {
+		e.preventDefault();
+		const next = e.relatedTarget as Node | null;
+		if (next && e.currentTarget.contains(next)) return;
 		setIsDecryptFileDragActive(false);
 	}
 
@@ -569,24 +724,30 @@ function App() {
 			const info = detectAuthMode(data);
 			setDecryptDetected(info);
 			setDecryptError(null);
-		} catch {
-			setDecryptDetected(null);
+		} catch { setDecryptDetected(null); }
+	}
+
+	function handleDecryptFileDrop(e: React.DragEvent<HTMLDivElement>) {
+		e.preventDefault(); setIsDecryptFileDragActive(false);
+		if (decryptBusy) return;
+		const f = e.dataTransfer.files?.[0];
+		if (f) {
+			setDecryptPayloadFile(f);
+			setDecryptPayloadInput("");
+			setDecryptStatus(null); setDecryptError(null); setDecryptedResult(null);
+			f.arrayBuffer().then((buf) => tryAutoDetect(new Uint8Array(buf)));
 		}
 	}
 
-	function handleDecryptFileDrop(event: React.DragEvent<HTMLDivElement>) {
-		event.preventDefault();
+	function handleDecryptFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+		const f = e.target.files?.[0] ?? null;
+		setDecryptPayloadFile(f);
+		setDecryptPayloadInput("");
+		setDecryptStatus(null); setDecryptError(null); setDecryptedResult(null);
 		setIsDecryptFileDragActive(false);
-		if (decryptBusy) return;
-		const droppedFile = event.dataTransfer.files?.[0];
-		if (droppedFile) {
-			setDecryptPayloadFile(droppedFile);
-			setDecryptPayloadInput("");
-			setDecryptStatus(null);
-			setDecryptError(null);
-			setDecryptedResult(null);
-			droppedFile.arrayBuffer().then((buf) => tryAutoDetect(new Uint8Array(buf)));
-		}
+		e.target.value = "";
+		if (f) f.arrayBuffer().then((buf) => tryAutoDetect(new Uint8Array(buf)));
+		else setDecryptDetected(null);
 	}
 
 	function resetDecryptForm() {
@@ -602,22 +763,7 @@ function App() {
 		setDecryptStatus(null);
 		setDecryptError(null);
 		setDecryptedResult(null);
-	}
-
-	function handleDecryptFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-		const file = event.target.files?.[0] ?? null;
-		setDecryptPayloadFile(file);
-		setDecryptPayloadInput("");
-		setDecryptStatus(null);
-		setDecryptError(null);
-		setDecryptedResult(null);
-		setIsDecryptFileDragActive(false);
-		event.target.value = "";
-		if (file) {
-			file.arrayBuffer().then((buf) => tryAutoDetect(new Uint8Array(buf)));
-		} else {
-			setDecryptDetected(null);
-		}
+		setDecryptStep(1);
 	}
 
 	async function resolvePrivateKeyB64(): Promise<string> {
@@ -625,256 +771,65 @@ function App() {
 		if (manual) return manual;
 		if (privateKeyPem) return privateKeyPem;
 		if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf) {
-			// Must use WebAuthn for stored keys
-			if (!decryptionToken) {
-				throw new Error("Use WebAuthn to unlock your stored private key");
-			}
-			// Decrypt using server-side decryption with WebAuthn token
-			console.log("[resolvePrivateKeyB64] Using decryption token:", decryptionToken?.substring(0, 50) + "...");
+			if (!decryptionToken) throw new Error("저장된 개인키를 잠금 해제하려면 보안 키를 사용하세요");
 			const result = await decryptStoredPrivateKey(storedAccount.username, decryptionToken);
 			return result.privateKey;
 		}
-		throw new Error("No private key available. Paste one or use WebAuthn.");
-	}
-
-	async function startWebAuthnRegistration() {
-		if (!authToken) {
-			setError("Must be logged in to register WebAuthn");
-			return;
-		}
-
-		try {
-			// Get registration options from server
-			const optionsResp = await getWebAuthnRegisterOptions(authToken);
-			const options = optionsResp.options;
-
-			// Create credential with WebAuthn
-			setStatus("Please interact with your security key...");
-			const registration = await registerWebAuthnCredential({
-				challenge: options.challenge,
-				rp: options.rp,
-				user: options.user,
-				pubKeyCredParams: options.pubKeyCredParams,
-				timeout: options.timeout,
-				attestation: options.attestation,
-				authenticatorSelection: options.authenticatorSelection,
-			});
-
-			// Verify credential on server
-			setStatus("Verifying WebAuthn credential...");
-			await verifyWebAuthnRegistration(
-				authToken,
-				registration.credentialId,
-				registration.publicKey,
-				registration.counter,
-				registration.transports
-			);
-
-			setStatus("✅ WebAuthn credential registered successfully!");
-			setError(null);
-			setTimeout(() => setStatus(null), 3000);
-		} catch (err) {
-			const msg = (err as Error).message || "WebAuthn registration failed";
-			if (msg !== "WebAuthn registration cancelled") {
-				setError(`WebAuthn setup: ${msg}`);
-			}
-			setStatus(null);
-		}
-	}
-
-	async function handleWebAuthnAuthenticate() {
-		if (!authToken || !isAuthed) {
-			setDecryptError("You must be logged in to use WebAuthn");
-			return;
-		}
-
-		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) {
-			setDecryptError("No stored private key found. Please upload a key first.");
-			return;
-		}
-
-		setWebauthnAuthBusy(true);
-		setDecryptError(null);
-		setDecryptStatus("Requesting WebAuthn...");
-
-		try {
-			// Get authentication options from server
-			const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
-			const options = optionsResp.options;
-
-			// Authenticate with WebAuthn
-			setDecryptStatus("Please verify with your security key...");
-			const assertion = await authenticateWithWebAuthn({
-				challenge: options.challenge,
-				allowCredentials: options.allowCredentials || [],
-				timeout: options.timeout,
-				userVerification: options.userVerification,
-			});
-
-			// Verify authentication on server
-			setDecryptStatus("Verifying...");
-			const verifyResp = await verifyWebAuthnAuthentication(authToken, assertion.credentialId, assertion.counter);
-
-			// Store decryption token
-			console.log("[WebAuthn] Decryption token received:", verifyResp.token?.substring(0, 50) + "...");
-			setDecryptionToken(verifyResp.token);
-			setDecryptStatus(null);
-			setDecryptError(null);
-
-			// Success message would be shown in UI
-		} catch (err) {
-			const msg = (err as Error).message || "WebAuthn authentication failed";
-			setDecryptError(msg);
-			setDecryptStatus(null);
-		} finally {
-			setWebauthnAuthBusy(false);
-		}
+		throw new Error("사용 가능한 개인키가 없습니다.");
 	}
 
 	async function loadOpsecData(): Promise<Uint8Array> {
-		if (decryptPayloadFile) {
-			return new Uint8Array(await decryptPayloadFile.arrayBuffer());
-		}
+		if (decryptPayloadFile) return new Uint8Array(await decryptPayloadFile.arrayBuffer());
 		const raw = decryptPayloadInput.trim();
-		if (!raw) {
-			throw new Error("Paste Base64 ciphertext or upload a file");
-		}
-		try {
-			return base64ToU8(raw);
-		} catch {
-			throw new Error("Invalid Base64 format");
-		}
+		if (!raw) throw new Error("Base64 텍스트를 붙여넣거나 파일을 업로드하세요");
+		try { return base64ToU8(raw); } catch { throw new Error("올바르지 않은 Base64 형식입니다"); }
 	}
 
-	async function handleDecryptSubmit(e: React.FormEvent) {
-		e.preventDefault();
-		setDecryptStatus(null);
-		setDecryptError(null);
-		setDecryptedResult(null);
-		try {
-			setDecryptBusy(true);
-			setDecryptStatus("Loading data...");
-			const dataU8 = await loadOpsecData();
+	/* ─── Encrypt submit ─── */
 
-			// Use already-detected mode, or detect now
-			const info = decryptDetected ?? detectAuthMode(dataU8);
-			setDecryptDetected(info);
-
-			setDecryptStatus("Decrypting...");
-
-			let result: DecryptResult;
-			if (info.mode === "password") {
-				if (!decryptPassword) throw new Error("Enter the encryption password");
-				result = await decryptOpsecPw(dataU8, decryptPassword);
-			} else {
-				const priB64 = await resolvePrivateKeyB64();
-				const peerPub = decryptPeerPublicKey.trim() || undefined;
-				result = await decryptOpsecPub(dataU8, priB64, peerPub);
-			}
-			setDecryptedResult(result);
-			setDecryptStatus("Decrypted successfully");
-		} catch (err) {
-			console.error(err);
-			setDecryptError((err as Error).message || "Failed to decrypt");
-			setDecryptStatus(null);
-			setDecryptedResult(null);
-		} finally {
-			setDecryptBusy(false);
-		}
-	}
-
-	function handleDownloadDecryptedFile(name: string, data: Uint8Array) {
-		const blob = new Blob([data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement("a");
-		link.href = url;
-		link.download = name;
-		link.click();
-		URL.revokeObjectURL(url);
-	}
-
-	async function handleEncryptSubmit(e: React.FormEvent) {
-		e.preventDefault();
+	async function handleEncryptSubmit() {
 		setEncryptStatus(null);
 		setEncryptError(null);
 		setEncryptedBlob(null);
 
-		// Validate based on auth mode
 		if (encryptAuthMode === "password") {
-			if (!encryptPassword) {
-				setEncryptError("Enter a password");
-				return;
-			}
+			if (!encryptPassword) { setEncryptError("비밀번호를 입력하세요"); return; }
 		} else {
-			const recipient = contacts.find((c) => c.id === encryptRecipientId);
-			if (!recipient) {
-				setEncryptError("Select a contact (recipient)");
-				return;
-			}
+			if (!contacts.find((c) => c.id === encryptRecipientId)) { setEncryptError("수신자를 선택하세요"); return; }
 		}
-
-		// Validate data
 		if (encryptMode === "text") {
-			if (!encryptSmsg) {
-				setEncryptError("Enter a secure message to encrypt");
-				return;
-			}
+			if (!encryptSmsg) { setEncryptError("암호화할 메시지를 입력하세요"); return; }
 		} else {
-			if (!encryptFile) {
-				setEncryptError("Select a file to encrypt");
-				return;
-			}
+			if (!encryptFile) { setEncryptError("암호화할 파일을 선택하세요"); return; }
 		}
 
 		try {
 			setEncryptBusy(true);
-			setEncryptStatus("Encrypting...");
-
+			setEncryptStatus("암호화 중...");
 			const files = encryptMode === "file" && encryptFile ? [encryptFile] : undefined;
-
 			let result: Uint8Array;
 			if (encryptAuthMode === "password") {
 				result = await encryptOpsec({
-					mode: "password",
-					kdfMethod: encryptKdfMethod,
-					password: encryptPassword,
-					encAlgo: encryptEncAlgo,
-					smsg: encryptSmsg || undefined,
-					msg: encryptMsg || undefined,
-					files,
+					mode: "password", kdfMethod: encryptKdfMethod, password: encryptPassword,
+					encAlgo: encryptEncAlgo, smsg: encryptSmsg || undefined, msg: encryptMsg || undefined, files,
 				});
 			} else {
 				const recipient = contacts.find((c) => c.id === encryptRecipientId)!;
 				let myPrivateKey: string | undefined;
-				if (encryptSignWithKey) {
-					if (privateKeyPem) {
-						myPrivateKey = privateKeyPem;
-					}
-					// Note: Stored keys require WebAuthn - implement server-side decryption
-				}
+				if (encryptSignWithKey && privateKeyPem) myPrivateKey = privateKeyPem;
 				result = await encryptOpsec({
-					mode: "publickey",
-					asymAlgo: encryptAsymAlgo,
-					peerPublicKey: recipient.publicKey,
-					myPrivateKey,
-					encAlgo: encryptEncAlgo,
-					smsg: encryptSmsg || undefined,
-					msg: encryptMsg || undefined,
-					files,
+					mode: "publickey", asymAlgo: encryptAsymAlgo, peerPublicKey: recipient.publicKey,
+					myPrivateKey, encAlgo: encryptEncAlgo, smsg: encryptSmsg || undefined, msg: encryptMsg || undefined, files,
 				});
 			}
-
 			setEncryptedBlob(result);
-
-			// For text-only mode (no files), also show base64
-			if (encryptMode === "text") {
-				setEncryptStatus(`Encrypted (${result.length} bytes). Download started.`);
-			} else {
-				setEncryptStatus(`Encrypted file (${formatBytes(result.length)}). Download started.`);
-			}
+			setEncryptStatus(encryptMode === "text"
+				? `암호화 완료 (${result.length} bytes). 다운로드가 시작됩니다.`
+				: `파일 암호화 완료 (${formatBytes(result.length)}). 다운로드가 시작됩니다.`
+			);
 		} catch (err) {
 			console.error(err);
-			setEncryptError((err as Error).message || "Failed to encrypt");
+			setEncryptError((err as Error).message || "암호화에 실패했습니다");
 			setEncryptStatus(null);
 			setEncryptedBlob(null);
 		} finally {
@@ -895,957 +850,832 @@ function App() {
 
 	async function handleCopyEncryptedBase64() {
 		if (!encryptedBlob) return;
-		try {
-			await navigator.clipboard.writeText(u8ToBase64(encryptedBlob));
-		} catch (err) {
-			console.error(err);
-		}
+		try { await navigator.clipboard.writeText(u8ToBase64(encryptedBlob)); } catch (err) { console.error(err); }
 	}
 
-	async function handleGenerateKeys() {
-		setError(null);
-		setStatus(`Generating ${keyAlgo.toUpperCase()} key pair...`);
-		try {
-			const { publicKey, privateKey } = await generateKeyPair(keyAlgo);
-			setPublicKeyPem(publicKey);
-			setPrivateKeyPem(privateKey);
-			setCopyPrivateStatus("idle");
-			setStatus("Key pair ready. Keep the private key encrypted only.");
-		} catch (err) {
-			console.error(err);
-			setError("Failed to generate key pair");
-			setStatus(null);
-		}
-	}
+	/* ─── Decrypt submit ─── */
 
-	async function handleUpload() {
-		if (!canUpload) return;
-		setBusy(true);
-		setError(null);
-		setStatus("Encrypting and uploading...");
+	async function handleDecryptSubmit() {
+		setDecryptStatus(null);
+		setDecryptError(null);
+		setDecryptedResult(null);
 		try {
-			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, notes || undefined);
-			const result = await saveAccount(payload, authToken ?? undefined);
-			const record: AccountRecord = {
-				...payload,
-				id: result.id,
-				createdAt: result.createdAt,
-			};
-			setStoredAccount(record);
-			setStatus("Stored encrypted key");
-			setShowKeySection(false);
-			setPrivateKeyPem("");
-			setCopyPrivateStatus("idle");
-
-			// Auto-register WebAuthn if user is logged in
-			if (authToken && (await isWebAuthnAvailable())) {
-				setStatus("Setting up WebAuthn for secure access...");
-				setTimeout(() => startWebAuthnRegistration(), 500);
+			setDecryptBusy(true);
+			setDecryptStatus("데이터 불러오는 중...");
+			const dataU8 = await loadOpsecData();
+			const info = decryptDetected ?? detectAuthMode(dataU8);
+			setDecryptDetected(info);
+			setDecryptStatus("복호화 중...");
+			let result: DecryptResult;
+			if (info.mode === "password") {
+				if (!decryptPassword) throw new Error("비밀번호를 입력하세요");
+				result = await decryptOpsecPw(dataU8, decryptPassword);
+			} else {
+				const priB64 = await resolvePrivateKeyB64();
+				const peerPub = decryptPeerPublicKey.trim() || undefined;
+				result = await decryptOpsecPub(dataU8, priB64, peerPub);
 			}
+			setDecryptedResult(result);
+			setDecryptStatus("복호화 완료");
 		} catch (err) {
 			console.error(err);
-			setError((err as Error).message || "Upload failed");
-			setStatus(null);
+			setDecryptError((err as Error).message || "복호화에 실패했습니다");
+			setDecryptStatus(null);
+			setDecryptedResult(null);
 		} finally {
-			setBusy(false);
+			setDecryptBusy(false);
 		}
 	}
 
-	function handleRegenerate() {
-		setStoredAccount(null);
-		setShowKeySection(true);
-		setPublicKeyPem("");
-		setPrivateKeyPem("");
-		setCopyPrivateStatus("idle");
-		setNotes("");
-		setStatus(null);
-		setError(null);
+	function handleDownloadDecryptedFile(name: string, data: Uint8Array) {
+		const blob = new Blob([data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer], { type: "application/octet-stream" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = name;
+		link.click();
+		URL.revokeObjectURL(url);
 	}
 
-	async function handleContactSubmit(e: React.FormEvent) {
-		e.preventDefault();
-		if (!authToken) return;
-		const trimmedUsername = contactForm.contactUsername.trim();
-		const trimmedKey = contactForm.publicKey.trim();
-		const selfKey = storedAccount?.publicKey || publicKeyPem;
-		if (selfKey && trimmedKey && selfKey === trimmedKey) {
-			setContactModalError("This public key already belongs to you");
-			return;
-		}
-		if (!trimmedUsername || !trimmedKey) {
-			setContactModalError("Username and public key are required");
-			return;
-		}
-		setContactBusy(true);
-		setContactModalError(null);
+	async function handleDecryptAdvanceToStep2() {
+		setDecryptError(null);
 		try {
-			const payload = {
-				contactUsername: trimmedUsername,
-				publicKey: trimmedKey,
-				notes: contactForm.notes.trim() || undefined,
-			};
-			const saved = await createContact(payload, authToken);
-			setContacts((prev) => {
-				const withoutSaved = prev.filter((c) => c.id !== saved.id);
-				const withoutOld = contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username
-					? withoutSaved.filter((c) => c.id !== editingContactMeta.id)
-					: withoutSaved;
-				return [saved, ...withoutOld];
-			});
-			if (contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username) {
-				try {
-					await deleteContact(editingContactMeta.id, authToken);
-				} catch (deleteErr) {
-					if ((deleteErr as Error).message === "TOKEN_EXPIRED") {
-						handleSignOut();
-						return;
-					}
-					console.error(deleteErr);
-					setContactError((deleteErr as Error).message || "Failed to remove old contact");
-				}
-			}
-			closeContactModal();
+			const data = await loadOpsecData();
+			const info = detectAuthMode(data);
+			setDecryptDetected(info);
+			setDecryptStep(2);
 		} catch (err) {
-			if ((err as Error).message === "TOKEN_EXPIRED") {
-				handleSignOut();
-				return;
-			}
-			console.error(err);
-			setContactModalError((err as Error).message || "Failed to save contact");
-		} finally {
-			setContactBusy(false);
+			setDecryptError((err as Error).message || "데이터를 분석할 수 없습니다");
 		}
 	}
 
-	async function handleDeleteContact(id: string) {
-		if (!authToken) return;
-		const confirmed = window.confirm("Delete this contact?");
-		if (!confirmed) return;
-		try {
-			await deleteContact(id, authToken);
-			setContacts((prev) => prev.filter((contact) => contact.id !== id));
-		} catch (err) {
-			if ((err as Error).message === "TOKEN_EXPIRED") {
-				handleSignOut();
-				return;
-			}
-			console.error(err);
-			setContactError((err as Error).message || "Failed to delete contact");
-		}
-	}
+	/* ─── Render: Landing / Auth ─── */
 
-	function renderDecryptedInfo(result: DecryptResult) {
-		const rows: { label: string; value: string | undefined }[] = [];
-		if (result.msg) rows.push({ label: "Public message", value: result.msg });
-		if (result.smsg) rows.push({ label: "Secure message", value: result.smsg });
-		if (result.files.length > 0) rows.push({ label: "Files", value: `${result.files.length} file(s)` });
-		if (result.verified !== undefined) rows.push({ label: "Signature", value: result.verified ? "Valid" : "INVALID" });
+	if (!isAuthed) {
+		if (view === "login") {
+			return (
+				<div className="auth-page" key="login">
+					<div className="auth-card view-animate">
+						<h1 className="auth-title">로그인</h1>
+						<form className="auth-form" onSubmit={handleLogin}>
+							<div className="form-group">
+								<label className="form-label">아이디</label>
+								<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="아이디 입력" autoComplete="username" />
+							</div>
+							<div className="form-group">
+								<label className="form-label">비밀번호</label>
+								<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="current-password" />
+							</div>
+							{error && <div className="status-bar error">{error}</div>}
+							<button type="submit" className="btn btn-primary btn-full" disabled={!canLogin || loginBusy}>
+								{loginBusy ? "로그인 중..." : "로그인"}
+							</button>
+						</form>
+						<p className="auth-hint">
+							<button onClick={() => { setView("landing"); setError(null); }}>← 돌아가기</button>
+						</p>
+					</div>
+				</div>
+			);
+		}
+
+		if (view === "signup") {
+			return (
+				<div className="auth-page" key="signup">
+					<div className="auth-card view-animate">
+						<h1 className="auth-title">회원가입</h1>
+						<form className="auth-form" onSubmit={handleSignup}>
+							<div className="form-group">
+								<label className="form-label">아이디</label>
+								<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="사용할 아이디" autoComplete="username" />
+							</div>
+							<div className="form-group">
+								<label className="form-label">비밀번호</label>
+								<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="new-password" />
+							</div>
+							<div className="form-group">
+								<label className="form-label">비밀번호 확인</label>
+								<input type="password" value={loginPassConfirm} onChange={(e) => setLoginPassConfirm(e.target.value)} placeholder="비밀번호 다시 입력" autoComplete="new-password" />
+							</div>
+							{error && <div className="status-bar error">{error}</div>}
+							<button type="submit" className="btn btn-primary btn-full" disabled={!canLogin || loginBusy}>
+								{loginBusy ? "처리 중..." : "가입하기"}
+							</button>
+						</form>
+						<p className="auth-hint">
+							<button onClick={() => { setView("landing"); setError(null); }}>← 돌아가기</button>
+						</p>
+					</div>
+				</div>
+			);
+		}
+
+		/* Landing */
 		return (
-			<div className="meta-grid">
-				{rows.map((row) =>
-					row.value ? (
-						<div key={row.label}>
-							<span className="summary-label">{row.label}</span>
-							<p style={{ whiteSpace: "pre-wrap" }}>{row.value}</p>
-						</div>
-					) : null
-				)}
+			<div className="landing" key="landing">
+				<div className="view-animate">
+					<h1 className="brand">
+						Yet<br />Another<br />Security
+					</h1>
+				</div>
+				<div className="landing-buttons view-animate">
+					<button className="btn btn-primary btn-full" onClick={() => { setView("login"); setError(null); setLoginUsername(""); setLoginPass(""); }}>
+						로그인
+					</button>
+					<button className="btn btn-secondary btn-full" onClick={() => { setView("signup"); setError(null); setLoginUsername(""); setLoginPass(""); setLoginPassConfirm(""); }}>
+						회원가입
+					</button>
+				</div>
 			</div>
 		);
 	}
 
-	function renderTabContent() {
-		if (tab === "keys") {
-			const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
+	/* ─── Render: Main App ─── */
 
-			if (tab === "keys") {
-				return hasStoredKey && !showKeySection ? (
-					<section className="card">
-						<h2>Your stored key</h2>
-						<p className="hint">Private key is stored encrypted. Regenerate to replace it.</p>
-						<div className="preview">
-							<div>
-								<h3>Public key</h3>
-								<div className="copy-block">
-									<button
-										type="button"
-										className={copyPublicStatus === "copied" ? "copy-button copied" : "copy-button"}
-										onClick={() => handleCopyPublicKey(storedAccount?.publicKey)}
-									>
-										{copyPublicStatus === "copied" ? "Copied" : copyPublicStatus === "error" ? "Error" : "Copy"}
-									</button>
-									<pre>{storedAccount?.publicKey}</pre>
-								</div>
-							</div>
-							<div>
-								<h3>Private key</h3>
-								<pre>Encrypted (ciphertext saved on server)</pre>
-							</div>
-						</div>
-						<div className="actions">
-							<button className="secondary" onClick={handleRegenerate}>Regenerate keys</button>
-						</div>
-					</section>
+	function renderStepDots(total: number, current: number) {
+		return (
+			<div className="step-dots">
+				{Array.from({ length: total }, (_, i) => (
+					<div key={i} className={`step-dot ${i + 1 === current ? "active" : i + 1 < current ? "done" : ""}`} />
+				))}
+			</div>
+		);
+	}
+
+	/* ─── Contacts tab ─── */
+
+	function renderContactsTab() {
+		return (
+			<>
+				<br />
+				<div className="section-header">
+					<h2 className="section-title">주소록</h2>
+					<button className="btn btn-secondary btn-sm" onClick={openAddContactModal}>+ 추가</button>
+				</div>
+				<p className="section-desc">상대방의 공개키를 관리하여 안전하게 암호화된 메시지를 주고받으세요.</p>
+
+				{contactError && <div className="status-bar error">{contactError}</div>}
+
+				{contactsLoading ? (
+					<p className="text-hint text-center mt-4">불러오는 중...</p>
+				) : contacts.length === 0 ? (
+					<div className="empty-state">
+						<p>저장된 연락처가 없습니다</p>
+						<p className="text-hint">연락처를 추가하면 공개키 암호화를 시작할 수 있어요.</p>
+					</div>
 				) : (
-					<>
-						<section className="card">
-							<label className="label" htmlFor="notes">Notes (optional)</label>
-							<textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Label this key..." />
-
-							<label className="label" htmlFor="key-algo">Key algorithm</label>
-							<select id="key-algo" value={keyAlgo} onChange={(e) => setKeyAlgo(e.target.value as AsymAlgo)}>
-								<option value="ecc1">Curve448 (X448 + Ed448)</option>
-								<option value="rsa1">RSA-2048</option>
-							</select>
-
-							<div className="actions">
-								<button onClick={handleGenerateKeys} className="secondary">Generate key pair</button>
-								<button onClick={handleUpload} disabled={!canUpload || busy}>
-									{busy ? "Working..." : "Encrypt and upload"}
-								</button>
-							</div>
-
-							{status && <div className="status success">{status}</div>}
-							{error && <div className="status error">{error}</div>}
-						</section>
-
-						<section className="card">
-							<h2>Local preview</h2>
-							<div className="preview">
-								<div>
-									<h3>Public key</h3>
-									<div className="copy-block">
-										<button
-											type="button"
-											className={copyPublicStatus === "copied" ? "copy-button copied" : "copy-button"}
-											onClick={() => handleCopyPublicKey(publicKeyPem || undefined)}
-											disabled={!publicKeyPem}
-										>
-											{copyPublicStatus === "copied" ? "Copied" : copyPublicStatus === "error" ? "Error" : "Copy"}
-										</button>
-										<pre>{publicKeyPem || "(generate a key pair)"}</pre>
-									</div>
+					<div className="contact-list">
+						{contacts.map((c) => (
+							<div key={c.id} className="contact-row">
+								<div className="contact-info">
+									<span className="contact-name">{c.contactUsername}</span>
+									{c.notes && <span className="contact-note">{c.notes}</span>}
 								</div>
-								<div>
-									<h3>Private key (plaintext)
-									</h3>
-									<div className="copy-block">
-										{privateKeyPem && (
-											<button
-												type="button"
-												className={copyPrivateStatus === "copied" ? "copy-button copied" : "copy-button"}
-												onClick={() => handleCopyPrivateKey(privateKeyPem)}
-											>
-												{copyPrivateStatus === "copied" ? "Copied" : copyPrivateStatus === "error" ? "Error" : "Copy"}
-											</button>
-										)}
-										<pre>{privateKeyPem || "(generate a key pair)"}</pre>
-									</div>
+								<div className="contact-btns">
+									<button className="btn-ghost btn-sm" onClick={() => handleCopyPublicKey(c.publicKey)}>복사</button>
+									<button className="btn-ghost btn-sm" onClick={() => openEditContactModal(c)}>수정</button>
+									<button className="btn-ghost btn-sm btn-danger" onClick={() => handleDeleteContact(c.id)}>삭제</button>
 								</div>
 							</div>
-							<p className="hint">Private key is encrypted in-browser with AES-GCM using PBKDF2-derived key.</p>
-						</section>
-					</>
-				);
-			}
-		}
+						))}
+					</div>
+				)}
+			</>
+		);
+	}
 
-		if (tab === "encrypt") {
-			const hasContacts = contacts.length > 0;
-			const canEncrypt = encryptAuthMode === "password"
-				? (encryptPassword && !encryptBusy && (encryptMode === "text" ? !!encryptSmsg : !!encryptFile))
-				: (!!encryptRecipientId && !encryptBusy && (encryptMode === "text" ? !!encryptSmsg : !!encryptFile));
+	/* ─── Keys tab ─── */
 
+	function renderKeysTab() {
+		const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
+
+		if (hasStoredKey && !showKeySection) {
 			return (
 				<>
-					<section className="card">
-						<h2>Encrypt data</h2>
-						<p className="hint">YAS2 Opsec encryption — supports password-based or public-key modes with AES-GCM.</p>
-
-						<form className="form-vertical" onSubmit={handleEncryptSubmit}>
-							{/* Auth mode selector */}
-							<label className="label">Authentication mode</label>
-							<div className="segment-control" role="tablist" aria-label="Auth mode">
-								<button
-									type="button"
-									className={encryptAuthMode === "password" ? "segment-option active" : "segment-option"}
-									onClick={() => { setEncryptAuthMode("password"); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
-								>
-									Password
+					<br />
+					<h2 className="section-title">내 키</h2>
+					<p className="section-desc">키가 서버에 안전하게 저장되어 있어요.</p>
+					<div className="card">
+						<div className="key-item">
+							<span className="key-label">공개키</span>
+							<div className="key-value-row">
+								<code className="key-truncated">{truncateKey(storedAccount!.publicKey)}</code>
+								<button className="btn btn-ghost btn-sm" onClick={() => handleCopyPublicKey(storedAccount?.publicKey)}>
+									{copyPublicStatus === "copied" ? "복사됨 ✓" : "복사"}
 								</button>
-								<button
-									type="button"
-									className={encryptAuthMode === "publickey" ? "segment-option active" : "segment-option"}
-									onClick={() => { setEncryptAuthMode("publickey"); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
-								>
-									Public key
-								</button>
-							</div>
-
-							{/* Password-mode fields */}
-							{encryptAuthMode === "password" && (
-								<>
-									<label className="label" htmlFor="encrypt-password">Password</label>
-									<input
-										id="encrypt-password"
-										type="password"
-										value={encryptPassword}
-										onChange={(e) => { setEncryptPassword(e.target.value); setEncryptError(null); }}
-										placeholder="Encryption password"
-									/>
-									<label className="label" htmlFor="encrypt-kdf">Key derivation</label>
-									<select id="encrypt-kdf" value={encryptKdfMethod} onChange={(e) => setEncryptKdfMethod(e.target.value as KdfMethod)}>
-										<option value="arg1">Argon2id (recommended)</option>
-										<option value="pbk1">PBKDF2-SHA512</option>
-									</select>
-								</>
-							)}
-
-							{/* Public-key-mode fields */}
-							{encryptAuthMode === "publickey" && (
-								<>
-									{!hasContacts && !contactsLoading && <div className="status info">Add a contact first to enable public key encryption.</div>}
-									<label className="label" htmlFor="encrypt-contact">Recipient</label>
-									<select
-										id="encrypt-contact"
-										value={encryptRecipientId}
-										onChange={(e) => { setEncryptRecipientId(e.target.value); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
-										disabled={!hasContacts || encryptBusy}
-									>
-										<option value="">Select a contact</option>
-										{contacts.map((c) => (
-											<option key={c.id} value={c.id}>{c.contactUsername}</option>
-										))}
-									</select>
-									<label className="label" htmlFor="encrypt-asym">Asymmetric algorithm</label>
-									<select id="encrypt-asym" value={encryptAsymAlgo} onChange={(e) => setEncryptAsymAlgo(e.target.value as AsymAlgo)}>
-										<option value="ecc1">Curve448 (X448 + Ed448)</option>
-										<option value="rsa1">RSA-2048 (OAEP + PKCS1v1.5)</option>
-									</select>
-									<label className="checkbox-label">
-										<input
-											type="checkbox"
-											checked={encryptSignWithKey}
-											onChange={(e) => setEncryptSignWithKey(e.target.checked)}
-										/>
-										<span>Sign with my private key</span>
-									</label>
-								</>
-							)}
-
-							{/* Encryption algorithm */}
-							<label className="label" htmlFor="encrypt-enc-algo">Encryption algorithm</label>
-							<select id="encrypt-enc-algo" value={encryptEncAlgo} onChange={(e) => setEncryptEncAlgo(e.target.value as EncAlgo)}>
-								<option value="gcm1">AES-GCM (single block)</option>
-								<option value="gcmx1">AES-GCM chunked (large files)</option>
-							</select>
-
-							{/* Public message */}
-							<label className="label" htmlFor="encrypt-msg">Public message (optional, visible without decrypt)</label>
-							<input
-								id="encrypt-msg"
-								type="text"
-								value={encryptMsg}
-								onChange={(e) => setEncryptMsg(e.target.value)}
-								placeholder="Short public note"
-							/>
-
-							{/* Payload mode selector */}
-							<div className="segment-control" role="tablist" aria-label="Payload type">
-								<button
-									type="button"
-									className={encryptMode === "text" ? "segment-option active" : "segment-option"}
-									onClick={() => handleEncryptionModeChange("text")}
-								>
-									Text
-								</button>
-								<button
-									type="button"
-									className={encryptMode === "file" ? "segment-option active" : "segment-option"}
-									onClick={() => handleEncryptionModeChange("file")}
-								>
-									File
-								</button>
-							</div>
-
-							{encryptMode === "text" ? (
-								<>
-									<label className="label" htmlFor="encrypt-smsg">Secure message (encrypted)</label>
-									<textarea
-										id="encrypt-smsg"
-										value={encryptSmsg}
-										onChange={(e) => { setEncryptSmsg(e.target.value); setEncryptError(null); setEncryptStatus(null); setEncryptedBlob(null); }}
-										placeholder="Write the secret message to encrypt"
-									/>
-								</>
-							) : (
-								<div className="file-picker">
-									<div
-										className={isFileDragActive ? "file-dropzone drag-active" : "file-dropzone"}
-										onDragEnter={handleFileDragEnter}
-										onDragOver={handleFileDragOver}
-										onDragLeave={handleFileDragLeave}
-										onDrop={handleFileDrop}
-										aria-disabled={encryptBusy}
-									>
-										<input
-											id="encrypt-file"
-											type="file"
-											onChange={handleEncryptFileChange}
-											disabled={encryptBusy}
-											className="visually-hidden"
-										/>
-										<label htmlFor="encrypt-file">
-											<div className="drop-graphic" aria-hidden="true">
-												<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-													<rect x="7" y="23" width="26" height="10" rx="3" stroke="#38bdf8" strokeWidth="1.6" opacity="0.7" />
-													<path d="M20 7v18" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" />
-													<path d="M15 18l5 5 5-5" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-												</svg>
-											</div>
-											<strong>Drag & drop a file to encrypt</strong>
-											<span className="drop-highlight">Drop it anywhere inside this panel or click to browse.</span>
-											<span className="muted">Files stay local. We encrypt in your browser before anything leaves.</span>
-										</label>
-									</div>
-
-									{encryptFile && (
-										<div className="file-info">
-											<div>
-												<strong>{encryptFile.name || "Selected file"}</strong>
-												<p className="muted">{formatBytes(encryptFile.size)} · {encryptFile.type || "application/octet-stream"}</p>
-											</div>
-											<button type="button" className="secondary button-inline" onClick={clearSelectedFile} disabled={encryptBusy}>
-												Remove
-											</button>
-										</div>
-									)}
-								</div>
-							)}
-
-							<div className="actions">
-								<button type="submit" disabled={!canEncrypt}>{encryptBusy ? "Encrypting..." : "Encrypt"}</button>
-								<button type="button" className="secondary" onClick={resetEncryptionForm} disabled={encryptBusy}>
-									Reset
-								</button>
-							</div>
-
-							{encryptBusy && (
-								<div className="progress-row" role="status" aria-live="polite">
-									<div className="progress-bar">
-										<div className="progress-fill" />
-									</div>
-									<span className="muted">Encrypting payload...</span>
-								</div>
-							)}
-						</form>
-						{encryptStatus && <div className="status success">{encryptStatus}</div>}
-						{encryptError && <div className="status error">{encryptError}</div>}
-					</section>
-
-					{encryptedBlob && (
-						<section className="card">
-							<div className="encrypt-summary">
-								<div>
-									<span className="summary-label">Mode</span>
-									<p>{encryptAuthMode === "password" ? "Password" : "Public key"}</p>
-								</div>
-								<div>
-									<span className="summary-label">Size</span>
-									<p>{formatBytes(encryptedBlob.length)}</p>
-								</div>
-								<div>
-									<span className="summary-label">Algorithm</span>
-									<p>{encryptEncAlgo === "gcmx1" ? "AES-GCM chunked" : "AES-GCM"}</p>
-								</div>
-							</div>
-							<p className="hint">Download the encrypted binary or copy as Base64.</p>
-							<div className="result-actions">
-								<button type="button" className="secondary button-inline" onClick={handleCopyEncryptedBase64}>
-									Copy Base64
-								</button>
-								<button type="button" className="ghost button-inline" onClick={handleDownloadEncryptedBlob}>
-									Download .bin
-								</button>
-							</div>
-						</section>
-					)}
-				</>
-			);
-		}
-
-		if (tab === "address-book") {
-			const isContactFormValid = Boolean(contactForm.contactUsername.trim() && contactForm.publicKey.trim());
-
-			return (
-				<>
-					<section className="card">
-						<div className="contact-header">
-							<div>
-								<h2>Contacts</h2>
-								<p className="hint">Manage trusted recipients and their public keys so you can encrypt messages to them.</p>
-							</div>
-							<button type="button" className="secondary button-inline" onClick={openAddContactModal}>Add contact</button>
-						</div>
-						{contactError && <div className="status error">{contactError}</div>}
-						<div className="contact-list">
-							<div className="contact-list-header">
-								<h3>Saved contacts</h3>
-								{contactsLoading && <span className="muted">Loading...</span>}
-							</div>
-							{contacts.length === 0 && !contactsLoading ? (
-								<p className="hint">No contacts yet. Add someone to start encrypting messages for them.</p>
-							) : (
-								<ul className="contact-items">
-									{contacts.map((contact) => (
-										<li key={contact.id} className="contact-item">
-											<div className="contact-meta">
-												<strong>{contact.contactUsername}</strong>
-												{contact.notes && <p className="hint">{contact.notes}</p>}
-											</div>
-											<div className="contact-actions">
-												<button
-													type="button"
-													className={`secondary button-inline copy-state ${
-														copyPublicStatus === "copied" ? "copied" : copyPublicStatus === "error" ? "error" : ""
-													}`}
-													onClick={() => handleCopyPublicKey(contact.publicKey)}
-												>
-													{copyPublicStatus === "copied" ? "Copied" : copyPublicStatus === "error" ? "Error" : "Copy key"}
-												</button>
-												<button type="button" className="secondary button-inline" onClick={() => openEditContactModal(contact)}>
-													Edit
-												</button>
-												<button type="button" className="ghost button-inline danger" onClick={() => handleDeleteContact(contact.id)}>
-													Delete
-												</button>
-											</div>
-										</li>
-									))}
-								</ul>
-							)}
-						</div>
-					</section>
-
-					{(contactModalOpen || contactModalClosing) && (
-						<div className={contactModalClosing ? "modal-backdrop closing" : "modal-backdrop"} role="dialog" aria-modal="true">
-							<div className={contactModalClosing ? "modal-card closing" : "modal-card"}>
-								<div className="modal-header">
-									<h3>{contactModalMode === "add" ? "Add contact" : "Edit contact"}</h3>
-									<button type="button" className="ghost button-inline" onClick={closeContactModal}>Close</button>
-								</div>
-								<form className="form-vertical" onSubmit={handleContactSubmit}>
-									<label className="label" htmlFor="contact-username">Contact username</label>
-									<input
-										id="contact-username"
-										type="text"
-										value={contactForm.contactUsername}
-										onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
-										placeholder="recipient_id"
-										required
-									/>
-									<label className="label" htmlFor="contact-notes">Notes (optional)</label>
-									<textarea
-										id="contact-notes"
-										value={contactForm.notes}
-										onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
-										placeholder="PGP fingerprint, onboarding status, etc."
-									/>
-									<label className="label" htmlFor="contact-public-key">Public key</label>
-									<textarea
-										id="contact-public-key"
-										value={contactForm.publicKey}
-										onChange={(e) => setContactForm((prev) => ({ ...prev, publicKey: e.target.value }))}
-										placeholder="Base64-encoded public key"
-										required
-									/>
-									<div className="modal-actions">
-										<button type="button" className="ghost button-inline" onClick={closeContactModal}>Cancel</button>
-										<button type="submit" disabled={contactBusy || !isContactFormValid}>
-											{contactBusy ? "Saving..." : contactModalMode === "add" ? "Save contact" : "Update contact"}
-										</button>
-									</div>
-									{contactModalError && <div className="status error">{contactModalError}</div>}
-								</form>
 							</div>
 						</div>
-					)}
+						<div className="key-item">
+							<span className="key-label">개인키</span>
+							<span className="text-hint">서버에 암호화되어 저장됨</span>
+						</div>
+					</div>
+					{status && <div className="status-bar success">{status}</div>}
+					{error && <div className="status-bar error">{error}</div>}
+					<div className="btn-row">
+						<button className="btn btn-secondary" onClick={handleRegenerate}>키 재생성</button>
+					</div>
 				</>
 			);
 		}
 
 		return (
 			<>
-				<section className="card">
-					<h2>Decrypt</h2>
-					<p className="hint">Paste Base64 ciphertext or upload an encrypted binary, then decrypt locally.</p>
-					<form className="form-vertical" onSubmit={handleDecryptSubmit}>
-						<label className="label" htmlFor="decrypt-base64">Ciphertext (Base64)</label>
-						<textarea
-							id="decrypt-base64"
-							placeholder="Paste Base64-encoded ciphertext..."
-							value={decryptPayloadInput}
-							onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-								const val = e.target.value;
-								setDecryptPayloadInput(val);
-								setDecryptPayloadFile(null);
-								setDecryptStatus(null);
-								setDecryptError(null);
-								setDecryptedResult(null);
-								if (val.trim()) {
-									try {
-										tryAutoDetect(base64ToU8(val.trim()));
-									} catch {
-										setDecryptDetected(null);
-									}
-								} else {
-									setDecryptDetected(null);
-								}
-							}}
-							disabled={decryptBusy}
-						/>
+				<h2 className="section-title">키 생성</h2>
+				<p className="section-desc">암호화에 사용할 키 쌍을 생성하고 서버에 안전하게 저장합니다.</p>
 
-						<div className="file-picker">
-							<div
-								className={isDecryptFileDragActive ? "file-dropzone drag-active" : "file-dropzone"}
-								onDragEnter={handleDecryptDragEnter}
-								onDragOver={handleDecryptDragOver}
-								onDragLeave={handleDecryptDragLeave}
-								onDrop={handleDecryptFileDrop}
-								aria-disabled={decryptBusy}
-							>
-								<input
-									id="decrypt-file"
-									type="file"
-									onChange={handleDecryptFileChange}
-									disabled={decryptBusy}
-									className="visually-hidden"
-								/>
-								<label htmlFor="decrypt-file">
-									<div className="drop-graphic" aria-hidden="true">
-										<svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-											<rect x="7" y="23" width="26" height="10" rx="3" stroke="#38bdf8" strokeWidth="1.6" opacity="0.7" />
-											<path d="M20 7v18" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" />
-											<path d="M15 18l5 5 5-5" stroke="#38bdf8" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-										</svg>
-									</div>
-									<strong>Drag & drop encrypted .bin file</strong>
-									<span className="drop-highlight">Drop your encrypted binary here or click to browse.</span>
-									<span className="muted">We parse and decrypt entirely in your browser.</span>
-								</label>
-							</div>
+				<div className="card">
+					<div className="form-group">
+						<label className="form-label">메모 (선택)</label>
+						<input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="이 키에 대한 메모..." />
+					</div>
+					<div className="form-group">
+						<label className="form-label">키 알고리즘</label>
+						<select value={keyAlgo} onChange={(e) => setKeyAlgo(e.target.value as AsymAlgo)}>
+							<option value="ecc1">Curve448 (추천)</option>
+							<option value="rsa1">RSA-2048</option>
+						</select>
+					</div>
+					<div className="btn-row">
+						<button className="btn btn-secondary" onClick={handleGenerateKeys}>키 쌍 생성</button>
+						<button className="btn btn-primary" onClick={handleUpload} disabled={!canUpload || busy}>
+							{busy ? "처리 중..." : "암호화하여 저장"}
+						</button>
+					</div>
+					{status && <div className="status-bar success mt-3">{status}</div>}
+					{error && <div className="status-bar error mt-3">{error}</div>}
+				</div>
 
-							{decryptPayloadFile && (
-								<div className="file-info">
-									<div>
-										<strong>{decryptPayloadFile.name}</strong>
-										<p className="muted">{formatBytes(decryptPayloadFile.size)} · {decryptPayloadFile.type || "application/octet-stream"}</p>
-									</div>
-									<button
-										type="button"
-										className="secondary button-inline"
-										onClick={() => {
-											setDecryptPayloadFile(null);
-											setIsDecryptFileDragActive(false);
-										}}
-										disabled={decryptBusy}
-									>
-										Remove
-									</button>
-								</div>
+				{/* Key preview */}
+				<div className="card">
+					<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>미리보기</h3>
+					<div className="key-item">
+						<span className="key-label">공개키</span>
+						<div className="key-full">
+							{publicKeyPem || "(키 쌍을 생성하세요)"}
+							{publicKeyPem && (
+								<button className={`key-copy-btn ${copyPublicStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPublicKey(publicKeyPem)}>
+									{copyPublicStatus === "copied" ? "복사됨" : "복사"}
+								</button>
 							)}
 						</div>
-
-						{/* Detected mode info */}
-						{decryptDetected && (
-							<div className="status info">
-								Detected mode: <strong>{decryptDetected.mode === "password" ? "🔑 Password" : "🔐 Public Key"}</strong>
-								{decryptDetected.msg && (
-									<div className="detected-message">
-										<span className="detected-message-label">Public message:</span>
-										<pre className="detected-message-body">{decryptDetected.msg}</pre>
-									</div>
-								)}
-							</div>
-						)}
-
-						{/* === PASSWORD MODE === */}
-						{(!decryptDetected || decryptDetected.mode === "password") && (
-							<>
-								{decryptDetected?.mode === "password" && (
-									<>
-										<label className="label" htmlFor="decrypt-password">Password</label>
-										<input
-											id="decrypt-password"
-											type="password"
-											value={decryptPassword}
-											onChange={(e) => { setDecryptPassword(e.target.value); setDecryptError(null); }}
-											placeholder="Enter the encryption password"
-											disabled={decryptBusy}
-											autoFocus
-										/>
-									</>
-								)}
-							</>
-						)}
-
-						{/* === PUBLIC KEY MODE === */}
-						{decryptDetected?.mode === "publickey" && (
-							<>
-								{/* WebAuthn or private key */}
-								{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable && (
-									<div>
-										<label className="label">Unlock stored key with security key</label>
-										<button
-											type="button"
-											className="secondary full-width"
-											onClick={handleWebAuthnAuthenticate}
-											disabled={decryptBusy || webauthnAuthBusy}
-										>
-											{webauthnAuthBusy ? "Verifying..." : "🔐 Authenticate with Security Key"}
-										</button>
-										{decryptionToken && (
-											<p className="hint success-text">✓ Security key verified</p>
-										)}
-									</div>
-								)}
-
-								<div>
-									<label className="label" htmlFor="decrypt-private-key">Private key (Base64)</label>
-									<textarea
-										id="decrypt-private-key"
-										value={decryptPrivateKeyInput}
-										onChange={(e) => {
-											setDecryptPrivateKeyInput(e.target.value);
-											setDecryptStatus(null);
-											setDecryptError(null);
-										}}
-										placeholder="Paste Base64-encoded private key (overrides stored key)"
-										disabled={decryptBusy}
-									/>
-								</div>
-
-								{/* Peer public key: contact selection or manual */}
-								<label className="label">Sender's public key (for signature verification)</label>
-								<div className="tab-row compact">
-									<button
-										type="button"
-										className={decryptPeerKeySource === "contact" ? "tab-btn active" : "tab-btn"}
-										onClick={() => setDecryptPeerKeySource("contact")}
-									>
-										From contacts
-									</button>
-									<button
-										type="button"
-										className={decryptPeerKeySource === "manual" ? "tab-btn active" : "tab-btn"}
-										onClick={() => setDecryptPeerKeySource("manual")}
-									>
-										Manual input
-									</button>
-								</div>
-
-								{decryptPeerKeySource === "contact" ? (
-									<select
-										value={decryptSelectedContactId}
-										onChange={(e) => {
-											const id = e.target.value;
-											setDecryptSelectedContactId(id);
-											const contact = contacts.find((c) => c.id === id);
-											setDecryptPeerPublicKey(contact?.publicKey ?? "");
-										}}
-										disabled={decryptBusy || contacts.length === 0}
-									>
-										<option value="">{contacts.length === 0 ? "No contacts saved" : "Select a contact..."}</option>
-										{contacts.map((c) => (
-											<option key={c.id} value={c.id}>
-												{c.contactUsername}{c.notes ? ` — ${c.notes}` : ""}
-											</option>
-										))}
-									</select>
-								) : (
-									<textarea
-										id="decrypt-peer-pubkey"
-										value={decryptPeerPublicKey}
-										onChange={(e) => {
-											setDecryptPeerPublicKey(e.target.value);
-											setDecryptSelectedContactId("");
-										}}
-										placeholder="Paste sender's Base64-encoded public key"
-										disabled={decryptBusy}
-									/>
-								)}
-							</>
-						)}
-
-						<div className="actions">
-							<button type="submit" disabled={decryptBusy}>{decryptBusy ? "Decrypting..." : "Decrypt"}</button>
-							<button type="button" className="secondary" onClick={resetDecryptForm} disabled={decryptBusy}>
-								Reset
-							</button>
+					</div>
+					<div className="key-item">
+						<span className="key-label">개인키 (평문)</span>
+						<div className="key-full">
+							{privateKeyPem || "(키 쌍을 생성하세요)"}
+							{privateKeyPem && (
+								<button className={`key-copy-btn ${copyPrivateStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPrivateKey(privateKeyPem)}>
+									{copyPrivateStatus === "copied" ? "복사됨" : "복사"}
+								</button>
+							)}
 						</div>
-
-						{decryptBusy && (
-							<div className="progress-row" role="status" aria-live="polite">
-								<div className="progress-bar">
-									<div className="progress-fill" />
-								</div>
-								<span className="muted">Decrypting payload...</span>
-							</div>
-						)}
-					</form>
-					{decryptStatus && <div className="status success">{decryptStatus}</div>}
-					{decryptError && <div className="status error">{decryptError}</div>}
-				</section>
-
-				{decryptedResult && (
-					<section className="card">
-						<h3>Decryption result</h3>
-						{renderDecryptedInfo(decryptedResult)}
-
-						{decryptedResult.files.length > 0 && (
-							<div className="file-list">
-								<h4>Extracted files</h4>
-								{decryptedResult.files.map((f, i) => (
-									<div key={i} className="file-info">
-										<div>
-											<strong>{f.name}</strong>
-											<p className="muted">{formatBytes(f.data.length)}</p>
-										</div>
-										<button type="button" className="secondary button-inline" onClick={() => handleDownloadDecryptedFile(f.name, f.data)}>
-											Download
-										</button>
-									</div>
-								))}
-							</div>
-						)}
-					</section>
-				)}
+					</div>
+					<p className="text-hint mt-2">개인키는 브라우저에서 AES-GCM으로 암호화된 후 서버에 저장됩니다.</p>
+				</div>
 			</>
 		);
 	}
 
-	if (!isAuthed) {
-		const onSubmit = authMode === "login" ? handleLogin : handleSignup;
-		return (
-			<div className="page">
-				<header className="hero">
-					<div>
-						<p className="eyebrow">Yet Another Security - Web</p>
-						<h1>{authMode === "login" ? "Sign in to manage encrypted keys" : "Create an account to get started"}</h1>
-						<p className="lede">Access your encrypted key vault and tools after authentication.</p>
-					</div>
-				</header>
+	/* ─── Encrypt tab (wizard) ─── */
 
-				<section className="card">
-					<form className="form-vertical" onSubmit={onSubmit}>
-						<div>
-							<label className="label" htmlFor="login-username">Username</label>
-							<input
-								id="login-username"
-								type="text"
-								value={loginUsername}
-								onChange={(e) => setLoginUsername(e.target.value)}
-								placeholder="your_id"
-								autoComplete="username"
-							/>
+	function renderEncryptTab() {
+		if (encryptedBlob) {
+			return (
+				<>
+					<h2 className="section-title">암호화 완료</h2>
+					<div className="card">
+						<div className="result-grid">
+							<div className="result-item">
+								<span className="result-label">방식</span>
+								<span className="result-value">{encryptAuthMode === "password" ? "비밀번호" : "공개키"}</span>
+							</div>
+							<div className="result-item">
+								<span className="result-label">크기</span>
+								<span className="result-value">{formatBytes(encryptedBlob.length)}</span>
+							</div>
+							<div className="result-item">
+								<span className="result-label">알고리즘</span>
+								<span className="result-value">{encryptEncAlgo === "gcmx1" ? "대용량" : "표준"}</span>
+							</div>
 						</div>
-						<div>
-							<label className="label" htmlFor="login-pass">Password</label>
-							<input
-								id="login-pass"
-								type="password"
-								value={loginPass}
-								onChange={(e) => setLoginPass(e.target.value)}
-								placeholder="••••••••"
-								autoComplete={authMode === "login" ? "current-password" : "new-password"}
-							/>
+						<div className="btn-row">
+							<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>Base64 복사</button>
+							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>파일 다운로드</button>
 						</div>
-						{authMode === "signup" && (
-							<div>
-								<label className="label" htmlFor="login-pass-confirm">Confirm password</label>
-								<input
-									id="login-pass-confirm"
-									type="password"
-									value={loginPassConfirm}
-									onChange={(e) => setLoginPassConfirm(e.target.value)}
-									placeholder="repeat password"
-									autoComplete="new-password"
-								/>
+					</div>
+					{encryptStatus && <div className="status-bar success">{encryptStatus}</div>}
+					<div className="btn-row mt-3">
+						<button className="btn btn-primary" onClick={resetEncryptionForm}>처음으로</button>
+					</div>
+				</>
+			);
+		}
+
+		return (
+			<div className="view-animate" key={`enc-step-${encryptStep}`}>
+				{renderStepDots(4, encryptStep)}
+
+				{encryptStep === 1 && (
+					<>
+						<h2 className="section-title">암호화</h2>
+						<p className="section-desc">어떤 방식으로 데이터를 보호할까요?</p>
+						<div className="option-cards">
+							<button className="option-card" onClick={() => { setEncryptAuthMode("password"); setEncryptStep(2); }}>
+								<span className="option-title">🔑 비밀번호</span>
+								<span className="option-desc">비밀번호를 아는 사람만 열 수 있어요.</span>
+							</button>
+							<button className="option-card" onClick={() => { setEncryptAuthMode("publickey"); setEncryptStep(2); }}>
+								<span className="option-title">👤 공개키</span>
+								<span className="option-desc">지정한 상대방만 열 수 있도록 보호합니다. 주소록에 등록된 상대방의 공개키가 필요합니다.</span>
+							</button>
+						</div>
+					</>
+				)}
+
+				{encryptStep === 2 && encryptAuthMode === "password" && (
+					<>
+						<h2 className="section-title">비밀번호 설정</h2>
+						<p className="section-desc">암호화에 사용할 비밀번호를 입력하세요.</p>
+						<div className="form-group">
+							<label className="form-label">비밀번호</label>
+							<input type="password" value={encryptPassword} onChange={(e) => setEncryptPassword(e.target.value)} placeholder="비밀번호 입력" autoFocus />
+						</div>
+						<div className="form-group">
+							<label className="form-label">키 유도 방식</label>
+							<div className="option-cards">
+								<button className={`option-card ${encryptKdfMethod === "arg1" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg1")}>
+									<span className="option-title">Argon2id</span>
+									<span className="option-desc">높은 보안 강도 (추천)</span>
+								</button>
+								<button className={`option-card ${encryptKdfMethod === "pbk1" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("pbk1")}>
+									<span className="option-title">PBKDF2</span>
+									<span className="option-desc">호환성 우선</span>
+								</button>
+							</div>
+						</div>
+						<div className="btn-row">
+							<button className="btn btn-ghost" onClick={() => setEncryptStep(1)}>이전</button>
+							<button className="btn btn-primary" disabled={!encryptPassword} onClick={() => setEncryptStep(3)}>다음</button>
+						</div>
+					</>
+				)}
+
+				{encryptStep === 2 && encryptAuthMode === "publickey" && (
+					<>
+						<h2 className="section-title">수신자 설정</h2>
+						<p className="section-desc">암호화된 데이터를 받을 사람을 선택하세요.</p>
+						<div className="form-group">
+							<label className="form-label">수신자</label>
+							<select value={encryptRecipientId} onChange={(e) => setEncryptRecipientId(e.target.value)}>
+								<option value="">연락처에서 선택...</option>
+								{contacts.map((c) => (
+									<option key={c.id} value={c.id}>{c.contactUsername}</option>
+								))}
+							</select>
+							{contacts.length === 0 && <span className="text-hint">주소록에 연락처를 먼저 추가하세요.</span>}
+						</div>
+						<div className="form-group">
+							<label className="form-label">비대칭 알고리즘</label>
+							<div className="option-cards">
+								<button className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setEncryptAsymAlgo("ecc1")}>
+									<span className="option-title">Curve448</span>
+									<span className="option-desc">높은 보안 강도 (추천)</span>
+								</button>
+								<button className={`option-card ${encryptAsymAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setEncryptAsymAlgo("rsa1")}>
+									<span className="option-title">RSA-2048</span>
+									<span className="option-desc">호환성 우선</span>
+								</button>
+							</div>
+						</div>
+						<label className="checkbox-row">
+							<input type="checkbox" checked={encryptSignWithKey} onChange={(e) => setEncryptSignWithKey(e.target.checked)} />
+							<span className="checkbox-text">내 개인키로 서명하기</span>
+						</label>
+						<div className="btn-row">
+							<button className="btn btn-ghost" onClick={() => setEncryptStep(1)}>이전</button>
+							<button className="btn btn-primary" disabled={!encryptRecipientId} onClick={() => setEncryptStep(3)}>다음</button>
+						</div>
+					</>
+				)}
+
+				{encryptStep === 3 && (
+					<>
+						<h2 className="section-title">암호화 방식</h2>
+						<p className="section-desc">데이터를 암호화할 방식을 선택하세요.</p>
+						<div className="option-cards">
+							<button className="option-card" onClick={() => { setEncryptEncAlgo("gcm1"); setEncryptStep(4); }}>
+								<span className="option-title">표준 (AES-GCM)</span>
+								<span className="option-desc">일반적인 텍스트와 파일에 적합합니다</span>
+							</button>
+							<button className="option-card" onClick={() => { setEncryptEncAlgo("gcmx1"); setEncryptStep(4); }}>
+								<span className="option-title">대용량 파일 전용 (AES-GCM 청크)</span>
+								<span className="option-desc">대용량 파일을 효율적으로 처리합니다</span>
+							</button>
+						</div>
+						<div className="btn-row">
+							<button className="btn btn-ghost" onClick={() => setEncryptStep(2)}>이전</button>
+						</div>
+					</>
+				)}
+
+				{encryptStep === 4 && (
+					<>
+						<h2 className="section-title">데이터 입력</h2>
+						<p className="section-desc">암호화할 내용을 입력하세요.</p>
+
+						<div className="form-group">
+							<label className="form-label">공개 메시지 (선택)</label>
+							<input type="text" value={encryptMsg} onChange={(e) => setEncryptMsg(e.target.value)} placeholder="암호화 없이 표시되는 메시지" />
+							<span className="form-hint">이 메시지는 복호화 없이도 볼 수 있어요</span>
+						</div>
+
+						<div className="tab-toggle">
+							<button className={encryptMode === "text" ? "active" : ""} onClick={() => handleEncryptionModeChange("text")}>텍스트</button>
+							<button className={encryptMode === "file" ? "active" : ""} onClick={() => handleEncryptionModeChange("file")}>파일</button>
+						</div>
+
+						{encryptMode === "text" ? (
+							<div className="form-group">
+								<label className="form-label">비밀 메시지</label>
+								<textarea value={encryptSmsg} onChange={(e) => { setEncryptSmsg(e.target.value); setEncryptError(null); }} placeholder="암호화할 메시지 입력" />
+							</div>
+						) : (
+							<div className="form-group">
+								<div
+									className={`file-drop ${isFileDragActive ? "active" : ""}`}
+									onDragEnter={handleFileDragEnter}
+									onDragOver={handleFileDragOver}
+									onDragLeave={handleFileDragLeave}
+									onDrop={handleFileDrop}
+								>
+									<input id="encrypt-file" type="file" onChange={handleEncryptFileChange} disabled={encryptBusy} className="sr-only" />
+									<label htmlFor="encrypt-file" style={{ cursor: "pointer" }}>
+										<div className="file-drop-icon">📁</div>
+										<p className="file-drop-text">파일을 끌어놓거나 클릭하세요</p>
+										<p className="file-drop-hint">브라우저에서 암호화됩니다</p>
+									</label>
+								</div>
+								{encryptFile && (
+									<div className="file-info-bar">
+										<div>
+											<span className="file-info-name">{encryptFile.name}</span>
+											<span className="file-info-size"> · {formatBytes(encryptFile.size)}</span>
+										</div>
+										<button className="btn-ghost btn-sm" onClick={() => applySelectedEncryptFile(null)}>제거</button>
+									</div>
+								)}
 							</div>
 						)}
-						<div className="actions vertical-actions">
-							<button type="submit" disabled={!canLogin || loginBusy}>
-								{loginBusy ? "Working..." : authMode === "login" ? "Sign in" : "Create account"}
-							</button>
-							<button
-								type="button"
-								className="secondary"
-								onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")}
-							>
-								{authMode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
+
+						{encryptError && <div className="status-bar error">{encryptError}</div>}
+						{encryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
+
+						<div className="btn-row">
+							<button className="btn btn-ghost" onClick={() => setEncryptStep(3)}>이전</button>
+							<button className="btn btn-primary" disabled={encryptBusy} onClick={handleEncryptSubmit}>
+								{encryptBusy ? "암호화 중..." : "암호화"}
 							</button>
 						</div>
-					</form>
-					{error && <div className="status error">{error}</div>}
-					<p className="hint">Passwords are stored hashed (bcrypt) in MongoDB. Tokens are JWT (1d).</p>
-				</section>
+					</>
+				)}
 			</div>
 		);
 	}
 
-	const heroTitle =
-		tab === "keys"
-			? "Protect private keys with a passphrase-derived key"
-			: tab === "address-book"
-			? "Manage trusted contacts and their public keys"
-			: tab === "encrypt"
-			? "Encrypt data with recipients' public keys"
-			: "Decrypt securely in your browser";
+	/* ─── Decrypt tab (wizard) ─── */
 
-	const heroLede =
-		tab === "keys"
-			? "Encrypt in the browser, store only ciphertext, and keep your passphrase local. Public keys are shareable; private keys stay yours."
-			: tab === "address-book"
-			? "Keep recipients' public keys organized so you can encrypt to the right person every time."
-			: tab === "encrypt"
-			? "YAS2 Opsec encryption: password-based (Argon2id/PBKDF2) or public-key (Curve448/RSA-2048) with AES-GCM."
-			: "Decrypt YAS2 Opsec ciphertext locally — paste Base64 or upload a .bin file.";
+	function renderDecryptTab() {
+		if (decryptedResult) {
+			const rows: { label: string; value: string }[] = [];
+			if (decryptedResult.msg) rows.push({ label: "공개 메시지", value: decryptedResult.msg });
+			if (decryptedResult.smsg) rows.push({ label: "비밀 메시지", value: decryptedResult.smsg });
+			if (decryptedResult.files.length > 0) rows.push({ label: "파일", value: `${decryptedResult.files.length}개` });
+			if (decryptedResult.verified !== undefined) rows.push({ label: "서명 검증", value: decryptedResult.verified ? "유효 ✓" : "유효하지 않음 ✗" });
+
+			return (
+				<>
+					<h2 className="section-title">복호화 결과</h2>
+					{decryptStatus && <div className="status-bar success">{decryptStatus}</div>}
+					<div className="card">
+						{rows.map((r) => (
+							<div key={r.label} style={{ marginBottom: 14 }}>
+								<span className="result-label">{r.label}</span>
+								<p style={{ whiteSpace: "pre-wrap", marginTop: 4, fontSize: 15, fontWeight: 500 }}>{r.value}</p>
+							</div>
+						))}
+					</div>
+
+					{decryptedResult.files.length > 0 && (
+						<div className="card">
+							<h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>추출된 파일</h3>
+							{decryptedResult.files.map((f, i) => (
+								<div key={i} className="file-info-bar" style={{ marginTop: i > 0 ? 8 : 0 }}>
+									<div>
+										<span className="file-info-name">{f.name}</span>
+										<span className="file-info-size"> · {formatBytes(f.data.length)}</span>
+									</div>
+									<button className="btn btn-secondary btn-sm" onClick={() => handleDownloadDecryptedFile(f.name, f.data)}>다운로드</button>
+								</div>
+							))}
+						</div>
+					)}
+
+					<div className="btn-row mt-3">
+						<button className="btn btn-primary" onClick={resetDecryptForm}>처음으로</button>
+					</div>
+				</>
+			);
+		}
+
+		return (
+			<div className="view-animate" key={`dec-step-${decryptStep}`}>
+				{renderStepDots(2, decryptStep)}
+
+				{decryptStep === 1 && (
+					<>
+						<h2 className="section-title">복호화</h2>
+						<p className="section-desc">암호화된 데이터를 불러오세요.</p>
+
+						<div className="form-group">
+							<div
+								className={`file-drop ${isDecryptFileDragActive ? "active" : ""}`}
+								onDragEnter={handleDecryptDragEnter}
+								onDragOver={handleDecryptDragOver}
+								onDragLeave={handleDecryptDragLeave}
+								onDrop={handleDecryptFileDrop}
+							>
+								<input id="decrypt-file" type="file" onChange={handleDecryptFileChange} disabled={decryptBusy} className="sr-only" />
+								<label htmlFor="decrypt-file" style={{ cursor: "pointer" }}>
+									<div className="file-drop-icon">📂</div>
+									<p className="file-drop-text">암호화된 파일을 끌어놓거나 클릭하세요</p>
+									<p className="file-drop-hint">.bin 파일을 여기에 놓으세요</p>
+								</label>
+							</div>
+							{decryptPayloadFile && (
+								<div className="file-info-bar">
+									<div>
+										<span className="file-info-name">{decryptPayloadFile.name}</span>
+										<span className="file-info-size"> · {formatBytes(decryptPayloadFile.size)}</span>
+									</div>
+									<button className="btn-ghost btn-sm" onClick={() => { setDecryptPayloadFile(null); setDecryptDetected(null); }}>제거</button>
+								</div>
+							)}
+						</div>
+
+						<div className="form-group">
+							<label className="form-label">또는 Base64 텍스트 붙여넣기</label>
+							<textarea
+								value={decryptPayloadInput}
+								onChange={(e) => {
+									const val = e.target.value;
+									setDecryptPayloadInput(val);
+									setDecryptPayloadFile(null);
+									setDecryptError(null);
+									if (val.trim()) {
+										try { tryAutoDetect(base64ToU8(val.trim())); } catch { setDecryptDetected(null); }
+									} else { setDecryptDetected(null); }
+								}}
+								placeholder="Base64로 인코딩된 암호문..."
+								disabled={decryptBusy}
+							/>
+						</div>
+
+						{decryptError && <div className="status-bar error">{decryptError}</div>}
+
+						<div className="btn-row btn-row-right">
+							<button className="btn btn-primary" disabled={!decryptPayloadFile && !decryptPayloadInput.trim()} onClick={handleDecryptAdvanceToStep2}>
+								다음
+							</button>
+						</div>
+					</>
+				)}
+
+				{decryptStep === 2 && (
+					<>
+						<h2 className="section-title">복호화 설정</h2>
+
+						{decryptDetected && (
+							<div className="card mb-3">
+								<div className="result-grid">
+									<div className="result-item">
+										<span className="result-label">감지된 방식</span>
+										<span className="result-value">{decryptDetected.mode === "password" ? "🔑 비밀번호" : "👤 공개키"}</span>
+									</div>
+									<div className="result-item">
+										<span className="result-label">알고리즘</span>
+										<span className="result-value">{decryptDetected.algo}</span>
+									</div>
+								</div>
+								{decryptDetected.msg && (
+									<div className="detected-msg">
+										<p className="detected-msg-label">공개 메시지</p>
+										<pre className="detected-msg-body">{decryptDetected.msg}</pre>
+									</div>
+								)}
+							</div>
+						)}
+
+						{/* Password mode */}
+						{decryptDetected?.mode === "password" && (
+							<div className="form-group">
+								<label className="form-label">비밀번호</label>
+								<input
+									type="password"
+									value={decryptPassword}
+									onChange={(e) => { setDecryptPassword(e.target.value); setDecryptError(null); }}
+									placeholder="암호화에 사용한 비밀번호"
+									disabled={decryptBusy}
+									autoFocus
+								/>
+							</div>
+						)}
+
+						{/* Public key mode */}
+						{decryptDetected?.mode === "publickey" && (
+							<>
+								{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable && (
+									<div className="form-group">
+										<label className="form-label">저장된 키 잠금 해제</label>
+										<button className="btn btn-secondary btn-full" onClick={handleWebAuthnAuthenticate} disabled={decryptBusy || webauthnAuthBusy}>
+											{webauthnAuthBusy ? "인증 중..." : "🔐 보안 키로 인증"}
+										</button>
+										{decryptionToken && <p className="text-hint mt-1" style={{ color: "var(--success)" }}>✓ 보안 키 인증 완료</p>}
+									</div>
+								)}
+
+								<div className="form-group">
+									<label className="form-label">개인키 (Base64)</label>
+									<textarea
+										value={decryptPrivateKeyInput}
+										onChange={(e) => { setDecryptPrivateKeyInput(e.target.value); setDecryptError(null); }}
+										placeholder="Base64로 인코딩된 개인키 (저장된 키 사용 시 생략 가능)"
+										disabled={decryptBusy}
+									/>
+								</div>
+
+								<div className="form-group">
+									<label className="form-label">발신자의 공개키 (서명 검증용, 선택)</label>
+									<div className="tab-toggle mb-2">
+										<button className={decryptPeerKeySource === "contact" ? "active" : ""} onClick={() => setDecryptPeerKeySource("contact")}>연락처에서</button>
+										<button className={decryptPeerKeySource === "manual" ? "active" : ""} onClick={() => setDecryptPeerKeySource("manual")}>직접 입력</button>
+									</div>
+									{decryptPeerKeySource === "contact" ? (
+										<select
+											value={decryptSelectedContactId}
+											onChange={(e) => {
+												const id = e.target.value;
+												setDecryptSelectedContactId(id);
+												const contact = contacts.find((c) => c.id === id);
+												setDecryptPeerPublicKey(contact?.publicKey ?? "");
+											}}
+											disabled={decryptBusy || contacts.length === 0}
+										>
+											<option value="">{contacts.length === 0 ? "저장된 연락처 없음" : "연락처 선택..."}</option>
+											{contacts.map((c) => (
+												<option key={c.id} value={c.id}>{c.contactUsername}{c.notes ? ` — ${c.notes}` : ""}</option>
+											))}
+										</select>
+									) : (
+										<textarea
+											value={decryptPeerPublicKey}
+											onChange={(e) => { setDecryptPeerPublicKey(e.target.value); setDecryptSelectedContactId(""); }}
+											placeholder="Base64로 인코딩된 공개키"
+											disabled={decryptBusy}
+										/>
+									)}
+								</div>
+							</>
+						)}
+
+						{decryptStatus && <div className="status-bar info">{decryptStatus}</div>}
+						{decryptError && <div className="status-bar error">{decryptError}</div>}
+						{decryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
+
+						<div className="btn-row">
+							<button className="btn btn-ghost" onClick={() => setDecryptStep(1)}>이전</button>
+							<button className="btn btn-primary" disabled={decryptBusy} onClick={handleDecryptSubmit}>
+								{decryptBusy ? "복호화 중..." : "복호화"}
+							</button>
+						</div>
+					</>
+				)}
+			</div>
+		);
+	}
+
+	/* ─── Tab content router ─── */
+
+	function renderTabContent() {
+		switch (tab) {
+			case "contacts": return renderContactsTab();
+			case "keys": return renderKeysTab();
+			case "encrypt": return renderEncryptTab();
+			case "decrypt": return renderDecryptTab();
+		}
+	}
+
+	/* ─── Main layout ─── */
 
 	return (
 		<div className="page">
-			<nav className="nav-bar">
-				<button className={tab === "keys" ? "nav-item active" : "nav-item"} onClick={() => setTab("keys")}>
-					<IconHome active={tab === "keys"} />
-					<span>Keys</span>
-				</button>
-				<button className={tab === "address-book" ? "nav-item active" : "nav-item"} onClick={() => setTab("address-book")}>
-					<IconBook active={tab === "address-book"} />
-					<span>Contacts</span>
-				</button>
-				<button className={tab === "encrypt" ? "nav-item active" : "nav-item"} onClick={() => setTab("encrypt")}>
-					<IconLock active={tab === "encrypt"} />
-					<span>Encrypt</span>
-				</button>
-				<button className={tab === "decrypt" ? "nav-item active" : "nav-item"} onClick={() => setTab("decrypt")}>
-					<IconUnlock active={tab === "decrypt"} />
-					<span>Decrypt</span>
-				</button>
-			</nav>
-
-			<header className="hero">
-				<div>
-					<p className="eyebrow">Yet Another Security - Web</p>
-					<h1>{heroTitle}</h1>
-					<p className="lede">{heroLede}</p>
+			<div className="topbar">
+				<div className="topbar-left">
+					<span className="topbar-brand">YAS</span>
+					<span className="topbar-user">{authUsername}</span>
 				</div>
-			</header>
-
-			<div className="top-actions">
-				<span className="muted">Signed in as {authUsername}</span>
-				<button className="ghost" onClick={handleSignOut}>Sign out</button>
+				<div className="topbar-right">
+					<button
+						className="theme-toggle"
+						onClick={() => setThemeMode(prev => prev === "system" ? (resolvedDark ? "light" : "dark") : prev === "light" ? "dark" : "system")}
+						title={themeMode === "system" ? "시스템 테마" : resolvedDark ? "다크 모드" : "라이트 모드"}
+					>
+						{themeMode === "system" ? (
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8" /><path d="M12 17v4" /></svg>
+						) : resolvedDark ? (
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
+						) : (
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
+						)}
+					</button>
+					<button className="topbar-logout" onClick={handleSignOut}>로그아웃</button>
+				</div>
 			</div>
 
-			{renderTabContent()}
+			<nav className="pill-nav">
+				<div className="pill-nav-inner" ref={navInnerRef}>
+					{(["keys", "contacts", "encrypt", "decrypt"] as Tab[]).map((t) => {
+						const ref = { contacts: navContactsRef, keys: navKeysRef, encrypt: navEncryptRef, decrypt: navDecryptRef }[t];
+						const Icon = { contacts: IconContacts, keys: IconKey, encrypt: IconEncrypt, decrypt: IconDecrypt }[t];
+						const title = { contacts: "주소록", keys: "내 키", encrypt: "암호화", decrypt: "복호화" }[t];
+						return (
+							<button
+								key={t}
+								ref={ref}
+								className={`pill-nav-item ${tab === t ? "active" : ""}`}
+								onClick={() => { setPressedTab(null); setTab(t); }}
+								onPointerDown={() => { if (t !== tab) setPressedTab(t); }}
+								onPointerUp={() => setPressedTab(null)}
+								onPointerLeave={() => setPressedTab(null)}
+								onPointerCancel={() => setPressedTab(null)}
+								title={title}
+							>
+								<Icon active={tab === t} />
+							</button>
+						);
+					})}
+				</div>
+			</nav>
+
+			<div className="view-animate" key={tab}>
+				{renderTabContent()}
+			</div>
+
+			{/* Contact modal */}
+			{(contactModalOpen || contactModalClosing) && (
+				<div className={`modal-overlay ${contactModalClosing ? "closing" : ""}`} onClick={(e) => { if (e.target === e.currentTarget) closeContactModal(); }}>
+					<div className={`modal-box ${contactModalClosing ? "closing" : ""}`}>
+						<h3 className="modal-title">{contactModalMode === "add" ? "연락처 추가" : "연락처 수정"}</h3>
+						<form onSubmit={handleContactSubmit}>
+							<div className="form-group">
+								<label className="form-label">사용자 이름</label>
+								<input
+									type="text"
+									value={contactForm.contactUsername}
+									onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
+									placeholder="상대방 아이디"
+									required
+								/>
+							</div>
+							<div className="form-group">
+								<label className="form-label">메모 (선택)</label>
+								<input
+									type="text"
+									value={contactForm.notes}
+									onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
+									placeholder="간단한 메모"
+								/>
+							</div>
+							<div className="form-group">
+								<label className="form-label">공개키</label>
+								<textarea
+									value={contactForm.publicKey}
+									onChange={(e) => setContactForm((prev) => ({ ...prev, publicKey: e.target.value }))}
+									placeholder="Base64로 인코딩된 공개키"
+									required
+								/>
+							</div>
+							{contactModalError && <div className="status-bar error">{contactModalError}</div>}
+							<div className="modal-footer">
+								<button type="button" className="btn btn-ghost" onClick={closeContactModal}>취소</button>
+								<button type="submit" className="btn btn-primary" disabled={contactBusy || !contactForm.contactUsername.trim() || !contactForm.publicKey.trim()}>
+									{contactBusy ? "저장 중..." : contactModalMode === "add" ? "저장" : "수정"}
+								</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }
