@@ -1187,7 +1187,7 @@ function App() {
 							</button>
 							<button className="option-card" onClick={() => { setEncryptAuthMode("publickey"); setEncryptStep(2); }}>
 								<span className="option-title">👤 공개키</span>
-								<span className="option-desc">지정한 상대방만 열 수 있도록 보호합니다. 주소록에 등록된 상대방의 공개키가 필요합니다.</span>
+								<span className="option-desc">지정한 상대방만 열 수 있도록 보호해요. 먼저 주소록에 상대방의 공개키를 등록해주세요.</span>
 							</button>
 						</div>
 					</>
