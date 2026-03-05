@@ -10,7 +10,7 @@ const signupSchema = z.object({
   username: z.string().min(3),
   password: z
     .string()
-    .min(10, "Password must be at least 10 characters")
+    .min(10, "비밀번호는 최소 10자 이상이어야 합니다")
     .superRefine((val, ctx) => {
       const hasUpper = /[A-Z]/.test(val);
       const hasLower = /[a-z]/.test(val);
@@ -19,7 +19,7 @@ const signupSchema = z.object({
       if (!hasUpper || !hasLower || !hasNumber || !hasSpecial) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Password is too weak: include uppercase, lowercase, number, and special character",
+          message: "비밀번호가 약합니다: 대문자, 소문자, 숫자, 특수문자를 포함해주세요",
           path: ["password"],
         });
       }
@@ -46,17 +46,17 @@ router.post("/signup", async (req, res) => {
   if (!parsed.success) {
     const pwdIssue = parsed.error.issues.find((i) => i.path.join(".") === "password");
     if (pwdIssue) {
-      return res.status(400).json({ message: pwdIssue.message || "Password is too weak" });
+      return res.status(400).json({ message: pwdIssue.message || "비밀번호가 약합니다" });
     }
     const first = parsed.error.issues[0];
-    return res.status(400).json({ message: first?.message || "Invalid payload" });
+    return res.status(400).json({ message: first?.message || "잘못된 요청입니다" });
   }
 
   const { username, password } = parsed.data;
   try {
     const existing = await UserModel.findOne({ username }).lean();
     if (existing) {
-      return res.status(409).json({ message: "User already exists" });
+      return res.status(409).json({ message: "이미 존재하는 사용자입니다" });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -64,33 +64,33 @@ router.post("/signup", async (req, res) => {
     return res.status(201).json({ id: user.id, username: user.username });
   } catch (error) {
     console.error("Signup failed", error);
-    return res.status(500).json({ message: "Failed to sign up" });
+    return res.status(500).json({ message: "회원가입에 실패했습니다" });
   }
 });
 
 router.post("/login", async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return res.status(400).json({ message: "잘못된 요청입니다", issues: parsed.error.flatten() });
   }
 
   const { username, password } = parsed.data;
   try {
     const user = await UserModel.findOne({ username });
     if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "아이디 또는 비밀번호가 올바르지 않습니다" });
     }
 
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(401).json({ message: "아이디 또는 비밀번호가 올바르지 않습니다" });
     }
 
     const token = signToken(user.id, user.username);
     return res.json({ token, user: { id: user.id, username: user.username } });
   } catch (error) {
     console.error("Login failed", error);
-    return res.status(500).json({ message: "Failed to log in" });
+    return res.status(500).json({ message: "로그인에 실패했습니다" });
   }
 });
 
