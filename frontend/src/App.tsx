@@ -1131,7 +1131,7 @@ function App() {
 							)}
 						</div>
 					</div>
-					<p className="text-hint mt-2">개인키는 브라우저에서 AES-GCM으로 암호화된 후 서버에 저장됩니다.</p>
+					<p className="text-hint mt-2">개인키는 브라우저에서 암호화된 후 서버에 안전하게 저장됩니다.</p>
 				</div>
 			</>
 		);
