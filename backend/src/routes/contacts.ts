@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { ContactModel } from "../models/Contact";
+import { AccountModel } from "../models/Account";
 import { requireAuth, AuthenticatedRequest } from "../middleware/requireAuth";
 
 const router = Router();
@@ -30,12 +31,12 @@ function isValidPublicKey(key: string): boolean {
 const contactSchema = z
 	.object({
 		contactUsername: z.string().min(3).max(64),
-		publicKey: z.string().min(1),
+		publicKey: z.string().optional(),
 		label: z.string().max(120).optional(),
 		notes: z.string().max(500).optional(),
 	})
 	.superRefine((val, ctx) => {
-		if (!isValidPublicKey(val.publicKey)) {
+		if (val.publicKey && !isValidPublicKey(val.publicKey)) {
 			ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["publicKey"], message: "Public key must be valid Base64 or PEM format" });
 		}
 	});
@@ -47,7 +48,19 @@ router.get("/", requireAuth, async (req: AuthenticatedRequest, res) => {
 
 	try {
 		const contacts = await ContactModel.find({ ownerId: req.user.sub }).sort({ createdAt: -1 }).lean();
-		return res.json(contacts.map(sanitize));
+		
+		// Update dynamic public keys for internal users (if external, contact.publicKey acts as fallback)
+		const contactsWithDynamicKeys = await Promise.all(
+			contacts.map(async (contact) => {
+				const account = await AccountModel.findOne({ username: contact.contactUsername }).lean();
+				if (account && account.publicKey) {
+					return { ...contact, publicKey: account.publicKey };
+				}
+				return contact;
+			})
+		);
+		
+		return res.json(contactsWithDynamicKeys.map(sanitize));
 	} catch (error) {
 		console.error("Failed to list contacts", error);
 		return res.status(500).json({ message: "Failed to list contacts" });
@@ -65,17 +78,27 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res) => {
 	}
 
 	if (parsed.data.contactUsername === req.user.username) {
-		return res.status(400).json({ message: "You cannot add yourself as a contact" });
+		return res.status(400).json({ message: "자기 자신은 연락처로 추가할 수 없습니다." });
 	}
 
 	try {
+        let finalPublicKey = parsed.data.publicKey?.trim();
+
+        if (!finalPublicKey) {
+            const account = await AccountModel.findOne({ username: parsed.data.contactUsername }).lean();
+            if (!account || !account.publicKey) {
+                return res.status(404).json({ message: "사용자를 찾을 수 없거나 등록된 공개키가 없습니다." });
+            }
+            finalPublicKey = account.publicKey;
+        }
+
 		const result = await ContactModel.findOneAndUpdate(
 			{ ownerId: req.user.sub, contactUsername: parsed.data.contactUsername },
 			{
 				ownerId: req.user.sub,
 				ownerUsername: req.user.username,
 				contactUsername: parsed.data.contactUsername,
-				publicKey: parsed.data.publicKey.trim(),
+				publicKey: finalPublicKey,
 				label: parsed.data.label,
 				notes: parsed.data.notes,
 			},

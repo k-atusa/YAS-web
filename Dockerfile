@@ -29,11 +29,11 @@ RUN npm run build
 FROM node:${NODE_VERSION}-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=7000
+ENV PORT=7001
 COPY backend/package*.json ./
 RUN npm install --omit=dev && npm cache clean --force
 COPY --from=backend-build /app/backend/dist ./dist
 COPY --from=frontend-build /app/frontend/dist ./public
 ENV FRONTEND_DIST=/app/public
-EXPOSE 7000
+EXPOSE 7001
 CMD ["node", "dist/server.js"]

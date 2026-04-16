@@ -135,12 +135,18 @@ function App() {
 	const [showKeySection, setShowKeySection] = useState(true);
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
 	const [copyPrivateStatus, setCopyPrivateStatus] = useState<"idle" | "copied" | "error">("idle");
+	const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+	function showToast(msg: string) {
+		setToastMsg(msg);
+		setTimeout(() => setToastMsg(null), 2500);
+	}
 	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("ecc1");
 
 	/* Contacts */
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
 	const [contactsLoading, setContactsLoading] = useState(false);
-	const [contactForm, setContactForm] = useState({ contactUsername: "", publicKey: "", notes: "" });
+	const [contactForm, setContactForm] = useState({ contactUsername: "", notes: "" });
 	const [contactError, setContactError] = useState<string | null>(null);
 	const [contactBusy, setContactBusy] = useState(false);
 	const [contactModalOpen, setContactModalOpen] = useState(false);
@@ -415,7 +421,7 @@ function App() {
 		setShowKeySection(true);
 		setCopyPrivateStatus("idle");
 		setContacts([]);
-		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
+		setContactForm({ contactUsername: "", notes: "" });
 		setContactError(null);
 		forceCloseContactModal();
 		setEncryptRecipientId("");
@@ -483,7 +489,7 @@ function App() {
 		setContactModalOpen(false);
 		setContactModalMode("add");
 		setEditingContactMeta(null);
-		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
+		setContactForm({ contactUsername: "", notes: "" });
 		setContactModalError(null);
 	}
 
@@ -491,7 +497,7 @@ function App() {
 		reopenContactModal();
 		setContactModalMode("add");
 		setEditingContactMeta(null);
-		setContactForm({ contactUsername: "", publicKey: "", notes: "" });
+		setContactForm({ contactUsername: "", notes: "" });
 		setContactModalError(null);
 	}
 
@@ -499,7 +505,7 @@ function App() {
 		reopenContactModal();
 		setContactModalMode("edit");
 		setEditingContactMeta({ id: contact.id, username: contact.contactUsername });
-		setContactForm({ contactUsername: contact.contactUsername, publicKey: contact.publicKey, notes: contact.notes || "" });
+		setContactForm({ contactUsername: contact.contactUsername, notes: contact.notes || "" });
 		setContactModalError(null);
 	}
 
@@ -514,15 +520,16 @@ function App() {
 		e.preventDefault();
 		if (!authToken) return;
 		const trimmedUsername = contactForm.contactUsername.trim();
-		const trimmedKey = contactForm.publicKey.trim();
-		const selfKey = storedAccount?.publicKey || publicKeyPem;
-		if (selfKey && trimmedKey && selfKey === trimmedKey) { setContactModalError("이 공개키는 이미 본인의 키입니다"); return; }
-		if (!trimmedUsername || !trimmedKey) { setContactModalError("사용자 이름과 공개키는 필수입니다"); return; }
+		if (!trimmedUsername) { setContactModalError("사용자 아이디는 필수입니다"); return; }
 		setContactBusy(true);
 		setContactModalError(null);
 		try {
-			const payload = { contactUsername: trimmedUsername, publicKey: trimmedKey, notes: contactForm.notes.trim() || undefined };
-			const saved = await createContact(payload, authToken);
+			const payload: { contactUsername: string; notes?: string } = { 
+                contactUsername: trimmedUsername, 
+                notes: contactForm.notes.trim() || undefined 
+            };
+			
+            const saved = await createContact(payload as any, authToken);
 			setContacts((prev) => {
 				const withoutSaved = prev.filter((c) => c.id !== saved.id);
 				const withoutOld = contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username
@@ -1047,10 +1054,17 @@ function App() {
 							<div key={c.id} className="contact-row">
 								<div className="contact-info">
 									<span className="contact-name">{c.contactUsername}</span>
-									{c.notes && <span className="contact-note">{c.notes}</span>}
+									{c.notes && (
+										<div className="contact-meta-row">
+											<span className="contact-note">{c.notes}</span>
+										</div>
+									)}
 								</div>
 								<div className="contact-btns">
-									<button className="btn-ghost btn-sm" onClick={() => handleCopyPublicKey(c.publicKey)}>복사</button>
+									<span className="contact-pk-preview" style={{ marginRight: "12px", opacity: 0.6 }}>
+										{c.publicKey && c.publicKey.length > 20 ? `${c.publicKey.slice(0, 6)}…${c.publicKey.slice(-5)}` : c.publicKey}
+									</span>
+									<button className="btn-ghost btn-sm" onClick={() => { handleCopyPublicKey(c.publicKey); showToast("복사 되었습니다"); }}>복사</button>
 									<button className="btn-ghost btn-sm" onClick={() => openEditContactModal(c)}>수정</button>
 									<button className="btn-ghost btn-sm btn-danger" onClick={() => handleDeleteContact(c.id)}>삭제</button>
 								</div>
@@ -1779,6 +1793,8 @@ function App() {
 				{renderTabContent()}
 			</div>
 
+			{toastMsg && <div className="toast-message">{toastMsg}</div>}
+
 			{/* Contact modal */}
 			{(contactModalOpen || contactModalClosing) && (
 				<div className={`modal-overlay ${contactModalClosing ? "closing" : ""}`} onClick={(e) => { if (e.target === e.currentTarget) closeContactModal(); }}>
@@ -1787,7 +1803,7 @@ function App() {
 						<form onSubmit={handleContactSubmit}>
 							<div className="form-group">
 								<label className="form-label">
-									사용자 이름
+									사용자 아이디
 									<div className="help-icon-wrapper">
 										<svg
 											className="help-icon"
@@ -1808,7 +1824,7 @@ function App() {
 										</svg>
 										{showUsernameTooltip && (
 											<div className="tooltip">
-												상대방의 실제 계정 아이디일 필요는 없으며, 내가 알아볼 수 있는 이름으로 설정하면 됩니다.
+												상대방이 서비스에 가입할 때 사용한 실제 아이디(username)를 정확히 입력해야 합니다.
 											</div>
 										)}
 									</div>
@@ -1817,7 +1833,7 @@ function App() {
 									type="text"
 									value={contactForm.contactUsername}
 									onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
-									placeholder="이름"
+									placeholder="아이디"
 									required
 								/>
 							</div>
@@ -1830,19 +1846,10 @@ function App() {
 									placeholder="간단한 메모"
 								/>
 							</div>
-							<div className="form-group">
-								<label className="form-label">공개키</label>
-								<textarea
-									value={contactForm.publicKey}
-									onChange={(e) => setContactForm((prev) => ({ ...prev, publicKey: e.target.value }))}
-									placeholder="Base64로 인코딩된 공개키"
-									required
-								/>
-							</div>
 							{contactModalError && <div className="status-bar error">{contactModalError}</div>}
 							<div className="modal-footer">
 								<button type="button" className="btn btn-ghost" onClick={closeContactModal}>취소</button>
-								<button type="submit" className="btn btn-primary" disabled={contactBusy || !contactForm.contactUsername.trim() || !contactForm.publicKey.trim()}>
+								<button type="submit" className="btn btn-primary" disabled={contactBusy || !contactForm.contactUsername.trim()}>
 									{contactBusy ? "저장 중..." : contactModalMode === "add" ? "저장" : "수정"}
 								</button>
 							</div>
