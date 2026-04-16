@@ -1229,7 +1229,7 @@ function App() {
 						</div>
 						<div className="form-group">
 							<label className="form-label">키 유도 방식</label>
-							<div className="option-cards">
+							<div className="option-cards row-layout">
 								<button className={`option-card ${encryptKdfMethod === "arg1" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg1")}>
 									<span className="option-title">Argon2id</span>
 									<span className="option-desc">높은 보안 강도 (추천)</span>
