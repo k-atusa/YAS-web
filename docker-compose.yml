@@ -11,13 +11,13 @@ services:
       - ./backend/.env
     environment:
       MONGODB_URI: mongodb://mongo:27017/yas-web
-      CORS_ORIGIN: http://localhost:4000
+      CORS_ORIGIN: http://localhost:7000
       FRONTEND_DIST: /app/public
-      PORT: 4000
+      PORT: 7000
     depends_on:
       - mongo
     ports:
-      - "4000:4000"
+      - "7000:7000"
     restart: unless-stopped
 
 volumes:
