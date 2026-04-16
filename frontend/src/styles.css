@@ -729,6 +729,14 @@ select {
 	gap: 12px;
 }
 
+.option-cards.row-layout {
+	flex-direction: row;
+}
+
+.option-cards.row-layout .option-card {
+	flex: 1;
+}
+
 .option-card {
 	display: flex;
 	flex-direction: column;

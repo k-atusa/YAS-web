@@ -1109,7 +1109,7 @@ function App() {
 					</div>
 					<div className="form-group">
 						<label className="form-label">키 알고리즘</label>
-						<div className="option-cards">
+						<div className="option-cards row-layout">
 							<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
 								<span className="option-title">Curve448</span>
 								<span className="option-desc">높은 보안 강도 (추천)</span>
@@ -1275,7 +1275,7 @@ function App() {
 						</div>
 						<div className="form-group">
 							<label className="form-label">비대칭 알고리즘</label>
-							<div className="option-cards">
+							<div className="option-cards row-layout">
 								<button
 									className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`}
 									disabled
