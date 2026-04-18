@@ -666,7 +666,7 @@ class PQC1 {
     async sign(data) {
         const d = toU8(data);
         const edSgn = ed448.sign(d, this.priEd);
-        const mlSgn = ml_dsa87.sign(this.priDSA, d);
+        const mlSgn = ml_dsa87.sign(d, this.priDSA);
         const res = new Uint8Array(edSgn.length + mlSgn.length);
         res.set(edSgn, 0);
         res.set(mlSgn, edSgn.length);
@@ -683,7 +683,7 @@ class PQC1 {
         const okEd = ed448.verify(edSgn, d, this.pubEd);
         if (!okEd)
             return false;
-        return ml_dsa87.verify(this.pubDSA, d, mlSgn);
+        return ml_dsa87.verify(mlSgn, d, this.pubDSA);
     }
 }
 // ==================== SymMaster ====================
