@@ -201,6 +201,7 @@ function App() {
 	const [encryptError, setEncryptError] = useState<string | null>(null);
 	const [shareExpiresHours, setShareExpiresHours] = useState("24");
 	const [shareMaxDownloads, setShareMaxDownloads] = useState("3");
+	const [showShareOptions, setShowShareOptions] = useState(false);
 	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
 	const [encryptStep, setEncryptStep] = useState(1);
 
@@ -468,6 +469,7 @@ function App() {
 		setEncryptStatus(null);
 		setEncryptError(null);
 		setEncryptResultLink(null);
+		setShowShareOptions(false);
 		setShareExpiresHours("24");
 		setShareMaxDownloads("3");
 		setEncryptedBlob(null);
@@ -762,6 +764,7 @@ function App() {
 		setEncryptStatus(null);
 		setEncryptError(null);
 		setEncryptResultLink(null);
+		setShowShareOptions(false);
 		setShareExpiresHours("24");
 		setShareMaxDownloads("3");
 		setEncryptKdfMethod("arg1");
@@ -1306,7 +1309,7 @@ function App() {
 									<div style={{ fontWeight: "bold", marginBottom: "7px" }}>파일명: {f.filename}</div>
 									<div style={{ fontSize: "13px", color: "var(--text-sub)" }}>만료시간: {new Date(f.expiresAt).toLocaleString()}</div>
 									<div style={{ fontSize: "13px", color: "var(--text-sub)", marginTop: "5px" }}>
-										공유 횟수: {Number(f.downloadCount ?? 0)} / {Number(f.maxDownloads ?? 1)}
+										다운로드 횟수: {Number(f.downloadCount ?? 0)} / {Number(f.maxDownloads ?? 1)}
 									</div>
 									<div style={{ marginTop: "10px" }}>
 										<label style={{ fontSize: "12px" }}>오니온 링크 (Tor)</label>
@@ -1333,30 +1336,8 @@ function App() {
 			return (
 				<>
 					<h2 className="section-title">암호화 완료</h2>
+					<br />
 					<div className="card">
-						<div className="form-group">
-							<label className="form-label">만료 시간 (시간)</label>
-							<input
-								type="number"
-								min={1}
-								step={1}
-								value={shareExpiresHours}
-								onChange={(e) => setShareExpiresHours(e.target.value)}
-								placeholder="예: 24"
-							/>
-						</div>
-						<div className="form-group">
-							<label className="form-label">공유 횟수 제한</label>
-							<input
-								type="number"
-								min={1}
-								step={1}
-								value={shareMaxDownloads}
-								onChange={(e) => setShareMaxDownloads(e.target.value)}
-								placeholder="예: 3"
-							/>
-							<span className="form-hint">설정한 횟수만큼 다운로드되면 링크가 자동 만료됩니다.</span>
-						</div>
 						<div className="result-grid">
 							<div className="result-item">
 								<span className="result-label">방식</span>
@@ -1376,48 +1357,87 @@ function App() {
 								<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>Base64 복사</button>
 							)}
 							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>다운로드</button>
-							<button className="btn btn-primary btn-sm" onClick={async () => {
-								try {
-									setEncryptError(null);
-									setEncryptStatus(null);
-									setEncryptResultLink(null);
-
-									const hours = Number(shareExpiresHours);
-									const maxDownloads = Number(shareMaxDownloads);
-									if (!Number.isFinite(hours) || hours <= 0) {
-										setEncryptError("만료 시간은 1 이상의 숫자여야 합니다.");
-										return;
-									}
-									if (!Number.isInteger(maxDownloads) || maxDownloads <= 0) {
-										setEncryptError("공유 횟수 제한은 1 이상의 정수여야 합니다.");
-										return;
-									}
-
-									const b64 = u8ToBase64(encryptedBlob);
-									const fn = encryptFile ? "secure_file.yas" : "secure_message.yas";
-									const res = await uploadEncryptedFile(authToken!, {
-										recipientId: encryptAuthMode === "publickey" ? encryptRecipientId : undefined,
-										filename: fn,
-										encryptedData: b64,
-										expiresInHours: hours,
-										maxDownloads,
-									});
-									setEncryptStatus("업로드 완료!");
-									setEncryptResultLink(res.torDomain);
-								} catch (err: any) {
-									setEncryptError(`업로드 실패: ${err.message}`);
-								}
+							<button className="btn btn-primary btn-sm" onClick={() => {
+								setEncryptError(null);
+								setEncryptStatus(null);
+								setShowShareOptions(true);
 							}}>공유하기</button>
 						</div>
 					</div>
-					{encryptStatus && <div className="status-bar success">{encryptStatus}</div>}
+					{showShareOptions && (
+						<div className="card mt-3">
+							<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>공유 설정</h3>
+							<div className="form-group">
+								<label className="form-label">만료 시간 (시간)</label>
+								<input
+									type="number"
+									min={1}
+									step={1}
+									value={shareExpiresHours}
+									onChange={(e) => setShareExpiresHours(e.target.value)}
+									placeholder="예: 24"
+									autoFocus
+									className="form-input"
+								/>
+							</div>
+							<div className="form-group">
+								<label className="form-label">다운로드 횟수 제한</label>
+								<input
+									type="number"
+									min={1}
+									step={1}
+									value={shareMaxDownloads}
+									onChange={(e) => setShareMaxDownloads(e.target.value)}
+									placeholder="예: 3"
+									className="form-input"
+								/>
+								<span className="form-hint">설정한 횟수만큼 다운로드되면 링크가 자동 만료됩니다.</span>
+							</div>
+							<div className="btn-row">
+								<button className="btn btn-secondary" onClick={() => setShowShareOptions(false)}>취소</button>
+								<button className="btn btn-primary" onClick={async () => {
+									try {
+										setEncryptError(null);
+										setEncryptStatus(null);
+
+										const hours = Number(shareExpiresHours);
+										const maxDownloads = Number(shareMaxDownloads);
+										if (!Number.isFinite(hours) || hours <= 0) {
+											setEncryptError("만료 시간은 1 이상의 숫자여야 합니다.");
+											return;
+										}
+										if (!Number.isInteger(maxDownloads) || maxDownloads <= 0) {
+											setEncryptError("다운로드 횟수 제한은 1 이상의 정수여야 합니다.");
+											return;
+										}
+
+										const b64 = u8ToBase64(encryptedBlob);
+										const fn = encryptFile ? "secure_file.yas" : "secure_message.yas";
+										const res = await uploadEncryptedFile(authToken!, {
+											recipientId: encryptAuthMode === "publickey" ? encryptRecipientId : undefined,
+											filename: fn,
+											encryptedData: b64,
+											expiresInHours: hours,
+											maxDownloads,
+										});
+										setEncryptStatus("업로드 완료!");
+										setEncryptResultLink(res.torDomain);
+										setShowShareOptions(false);
+									} catch (err: any) {
+										setEncryptError(`업로드 실패: ${err.message}`);
+									}
+								}}>확인</button>
+							</div>
+							{encryptError && <div className="status-bar error mt-3">{encryptError}</div>}
+						</div>
+					)}
+					{encryptStatus && <div className="status-bar success mt-3">{encryptStatus}</div>}
 					{encryptResultLink && (
 						<div className="card mt-3">
 							<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>다운로드 링크 (Tor Onion)</h3>
 							<input type="text" readOnly className="form-input" value={encryptResultLink} style={{ fontSize: "14px", marginTop: "4px" }} />
 						</div>
 					)}
-					{encryptError && <div className="status-bar error mt-3">{encryptError}</div>}
 					<div className="btn-row mt-3">
 						<button className="btn btn-primary" onClick={resetEncryptionForm}>처음으로</button>
 					</div>

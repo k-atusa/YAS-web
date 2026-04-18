@@ -114,11 +114,17 @@ router.get("/download/:domain", async (req: any, res) => {
       return res.status(404).json({ error: "File not found or expired" });
     }
 
-    if (fileDoc.downloadCount >= fileDoc.maxDownloads) {
+    const maxDownloads = Number(fileDoc.maxDownloads ?? 1);
+    const downloadCount = Number(fileDoc.downloadCount ?? 0);
+    const safeMaxDownloads = Number.isInteger(maxDownloads) && maxDownloads > 0 ? maxDownloads : 1;
+    const safeDownloadCount = Number.isFinite(downloadCount) && downloadCount >= 0 ? downloadCount : 0;
+
+    if (safeDownloadCount >= safeMaxDownloads) {
       return res.status(410).json({ error: "Download limit exceeded" });
     }
 
-    fileDoc.downloadCount += 1;
+    fileDoc.maxDownloads = safeMaxDownloads;
+    fileDoc.downloadCount = safeDownloadCount + 1;
     await fileDoc.save();
     
     // Read the encrypted payload from disk
@@ -131,7 +137,7 @@ router.get("/download/:domain", async (req: any, res) => {
       filename: fileDoc.filename,
       torDomain: fileDoc.torDomain,
       expiresAt: fileDoc.expiresAt,
-      maxDownloads: fileDoc.maxDownloads,
+      maxDownloads: safeMaxDownloads,
       downloadCount: fileDoc.downloadCount,
       createdAt: (fileDoc as any).createdAt,
       updatedAt: (fileDoc as any).updatedAt,
