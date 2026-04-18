@@ -95,10 +95,8 @@ function IconKey({ active }: { active?: boolean }) {
 	const stroke = active ? "#fff" : "#888";
 	return (
 		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-			<circle cx="8" cy="15" r="4" />
-			<path d="M11.3 11.7 20 3" />
-			<path d="M17 3h3v3" />
-			<path d="m17 7 3-3" />
+			<path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z" />
+			<circle cx="16.5" cy="7.5" r=".5" fill={stroke} />
 		</svg>
 	);
 }
