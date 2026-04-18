@@ -780,12 +780,24 @@ class Opsec {
     if (this.size >= 0) this.bodyKey = random(44);
 
     const am = new AsymMaster(method);
-    await am.loadkey(publicBytes, privateBytes);
+    try {
+      await am.loadkey(publicBytes, privateBytes);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "DataError") {
+        throw new Error("키 형식이 올바르지 않거나 공개키/개인키 알고리즘이 서로 맞지 않습니다.");
+      }
+      throw err;
+    }
 
     // Sign
     if (privateBytes !== null) {
       if (this.bodyKey.length > 0) this._sign = await am.sign(this.bodyKey);
       else if (this.smsg !== "") this._sign = await am.sign(strToU8(this.smsg));
+      else if (this.msg !== "") this._sign = await am.sign(strToU8(this.msg));
+      else {
+        // If everything is empty but we wanted to sign, sign an empty array
+        this._sign = await am.sign(new Uint8Array(0));
+      }
     }
 
     // Encrypt header
@@ -882,6 +894,7 @@ class Opsec {
       let s: Uint8Array = new Uint8Array(0);
       if (this.bodyKey.length > 0) s = this.bodyKey;
       else if (this.smsg !== "") s = strToU8(this.smsg);
+      else if (this.msg !== "") s = strToU8(this.msg);
       const ok = await am.verify(s, this._sign);
       if (!ok) throw new Error(`${this._headAlgo.toUpperCase()} 서명이 유효하지 않습니다`);
     }
@@ -1057,7 +1070,17 @@ export async function decryptOpsecPub(
   try {
     await ops.decpub(myPri, peerPub);
     const hasSignature = ops._sign.length > 0;
-    verified = peerPub && hasSignature ? true : undefined;
+    if (peerPub) {
+      if (hasSignature) {
+        verified = true;
+      } else {
+        verified = undefined;
+        verifyError = "파일본에 서명이 포함되어 있지 않습니다.";
+      }
+    } else {
+      verified = undefined;
+      // No verifyError, so we don't show a red alert when intentionally skipped
+    }
   } catch (err) {
     // If decryption itself fails (no peer key case would also fail), re-throw
     // If only verification fails, try again without peer key to get decrypted data

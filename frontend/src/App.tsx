@@ -62,6 +62,17 @@ function detectPublicKeyAlgo(publicKeyB64: string): AsymAlgo {
 	}
 }
 
+function detectPrivateKeyAlgo(privateKeyB64: string): AsymAlgo {
+	try {
+		const u8 = base64ToU8(privateKeyB64);
+		// Curve448 private key is exactly 113 bytes
+		if (u8.length === 113) return "ecc1";
+		return "rsa1";
+	} catch {
+		return "ecc1";
+	}
+}
+
 /* ─── Icons ─── */
 
 function IconContacts({ active }: { active?: boolean }) {
@@ -649,30 +660,54 @@ function App() {
 	}
 
 	async function handleWebAuthnAuthenticate() {
-		if (!authToken || !isAuthed) { setDecryptError("로그인이 필요합니다"); return; }
-		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) { setDecryptError("저장된 개인키가 없습니다."); return; }
+		await requestPrivateKeyAccess("decrypt");
+	}
+
+	async function requestPrivateKeyAccess(target: "decrypt" | "encrypt"): Promise<boolean> {
+		const setTargetError = target === "decrypt" ? setDecryptError : setEncryptError;
+		const setTargetStatus = target === "decrypt" ? setDecryptStatus : setEncryptStatus;
+
+		if (!authToken || !isAuthed) { setTargetError("로그인이 필요합니다"); return false; }
+		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) { setTargetError("저장된 개인키가 없습니다."); return false; }
 		setWebauthnAuthBusy(true);
-		setDecryptError(null);
-		setDecryptStatus("보안 키 요청 중...");
+		setTargetError(null);
+		setTargetStatus("보안 키 요청 중...");
 		try {
 			const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
 			const options = optionsResp.options;
-			setDecryptStatus("보안 키로 인증하세요...");
+			setTargetStatus("보안 키로 인증하세요...");
 			const assertion = await authenticateWithWebAuthn({
 				challenge: options.challenge, allowCredentials: options.allowCredentials || [],
 				timeout: options.timeout, userVerification: options.userVerification,
 			});
-			setDecryptStatus("확인 중...");
+			setTargetStatus("확인 중...");
 			const verifyResp = await verifyWebAuthnAuthentication(authToken, assertion.credentialId, assertion.counter);
 			setDecryptionToken(verifyResp.token);
-			setDecryptStatus(null);
-			setDecryptError(null);
+			setTargetStatus(null);
+			setTargetError(null);
+			return true;
 		} catch (err) {
-			setDecryptError((err as Error).message || "보안 키 인증 실패");
-			setDecryptStatus(null);
+			setTargetError((err as Error).message || "보안 키 인증 실패");
+			setTargetStatus(null);
+			return false;
 		} finally {
 			setWebauthnAuthBusy(false);
 		}
+	}
+
+	async function handleEncryptSignWithKeyToggle(checked: boolean) {
+		if (!checked) {
+			setEncryptSignWithKey(false);
+			return;
+		}
+
+		if (privateKeyPem || decryptionToken) {
+			setEncryptSignWithKey(true);
+			return;
+		}
+
+		const success = await requestPrivateKeyAccess("encrypt");
+		setEncryptSignWithKey(success);
 	}
 
 	/* ─── Encrypt helpers ─── */
@@ -803,6 +838,18 @@ function App() {
 		throw new Error("사용 가능한 개인키가 없습니다.");
 	}
 
+	async function resolveSigningPrivateKeyB64(): Promise<string> {
+		if (privateKeyPem) return privateKeyPem;
+		if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf) {
+			if (!decryptionToken) {
+				throw new Error("서명하려면 먼저 복호화 탭에서 보안 키 인증을 완료하세요.");
+			}
+			const result = await decryptStoredPrivateKey(storedAccount.username, decryptionToken);
+			return result.privateKey;
+		}
+		throw new Error("서명에 사용할 개인키를 찾을 수 없습니다.");
+	}
+
 	async function loadOpsecData(): Promise<Uint8Array> {
 		if (decryptPayloadFile) return new Uint8Array(await decryptPayloadFile.arrayBuffer());
 		const raw = decryptPayloadInput.trim();
@@ -841,7 +888,13 @@ function App() {
 			} else {
 				const recipient = contacts.find((c) => c.id === encryptRecipientId)!;
 				let myPrivateKey: string | undefined;
-				if (encryptSignWithKey && privateKeyPem) myPrivateKey = privateKeyPem;
+				if (encryptSignWithKey) {
+					myPrivateKey = await resolveSigningPrivateKeyB64();
+					const signAlgo = detectPrivateKeyAlgo(myPrivateKey);
+					if (signAlgo !== encryptAsymAlgo) {
+						throw new Error(`서명 키 알고리즘(${signAlgo})과 수신자 키 알고리즘(${encryptAsymAlgo})이 달라 서명할 수 없습니다.`);
+					}
+				}
 				result = await encryptOpsec({
 					mode: "publickey", asymAlgo: encryptAsymAlgo!, peerPublicKey: recipient.publicKey,
 					myPrivateKey, encAlgo: encryptEncAlgo, smsg: encryptSmsg || undefined, msg: encryptMsg || undefined, files,
@@ -897,7 +950,16 @@ function App() {
 				result = await decryptOpsecPw(dataU8, decryptPassword);
 			} else {
 				const priB64 = await resolvePrivateKeyB64();
-				const peerPub = decryptPeerPublicKey.trim() || undefined;
+				
+				let finalPeerPub = decryptPeerPublicKey.trim();
+				if (decryptPeerKeySource === "contact" && decryptSelectedContactId) {
+					const contact = contacts.find((c) => c.id === decryptSelectedContactId);
+					if (contact?.publicKey) {
+						finalPeerPub = contact.publicKey.trim();
+					}
+				}
+				const peerPub = finalPeerPub || undefined;
+				
 				result = await decryptOpsecPub(dataU8, priB64, peerPub);
 			}
 			setDecryptedResult(result);
@@ -1310,7 +1372,12 @@ function App() {
 							<span className="form-hint">상대방의 공개키 형식에 따라 자동으로 선택됩니다</span>
 						</div>
 						<label className="checkbox-row">
-							<input type="checkbox" checked={encryptSignWithKey} onChange={(e) => setEncryptSignWithKey(e.target.checked)} />
+							<input
+								type="checkbox"
+								checked={encryptSignWithKey}
+								onChange={(e) => { void handleEncryptSignWithKeyToggle(e.target.checked); }}
+								disabled={encryptBusy || webauthnAuthBusy}
+							/>
 							<div className="checkbox-label-with-help">
 								<span className="checkbox-text">내 개인키로 서명하기</span>
 								<div className="help-icon-wrapper">
@@ -1476,7 +1543,7 @@ function App() {
 							<p style={{ whiteSpace: "pre-wrap", marginTop: 4, fontSize: 15, fontWeight: 500 }}>
 								{decryptedResult.verified === true && "✓ 유효 (발신자 확인됨)"}
 								{decryptedResult.verified === false && "✗ 유효하지 않음 (경고)"}
-								{decryptedResult.verified === undefined && "- 공개키 미제공"}
+								{decryptedResult.verified === undefined && (decryptedResult.verifyError ? `- ${decryptedResult.verifyError}` : "- 서명 검증 생략됨 (공개키 미제공)")}
 							</p>
 						</div>
 					</div>
