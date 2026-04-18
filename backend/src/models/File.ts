@@ -1,0 +1,25 @@
+import mongoose, { Schema, Document } from "mongoose";
+
+export interface IFile extends Document {
+  senderId: string;
+  recipientId: string;
+  filename: string;
+  filePath: string;
+  torDomain: string;
+  expiresAt: Date;
+}
+
+const fileSchema = new Schema<IFile>(
+  {
+    senderId: { type: String, required: true },
+    recipientId: { type: String, required: true },
+    filename: { type: String, required: true },
+    filePath: { type: String, required: true },
+    torDomain: { type: String, required: true, unique: true },
+    // MongoDB TTL Index
+    expiresAt: { type: Date, required: true, expires: 0 },
+  },
+  { timestamps: true }
+);
+
+export const FileModel = mongoose.model<IFile>("File", fileSchema);

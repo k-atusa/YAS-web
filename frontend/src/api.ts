@@ -246,3 +246,32 @@ export async function decryptStoredPrivateKey(username: string, token: string): 
 
   return response.json();
 }
+
+export async function uploadEncryptedFile(token: string, payload: { recipientId: string; filename: string; encryptedData: string; expiresInHours: number }) {
+  const response = await fetch(`${API_BASE}/files/upload`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error("Upload failed");
+  return response.json();
+}
+
+export async function getInboxFiles(token: string) {
+  const response = await fetch(`${API_BASE}/files/inbox`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error("Fetch failed");
+  return response.json();
+}
+
+export async function downloadFile(token: string, domain: string) {
+  const response = await fetch(`${API_BASE}/files/download/${encodeURIComponent(domain)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error("Download failed");
+  return response.json();
+}

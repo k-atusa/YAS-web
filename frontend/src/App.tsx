@@ -4,6 +4,8 @@ import {
 	login as loginApi,
 	saveAccount,
 	signup,
+	uploadEncryptedFile,
+	getInboxFiles,
 	listContacts,
 	createContact,
 	deleteContact,
@@ -91,6 +93,15 @@ function IconContacts({ active }: { active?: boolean }) {
 	);
 }
 
+function IconMessages({ active }: { active?: boolean }) {
+	const stroke = active ? "#fff" : "#888";
+	return (
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+			<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+		</svg>
+	);
+}
+
 function IconKey({ active }: { active?: boolean }) {
 	const stroke = active ? "#fff" : "#888";
 	return (
@@ -123,7 +134,7 @@ function IconDecrypt({ active }: { active?: boolean }) {
 
 /* ─── App ─── */
 
-type Tab = "contacts" | "keys" | "encrypt" | "decrypt";
+type Tab = "contacts" | "keys" | "encrypt" | "decrypt" | "messages";
 
 function App() {
 	/* Auth */
@@ -158,6 +169,7 @@ function App() {
 
 	/* Contacts */
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
+	const [inboxFiles, setInboxFiles] = useState<any[]>([]);
 	const [contactsLoading, setContactsLoading] = useState(false);
 	const [contactForm, setContactForm] = useState({ contactUsername: "", notes: "" });
 	const [contactError, setContactError] = useState<string | null>(null);
@@ -184,6 +196,7 @@ function App() {
 	const [encryptSignWithKey, setEncryptSignWithKey] = useState(false);
 	const [encryptBusy, setEncryptBusy] = useState(false);
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
+	const [encryptResultLink, setEncryptResultLink] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
 	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
 	const [encryptStep, setEncryptStep] = useState(1);
@@ -227,6 +240,7 @@ function App() {
 	const navKeysRef = useRef<HTMLButtonElement>(null);
 	const navEncryptRef = useRef<HTMLButtonElement>(null);
 	const navDecryptRef = useRef<HTMLButtonElement>(null);
+	const navMessagesRef = useRef<HTMLButtonElement>(null);
 	const [pressedTab, setPressedTab] = useState<Tab | null>(null);
 	/* Tooltip */
 	const [showUsernameTooltip, setShowUsernameTooltip] = useState(false);
@@ -268,7 +282,7 @@ function App() {
 
 	/* Animate navigation pill position + squish */
 	const updateNavHighlight = () => {
-		const refMap: Record<Tab, React.RefObject<HTMLButtonElement | null>> = { contacts: navContactsRef, keys: navKeysRef, encrypt: navEncryptRef, decrypt: navDecryptRef };
+		const refMap: Record<Tab, React.RefObject<HTMLButtonElement | null>> = { contacts: navContactsRef, keys: navKeysRef, messages: navMessagesRef, encrypt: navEncryptRef, decrypt: navDecryptRef };
 		const activeEl = refMap[tab]?.current;
 		const inner = navInnerRef.current;
 		if (!activeEl || !inner) return;
@@ -338,7 +352,11 @@ function App() {
 			if (!cancelled) { setContactsLoading(true); setContactError(null); }
 			try {
 				const items = await listContacts(authToken);
-				if (!cancelled) setContacts(items);
+				const inboxData = await getInboxFiles(authToken).catch(() => ({ files: [] }));
+				if (!cancelled) {
+					setContacts(items);
+					setInboxFiles(inboxData.files || []);
+				}
 			} catch (err) {
 				const msg = (err as Error).message || "연락처 불러오기 실패";
 				if (msg === "TOKEN_EXPIRED") { handleSignOut(); return; }
@@ -724,6 +742,7 @@ function App() {
 		setEncryptStep(1);
 		setEncryptStatus(null);
 		setEncryptError(null);
+		setEncryptResultLink(null);
 		setEncryptKdfMethod("arg1");
 		setEncryptEncAlgo("gcm1");
 		setEncryptAsymAlgo(null);
@@ -1250,6 +1269,34 @@ function App() {
 		);
 	}
 
+	/* ─── Messages tab ─── */
+	function renderMessagesTab() {
+		return (
+			<>
+				<h2 className="section-title">메시지함</h2>
+				<p className="section-desc">수신된 암호화 파일 및 메시지 목록입니다.</p>
+				{inboxFiles.length === 0 ? (
+					<div className="status-bar info">수신된 파일이 없습니다.</div>
+				) : (
+					<div className="card" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+						{inboxFiles.map((f: any) => {
+							return (
+								<div key={f._id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: "10px" }}>
+									<div style={{ fontWeight: "bold" }}>파일명: {f.filename}</div>
+									<div style={{ fontSize: "13px", color: "var(--text-sub)" }}>만료시간: {new Date(f.expiresAt).toLocaleString()}</div>
+									<div style={{ marginTop: "8px" }}>
+										<label style={{ fontSize: "12px" }}>오니온 링크 (토어)</label>
+										<input type="text" readOnly className="form-input" value={f.torDomain} style={{ fontSize: "11px", marginTop: "4px" }} />
+									</div>
+								</div>
+							);
+						})}
+					</div>
+				)}
+			</>
+		);
+	}
+
 	/* ─── Encrypt tab (wizard) ─── */
 
 	function renderEncryptTab() {
@@ -1276,10 +1323,30 @@ function App() {
 							{encryptedBlob.length < 10240 && (
 								<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>Base64 복사</button>
 							)}
-							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>파일 다운로드</button>
+							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>다운로드</button>
+							<button className="btn btn-primary btn-sm" onClick={async () => {
+								try {
+									const hoursStr = prompt("몇 시간 후에 만료되도록 할까요? (예: 24)");
+									const hours = parseFloat(hoursStr || "24") || 24;
+									const b64 = u8ToBase64(encryptedBlob);
+									const fn = encryptFile ? "secure_file.yas" : "secure_message.yas";
+									const res = await uploadEncryptedFile(authToken!, { recipientId: encryptRecipientId, filename: fn, encryptedData: b64, expiresInHours: hours });
+									setEncryptStatus("업로드 완료!");
+									setEncryptResultLink(res.torDomain);
+								} catch (err: any) {
+									setEncryptError(`업로드 실패: ${err.message}`);
+								}
+							}}>공유하기</button>
 						</div>
 					</div>
 					{encryptStatus && <div className="status-bar success">{encryptStatus}</div>}
+					{encryptResultLink && (
+						<div className="card mt-3">
+							<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>다운로드 링크 (Tor Onion)</h3>
+							<input type="text" readOnly className="form-input" value={encryptResultLink} style={{ fontSize: "14px", marginTop: "4px" }} />
+						</div>
+					)}
+					{encryptError && <div className="status-bar error mt-3">{encryptError}</div>}
 					<div className="btn-row mt-3">
 						<button className="btn btn-primary" onClick={resetEncryptionForm}>처음으로</button>
 					</div>
@@ -1820,6 +1887,7 @@ function App() {
 		switch (tab) {
 			case "contacts": return renderContactsTab();
 			case "keys": return renderKeysTab();
+			case "messages": return renderMessagesTab();
 			case "encrypt": return renderEncryptTab();
 			case "decrypt": return renderDecryptTab();
 		}
@@ -1854,10 +1922,10 @@ function App() {
 
 			<nav className="pill-nav">
 				<div className="pill-nav-inner" ref={navInnerRef}>
-					{(["keys", "contacts", "encrypt", "decrypt"] as Tab[]).map((t) => {
-						const ref = { contacts: navContactsRef, keys: navKeysRef, encrypt: navEncryptRef, decrypt: navDecryptRef }[t];
-						const Icon = { contacts: IconContacts, keys: IconKey, encrypt: IconEncrypt, decrypt: IconDecrypt }[t];
-						const title = { contacts: "주소록", keys: "내 키", encrypt: "암호화", decrypt: "복호화" }[t];
+					{(["keys", "contacts", "messages", "encrypt", "decrypt"] as Tab[]).map((t) => {
+						const ref = { contacts: navContactsRef, keys: navKeysRef, messages: navMessagesRef, encrypt: navEncryptRef, decrypt: navDecryptRef }[t];
+						const Icon = { contacts: IconContacts, keys: IconKey, messages: IconMessages, encrypt: IconEncrypt, decrypt: IconDecrypt }[t];
+						const title = { contacts: "주소록", keys: "내 키", messages: "메시지", encrypt: "암호화", decrypt: "복호화" }[t];
 						return (
 							<button
 								key={t}
