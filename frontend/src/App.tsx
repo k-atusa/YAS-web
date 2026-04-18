@@ -53,6 +53,8 @@ function truncateKey(key: string): string {
 function detectPublicKeyAlgo(publicKeyB64: string): AsymAlgo {
 	try {
 		const u8 = base64ToU8(publicKeyB64);
+		// PQC1 public key is exactly 4273 bytes
+		if (u8.length === 4273) return "pqc1";
 		// Curve448 public key is exactly 113 bytes
 		if (u8.length === 113) return "ecc1";
 		// RSA public key is typically 290+ bytes
@@ -65,6 +67,8 @@ function detectPublicKeyAlgo(publicKeyB64: string): AsymAlgo {
 function detectPrivateKeyAlgo(privateKeyB64: string): AsymAlgo {
 	try {
 		const u8 = base64ToU8(privateKeyB64);
+		// PQC1 private key is exactly 8177 bytes
+		if (u8.length === 8177) return "pqc1";
 		// Curve448 private key is exactly 113 bytes
 		if (u8.length === 113) return "ecc1";
 		return "rsa1";
@@ -1190,6 +1194,10 @@ function App() {
 								<span className="option-title">Curve448</span>
 								<span className="option-desc">높은 보안 강도 (추천)</span>
 							</button>
+							<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
+								<span className="option-title">PQC1</span>
+								<span className="option-desc">양자내성 하이브리드 키</span>
+							</button>
 							<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setKeyAlgo("rsa1")}>
 								<span className="option-title">RSA-2048</span>
 								<span className="option-desc">호환성 우선</span>
@@ -1359,6 +1367,14 @@ function App() {
 									<span className="option-title">Curve448</span>
 									<span className="option-desc">높은 보안 강도 (추천)</span>
 									{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
+								</button>
+								<button
+									className={`option-card ${encryptAsymAlgo === "pqc1" ? "selected" : ""}`}
+									disabled
+								>
+									<span className="option-title">PQC1</span>
+									<span className="option-desc">양자내성 하이브리드</span>
+									{encryptAsymAlgo === "pqc1" && <span className="option-badge">자동 선택</span>}
 								</button>
 								<button
 									className={`option-card ${encryptAsymAlgo === "rsa1" ? "selected" : ""}`}

@@ -13,6 +13,8 @@
 
 import { sha3_256, sha3_512 } from "js-sha3";
 import { x448, ed448 } from "@noble/curves/ed448.js";
+import { ml_kem1024 } from "@noble/post-quantum/ml-kem.js";
+import { ml_dsa87 } from "@noble/post-quantum/ml-dsa.js";
 import type { AccountPayload, EncryptedPrivateKey, KdfParameters } from "./types";
 
 // TypeScript 5.7+ strict typed arrays — helper to satisfy BufferSource constraints
@@ -541,6 +543,137 @@ class ECC1 {
   }
 }
 
+// ==================== PQC1 (Hybrid PQC) ====================
+
+class PQC1 {
+  pubX: Uint8Array | null = null;
+  priX: Uint8Array | null = null;
+  pubEd: Uint8Array | null = null;
+  priEd: Uint8Array | null = null;
+
+  pubKEM: Uint8Array | null = null;
+  priKEM: Uint8Array | null = null;
+  pubDSA: Uint8Array | null = null;
+  priDSA: Uint8Array | null = null;
+
+  private em = new AES1();
+
+  async genkey(): Promise<[Uint8Array, Uint8Array]> {
+    const priXKey = x448.utils.randomSecretKey();
+    const pubXKey = x448.getPublicKey(priXKey);
+    const priEdKey = ed448.utils.randomSecretKey();
+    const pubEdKey = ed448.getPublicKey(priEdKey);
+
+    const kemKeys = ml_kem1024.keygen();
+    const dsaKeys = ml_dsa87.keygen();
+
+    const pubFull = new Uint8Array(4273);
+    pubFull.set(pubXKey, 0);
+    pubFull.set(pubEdKey, 56);
+    pubFull.set(kemKeys.publicKey, 113);
+    pubFull.set(dsaKeys.publicKey, 1681);
+
+    const priFull = new Uint8Array(8177);
+    priFull.set(priXKey, 0);
+    priFull.set(priEdKey, 56);
+    priFull.set(kemKeys.secretKey, 113);
+    priFull.set(dsaKeys.secretKey, 3281);
+
+    this.pubX = pubXKey;
+    this.priX = priXKey;
+    this.pubEd = pubEdKey;
+    this.priEd = priEdKey;
+    this.pubKEM = kemKeys.publicKey;
+    this.priKEM = kemKeys.secretKey;
+    this.pubDSA = dsaKeys.publicKey;
+    this.priDSA = dsaKeys.secretKey;
+
+    return [pubFull, priFull];
+  }
+
+  async loadkey(pub: Uint8Array | null, pri: Uint8Array | null): Promise<void> {
+    if (pub) {
+      const p = toU8(pub);
+      if (p.length !== 4273) throw new Error("Invalid PQC1 public key (must be 4273 bytes)");
+      this.pubX = p.slice(0, 56);
+      this.pubEd = p.slice(56, 113);
+      this.pubKEM = p.slice(113, 1681);
+      this.pubDSA = p.slice(1681, 4273);
+    }
+    if (pri) {
+      const p = toU8(pri);
+      if (p.length !== 8177) throw new Error("Invalid PQC1 private key (must be 8177 bytes)");
+      this.priX = p.slice(0, 56);
+      this.priEd = p.slice(56, 113);
+      this.priKEM = p.slice(113, 3281);
+      this.priDSA = p.slice(3281, 8177);
+    }
+  }
+
+  async encrypt(data: Uint8Array): Promise<Uint8Array> {
+    const d = toU8(data);
+
+    const tempPri = x448.utils.randomSecretKey();
+    const tempPub = x448.getPublicKey(tempPri);
+    const ssvECC = x448.getSharedSecret(tempPri, this.pubX!);
+
+    const { cipherText: kemEnc, sharedSecret: ssvKEM } = ml_kem1024.encapsulate(this.pubKEM!);
+
+    const combinedSecret = new Uint8Array(ssvECC.length + ssvKEM.length);
+    combinedSecret.set(ssvECC, 0);
+    combinedSecret.set(ssvKEM, ssvECC.length);
+
+    const gcmKey = genkey(combinedSecret, "KEYGEN_PQC1_ENCRYPT", 44);
+    const enc = await this.em.enAESGCM(gcmKey, d);
+
+    const res = new Uint8Array(56 + 1568 + enc.length);
+    res.set(tempPub, 0);
+    res.set(kemEnc, 56);
+    res.set(enc, 1624);
+    return res;
+  }
+
+  async decrypt(data: Uint8Array): Promise<Uint8Array> {
+    const d = toU8(data);
+    const tempPub = d.slice(0, 56);
+    const kemEnc = d.slice(56, 1624);
+    const enc = d.slice(1624);
+
+    const ssvECC = x448.getSharedSecret(this.priX!, tempPub);
+    const ssvKEM = ml_kem1024.decapsulate(kemEnc, this.priKEM!);
+
+    const combinedSecret = new Uint8Array(ssvECC.length + ssvKEM.length);
+    combinedSecret.set(ssvECC, 0);
+    combinedSecret.set(ssvKEM, ssvECC.length);
+
+    const gcmKey = genkey(combinedSecret, "KEYGEN_PQC1_ENCRYPT", 44);
+    return this.em.deAESGCM(gcmKey, enc);
+  }
+
+  async sign(data: Uint8Array): Promise<Uint8Array> {
+    const d = toU8(data);
+    const edSgn = ed448.sign(d, this.priEd!);
+    const mlSgn = ml_dsa87.sign(this.priDSA!, d);
+    const res = new Uint8Array(edSgn.length + mlSgn.length);
+    res.set(edSgn, 0);
+    res.set(mlSgn, edSgn.length);
+    return res;
+  }
+
+  async verify(data: Uint8Array, sig: Uint8Array): Promise<boolean> {
+    const d = toU8(data);
+    const s = toU8(sig);
+    const edSigLen = 114;
+    if (s.length <= edSigLen) return false;
+
+    const edSgn = s.slice(0, edSigLen);
+    const mlSgn = s.slice(edSigLen);
+    const okEd = ed448.verify(edSgn, d, this.pubEd!);
+    if (!okEd) return false;
+    return ml_dsa87.verify(this.pubDSA!, d, mlSgn);
+  }
+}
+
 // ==================== SymMaster ====================
 
 class SymMaster {
@@ -593,13 +726,15 @@ class SymMaster {
 
 class AsymMaster {
   algo: string;
-  worker: RSA1 | ECC1;
+  worker: RSA1 | ECC1 | PQC1;
 
   constructor(algo: string) {
-    const valid = ["rsa1", "rsa1-2k", "rsa1-3k", "rsa1-4k", "ecc1"];
+    const valid = ["rsa1", "rsa1-2k", "rsa1-3k", "rsa1-4k", "ecc1", "pqc1"];
     if (!valid.includes(algo)) throw new Error(`Unsupported algorithm: ${algo}`);
     this.algo = algo;
-    this.worker = algo === "ecc1" ? new ECC1() : new RSA1();
+    if (algo === "ecc1") this.worker = new ECC1();
+    else if (algo === "pqc1") this.worker = new PQC1();
+    else this.worker = new RSA1();
   }
 
   async genkey(): Promise<[Uint8Array, Uint8Array]> {
@@ -607,6 +742,7 @@ class AsymMaster {
       return (this.worker as RSA1).genkey(2048);
     if (this.algo === "rsa1-3k") return (this.worker as RSA1).genkey(3072);
     if (this.algo === "rsa1-4k") return (this.worker as RSA1).genkey(4096);
+    if (this.algo === "pqc1") return (this.worker as PQC1).genkey();
     return (this.worker as ECC1).genkey();
   }
 
@@ -774,7 +910,7 @@ class Opsec {
     publicBytes: Uint8Array,
     privateBytes: Uint8Array | null = null
   ): Promise<Uint8Array> {
-    if (method !== "rsa1" && method !== "ecc1")
+    if (method !== "rsa1" && method !== "ecc1" && method !== "pqc1")
       throw new Error(`Unsupported method: ${method}`);
     this._headAlgo = method;
     if (this.size >= 0) this.bodyKey = random(44);
@@ -871,7 +1007,7 @@ class Opsec {
     publicBytes: Uint8Array | null = null
   ): Promise<void> {
     if (!this._headAlgo) throw new Error("Call view() first");
-    if (this._headAlgo !== "rsa1" && this._headAlgo !== "ecc1")
+    if (this._headAlgo !== "rsa1" && this._headAlgo !== "ecc1" && this._headAlgo !== "pqc1")
       throw new Error(`Unsupported method: ${this._headAlgo}`);
     const am = new AsymMaster(this._headAlgo);
 
@@ -903,7 +1039,7 @@ class Opsec {
 
 // ==================== Exported Types ====================
 
-export type AsymAlgo = "rsa1" | "ecc1";
+export type AsymAlgo = "rsa1" | "ecc1" | "pqc1";
 export type KdfMethod = "arg1" | "pbk1";
 export type EncAlgo = "gcm1" | "gcmx1";
 export type AuthMode = "password" | "publickey";
