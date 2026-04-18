@@ -1364,7 +1364,7 @@ function App() {
 						</div>
 						<div className="form-group">
 							<label className="form-label">비대칭 알고리즘</label>
-							<div className="option-cards row-layout">
+							<div className="option-cards">
 								<button
 									className={`option-card ${encryptAsymAlgo === "pqc1" ? "selected" : ""}`}
 									disabled
