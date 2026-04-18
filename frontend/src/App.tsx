@@ -1330,7 +1330,7 @@ function App() {
 							</div>
 						</div>
 						<div className="btn-row">
-							<button className="btn btn-ghost" onClick={() => setEncryptStep(1)}>이전</button>
+							<button className="btn btn-secondary" onClick={() => setEncryptStep(1)}>이전</button>
 							<button className="btn btn-primary" disabled={!encryptPassword} onClick={() => setEncryptStep(3)}>다음</button>
 						</div>
 					</>
@@ -1428,7 +1428,7 @@ function App() {
 							</div>
 						</label>
 						<div className="btn-row">
-							<button className="btn btn-ghost" onClick={() => setEncryptStep(1)}>이전</button>
+							<button className="btn btn-secondary" onClick={() => setEncryptStep(1)}>이전</button>
 							<button className="btn btn-primary" disabled={!encryptRecipientId} onClick={() => setEncryptStep(3)}>다음</button>
 						</div>
 					</>
@@ -1449,7 +1449,7 @@ function App() {
 							</button>
 						</div>
 						<div className="btn-row">
-							<button className="btn btn-ghost" onClick={() => setEncryptStep(2)}>이전</button>
+							<button className="btn btn-secondary" onClick={() => setEncryptStep(2)}>이전</button>
 						</div>
 					</>
 				)}
@@ -1507,7 +1507,7 @@ function App() {
 						{encryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
 
 						<div className="btn-row">
-							<button className="btn btn-ghost" onClick={() => setEncryptStep(3)}>이전</button>
+							<button className="btn btn-secondary" onClick={() => setEncryptStep(3)}>이전</button>
 							<button className="btn btn-primary" disabled={encryptBusy} onClick={handleEncryptSubmit}>
 								{encryptBusy ? "암호화 중..." : "암호화"}
 							</button>
@@ -1746,7 +1746,7 @@ function App() {
 						{decryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
 
 						<div className="btn-row">
-							<button className="btn btn-ghost" onClick={() => setDecryptStep(1)}>이전</button>
+							<button className="btn btn-secondary" onClick={() => setDecryptStep(1)}>이전</button>
 							<button className="btn btn-primary" disabled={decryptBusy || (decryptDetected?.mode === "publickey" && decryptPrivateKeySource === "manual" && !decryptPrivateKeyInput.trim()) || (decryptDetected?.mode === "publickey" && decryptPrivateKeySource === "security" && !decryptionToken) || (decryptDetected?.mode === "password" && !decryptPassword)} onClick={() => {
 								if (decryptDetected?.mode === "publickey") {
 									setDecryptStep(3);
@@ -1803,7 +1803,7 @@ function App() {
 						{decryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
 
 						<div className="btn-row">
-							<button className="btn btn-ghost" onClick={() => setDecryptStep(2)}>이전</button>
+							<button className="btn btn-secondary" onClick={() => setDecryptStep(2)}>이전</button>
 							<button className="btn btn-primary" disabled={decryptBusy || (decryptPrivateKeySource === "manual" && !decryptPrivateKeyInput.trim()) || (decryptPrivateKeySource === "security" && !decryptionToken)} onClick={handleDecryptSubmit}>
 								{decryptBusy ? "복호화 중..." : "복호화"}
 							</button>
