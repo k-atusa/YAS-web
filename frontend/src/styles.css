@@ -642,9 +642,49 @@ select {
 	flex: 1;
 }
 
+.contact-name-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
 .contact-name {
 	font-weight: 600;
 	font-size: 15px;
+}
+
+.contact-algo-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 1.2;
+	border: 1px solid var(--border);
+	color: var(--text-sub);
+	background: var(--hover);
+	white-space: nowrap;
+}
+
+.contact-algo-badge.algo-pqc1 {
+	color: #0f8e5d;
+	border-color: rgba(15, 142, 93, 0.35);
+	background: rgba(15, 142, 93, 0.12);
+}
+
+.contact-algo-badge.algo-ecc1 {
+	color: #1276c8;
+	border-color: rgba(18, 118, 200, 0.35);
+	background: rgba(18, 118, 200, 0.12);
+}
+
+.contact-algo-badge.algo-rsa1 {
+	color: #c17d12;
+	border-color: rgba(193, 125, 18, 0.35);
+	background: rgba(193, 125, 18, 0.12);
 }
 
 .contact-meta-row {

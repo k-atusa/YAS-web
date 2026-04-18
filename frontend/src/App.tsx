@@ -1119,7 +1119,12 @@ function App() {
 						{contacts.map((c) => (
 							<div key={c.id} className="contact-row">
 								<div className="contact-info">
-									<span className="contact-name">{c.contactUsername}</span>
+									<div className="contact-name-row">
+										<span className="contact-name">{c.contactUsername}</span>
+										<span className={`contact-algo-badge algo-${detectPublicKeyAlgo(c.publicKey)}`}>
+											{detectPublicKeyAlgo(c.publicKey) === "pqc1" ? "PQC" : detectPublicKeyAlgo(c.publicKey) === "ecc1" ? "ECC" : "RSA"}
+										</span>
+									</div>
 									{c.notes && (
 										<div className="contact-meta-row">
 											<span className="contact-note">{c.notes}</span>
@@ -1189,14 +1194,14 @@ function App() {
 					</div>
 					<div className="form-group">
 						<label className="form-label">키 알고리즘</label>
-						<div className="option-cards row-layout">
-							<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
-								<span className="option-title">Curve448</span>
-								<span className="option-desc">높은 보안 강도 (추천)</span>
-							</button>
+						<div className="option-cards">
 							<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
 								<span className="option-title">PQC1</span>
 								<span className="option-desc">양자내성 하이브리드 키</span>
+							</button>
+							<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
+								<span className="option-title">Curve448</span>
+								<span className="option-desc">높은 보안 강도 (추천)</span>
 							</button>
 							<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setKeyAlgo("rsa1")}>
 								<span className="option-title">RSA-2048</span>
@@ -1361,20 +1366,20 @@ function App() {
 							<label className="form-label">비대칭 알고리즘</label>
 							<div className="option-cards row-layout">
 								<button
-									className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`}
-									disabled
-								>
-									<span className="option-title">Curve448</span>
-									<span className="option-desc">높은 보안 강도 (추천)</span>
-									{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
-								</button>
-								<button
 									className={`option-card ${encryptAsymAlgo === "pqc1" ? "selected" : ""}`}
 									disabled
 								>
 									<span className="option-title">PQC1</span>
 									<span className="option-desc">양자내성 하이브리드</span>
 									{encryptAsymAlgo === "pqc1" && <span className="option-badge">자동 선택</span>}
+								</button>
+								<button
+									className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`}
+									disabled
+								>
+									<span className="option-title">Curve448</span>
+									<span className="option-desc">높은 보안 강도 (추천)</span>
+									{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
 								</button>
 								<button
 									className={`option-card ${encryptAsymAlgo === "rsa1" ? "selected" : ""}`}
