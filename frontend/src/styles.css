@@ -543,6 +543,10 @@ select {
 	background: var(--hover);
 }
 
+.btn-ghost.copy-feedback {
+	color: var(--success);
+}
+
 .btn-full {
 	width: 100%;
 }

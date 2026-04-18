@@ -1135,7 +1135,9 @@ function App() {
 									<span className="contact-pk-preview" style={{ marginRight: "12px", opacity: 0.6 }}>
 										{c.publicKey && c.publicKey.length > 20 ? `${c.publicKey.slice(0, 6)}…${c.publicKey.slice(-5)}` : c.publicKey}
 									</span>
-									<button className="btn-ghost btn-sm" onClick={() => { handleCopyPublicKey(c.publicKey); showToast("복사 되었습니다"); }}>복사</button>
+									<button className={`btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`} onClick={() => handleCopyPublicKey(c.publicKey)}>
+										{copyPublicStatus === "copied" ? "✓ 복사됨" : "복사"}
+									</button>
 									<button className="btn-ghost btn-sm" onClick={() => openEditContactModal(c)}>수정</button>
 									<button className="btn-ghost btn-sm btn-danger" onClick={() => handleDeleteContact(c.id)}>삭제</button>
 								</div>
