@@ -1165,7 +1165,7 @@ function App() {
 							<span className="key-label">공개키</span>
 							<div className="key-value-row">
 								<code className="key-truncated">{truncateKey(storedAccount!.publicKey)}</code>
-								<button className="btn btn-ghost btn-sm" onClick={() => handleCopyPublicKey(storedAccount?.publicKey)}>
+								<button className={`btn btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`} onClick={() => handleCopyPublicKey(storedAccount?.publicKey)}>
 									{copyPublicStatus === "copied" ? "복사됨 ✓" : "복사"}
 								</button>
 							</div>
