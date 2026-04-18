@@ -7,6 +7,8 @@ export interface IFile extends Document {
   filePath: string;
   torDomain: string;
   expiresAt: Date;
+  maxDownloads: number;
+  downloadCount: number;
 }
 
 const fileSchema = new Schema<IFile>(
@@ -16,6 +18,8 @@ const fileSchema = new Schema<IFile>(
     filename: { type: String, required: true },
     filePath: { type: String, required: true },
     torDomain: { type: String, required: true, unique: true },
+    maxDownloads: { type: Number, required: true, default: 1, min: 1 },
+    downloadCount: { type: Number, required: true, default: 0, min: 0 },
     // MongoDB TTL Index
     expiresAt: { type: Date, required: true, expires: 0 },
   },

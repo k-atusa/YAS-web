@@ -170,6 +170,7 @@ function App() {
 	/* Contacts */
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
 	const [inboxFiles, setInboxFiles] = useState<any[]>([]);
+	const [copiedTorFileId, setCopiedTorFileId] = useState<string | null>(null);
 	const [contactsLoading, setContactsLoading] = useState(false);
 	const [contactForm, setContactForm] = useState({ contactUsername: "", notes: "" });
 	const [contactError, setContactError] = useState<string | null>(null);
@@ -198,6 +199,8 @@ function App() {
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
 	const [encryptResultLink, setEncryptResultLink] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
+	const [shareExpiresHours, setShareExpiresHours] = useState("24");
+	const [shareMaxDownloads, setShareMaxDownloads] = useState("3");
 	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
 	const [encryptStep, setEncryptStep] = useState(1);
 
@@ -464,6 +467,9 @@ function App() {
 		setIsFileDragActive(false);
 		setEncryptStatus(null);
 		setEncryptError(null);
+		setEncryptResultLink(null);
+		setShareExpiresHours("24");
+		setShareMaxDownloads("3");
 		setEncryptedBlob(null);
 		setEncryptStep(1);
 		setDecryptPayloadInput("");
@@ -503,6 +509,19 @@ function App() {
 		} catch {
 			setCopyPrivateStatus("error");
 			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
+		}
+	}
+
+	async function handleCopyTorLink(fileId: string, value?: string) {
+		if (!value) return;
+		try {
+			await navigator.clipboard.writeText(value);
+			setCopiedTorFileId(fileId);
+			setTimeout(() => {
+				setCopiedTorFileId((current) => (current === fileId ? null : current));
+			}, 2000);
+		} catch {
+			showToast("링크 복사 실패");
 		}
 	}
 
@@ -743,6 +762,8 @@ function App() {
 		setEncryptStatus(null);
 		setEncryptError(null);
 		setEncryptResultLink(null);
+		setShareExpiresHours("24");
+		setShareMaxDownloads("3");
 		setEncryptKdfMethod("arg1");
 		setEncryptEncAlgo("gcm1");
 		setEncryptAsymAlgo(null);
@@ -1278,15 +1299,23 @@ function App() {
 				{inboxFiles.length === 0 ? (
 					<div className="status-bar info">수신된 파일이 없습니다.</div>
 				) : (
-					<div className="card" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+					<div className="card" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
 						{inboxFiles.map((f: any) => {
 							return (
-								<div key={f._id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: "10px" }}>
-									<div style={{ fontWeight: "bold" }}>파일명: {f.filename}</div>
+								<div key={f._id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: "14px" }}>
+									<div style={{ fontWeight: "bold", marginBottom: "7px" }}>파일명: {f.filename}</div>
 									<div style={{ fontSize: "13px", color: "var(--text-sub)" }}>만료시간: {new Date(f.expiresAt).toLocaleString()}</div>
-									<div style={{ marginTop: "8px" }}>
-										<label style={{ fontSize: "12px" }}>오니온 링크 (토어)</label>
-										<input type="text" readOnly className="form-input" value={f.torDomain} style={{ fontSize: "11px", marginTop: "4px" }} />
+									<div style={{ fontSize: "13px", color: "var(--text-sub)", marginTop: "5px" }}>
+										공유 횟수: {Number(f.downloadCount ?? 0)} / {Number(f.maxDownloads ?? 1)}
+									</div>
+									<div style={{ marginTop: "10px" }}>
+										<label style={{ fontSize: "12px" }}>오니온 링크 (Tor)</label>
+										<div style={{ display: "flex", gap: "8px", marginTop: "4px", alignItems: "center" }}>
+											<input type="text" readOnly className="form-input" value={f.torDomain} style={{ fontSize: "11px", marginTop: 0 }} />
+											<button className="btn btn-secondary btn-sm" onClick={() => { void handleCopyTorLink(f._id, f.torDomain); }}>
+												{copiedTorFileId === f._id ? "복사됨" : "복사"}
+											</button>
+										</div>
 									</div>
 								</div>
 							);
@@ -1305,6 +1334,29 @@ function App() {
 				<>
 					<h2 className="section-title">암호화 완료</h2>
 					<div className="card">
+						<div className="form-group">
+							<label className="form-label">만료 시간 (시간)</label>
+							<input
+								type="number"
+								min={1}
+								step={1}
+								value={shareExpiresHours}
+								onChange={(e) => setShareExpiresHours(e.target.value)}
+								placeholder="예: 24"
+							/>
+						</div>
+						<div className="form-group">
+							<label className="form-label">공유 횟수 제한</label>
+							<input
+								type="number"
+								min={1}
+								step={1}
+								value={shareMaxDownloads}
+								onChange={(e) => setShareMaxDownloads(e.target.value)}
+								placeholder="예: 3"
+							/>
+							<span className="form-hint">설정한 횟수만큼 다운로드되면 링크가 자동 만료됩니다.</span>
+						</div>
 						<div className="result-grid">
 							<div className="result-item">
 								<span className="result-label">방식</span>
@@ -1326,11 +1378,30 @@ function App() {
 							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>다운로드</button>
 							<button className="btn btn-primary btn-sm" onClick={async () => {
 								try {
-									const hoursStr = prompt("몇 시간 후에 만료되도록 할까요? (예: 24)");
-									const hours = parseFloat(hoursStr || "24") || 24;
+									setEncryptError(null);
+									setEncryptStatus(null);
+									setEncryptResultLink(null);
+
+									const hours = Number(shareExpiresHours);
+									const maxDownloads = Number(shareMaxDownloads);
+									if (!Number.isFinite(hours) || hours <= 0) {
+										setEncryptError("만료 시간은 1 이상의 숫자여야 합니다.");
+										return;
+									}
+									if (!Number.isInteger(maxDownloads) || maxDownloads <= 0) {
+										setEncryptError("공유 횟수 제한은 1 이상의 정수여야 합니다.");
+										return;
+									}
+
 									const b64 = u8ToBase64(encryptedBlob);
 									const fn = encryptFile ? "secure_file.yas" : "secure_message.yas";
-									const res = await uploadEncryptedFile(authToken!, { recipientId: encryptRecipientId, filename: fn, encryptedData: b64, expiresInHours: hours });
+									const res = await uploadEncryptedFile(authToken!, {
+										recipientId: encryptAuthMode === "publickey" ? encryptRecipientId : undefined,
+										filename: fn,
+										encryptedData: b64,
+										expiresInHours: hours,
+										maxDownloads,
+									});
 									setEncryptStatus("업로드 완료!");
 									setEncryptResultLink(res.torDomain);
 								} catch (err: any) {

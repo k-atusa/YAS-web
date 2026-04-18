@@ -247,7 +247,7 @@ export async function decryptStoredPrivateKey(username: string, token: string): 
   return response.json();
 }
 
-export async function uploadEncryptedFile(token: string, payload: { recipientId: string; filename: string; encryptedData: string; expiresInHours: number }) {
+export async function uploadEncryptedFile(token: string, payload: { recipientId?: string; filename: string; encryptedData: string; expiresInHours: number; maxDownloads: number }) {
   const response = await fetch(`${API_BASE}/files/upload`, {
     method: "POST",
     headers: {

@@ -19,7 +19,7 @@ router.use(requireAuth);
 
 router.post("/upload", async (req: any, res) => {
   try {
-    const { recipientId, filename, encryptedData, expiresInHours } = req.body;
+    const { recipientId, filename, encryptedData, expiresInHours, maxDownloads } = req.body;
     const senderId = req.user?.sub;
 
     if (!filename || !encryptedData || !expiresInHours) {
@@ -59,7 +59,16 @@ router.post("/upload", async (req: any, res) => {
       torDomain = `http://${randomHex}.onion`;
     }
 
-    const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
+    const parsedExpiresInHours = Number(expiresInHours);
+    const parsedMaxDownloads = Number(maxDownloads ?? 1);
+    if (!Number.isFinite(parsedExpiresInHours) || parsedExpiresInHours <= 0) {
+      return res.status(400).json({ error: "Invalid expiresInHours" });
+    }
+    if (!Number.isInteger(parsedMaxDownloads) || parsedMaxDownloads <= 0) {
+      return res.status(400).json({ error: "Invalid maxDownloads" });
+    }
+
+    const expiresAt = new Date(Date.now() + parsedExpiresInHours * 60 * 60 * 1000);
 
     // Save actual file instead of DB raw data
     const fileId = new mongoose.Types.ObjectId();
@@ -74,10 +83,12 @@ router.post("/upload", async (req: any, res) => {
       filePath, // Save physical path
       torDomain,
       expiresAt,
+      maxDownloads: parsedMaxDownloads,
+      downloadCount: 0,
     });
 
     await file.save();
-    return res.json({ torDomain, expiresAt });
+    return res.json({ torDomain, expiresAt, maxDownloads: parsedMaxDownloads });
   } catch (error: any) {
     console.error(error);
     return res.status(500).json({ error: "Failed to upload file" });
@@ -102,6 +113,13 @@ router.get("/download/:domain", async (req: any, res) => {
     if (!fileDoc) {
       return res.status(404).json({ error: "File not found or expired" });
     }
+
+    if (fileDoc.downloadCount >= fileDoc.maxDownloads) {
+      return res.status(410).json({ error: "Download limit exceeded" });
+    }
+
+    fileDoc.downloadCount += 1;
+    await fileDoc.save();
     
     // Read the encrypted payload from disk
     const encryptedData = await fs.readFile(fileDoc.filePath, "utf8");
@@ -113,6 +131,8 @@ router.get("/download/:domain", async (req: any, res) => {
       filename: fileDoc.filename,
       torDomain: fileDoc.torDomain,
       expiresAt: fileDoc.expiresAt,
+      maxDownloads: fileDoc.maxDownloads,
+      downloadCount: fileDoc.downloadCount,
       createdAt: (fileDoc as any).createdAt,
       updatedAt: (fileDoc as any).updatedAt,
       encryptedData
