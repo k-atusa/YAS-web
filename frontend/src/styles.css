@@ -821,8 +821,8 @@ select {
 .option-card {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	padding: 20px;
+	gap: 4px;
+	padding: 14px;
 	border: 1.5px solid var(--border);
 	border-radius: var(--radius);
 	background: var(--surface);
