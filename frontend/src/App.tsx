@@ -1382,9 +1382,26 @@ function App() {
 								<label className="form-label">만료 날짜</label>
 								<input
 									type="date"
+									min={new Date().toISOString().split('T')[0]}
 									max="9999-12-31"
 									value={shareExpiresDate}
-									onChange={(e) => setShareExpiresDate(e.target.value)}
+									onChange={(e) => {
+										let val = e.target.value;
+										if (val && val.length > 10) {
+											const parts = val.split('-');
+											if (parts.length > 0 && parts[0].length > 4) {
+												parts[0] = parts[0].slice(0, 4);
+												val = parts.join('-');
+											}
+										}
+										setShareExpiresDate(val);
+									}}
+									onKeyDown={(e) => {
+										if (e.key >= '0' && e.key <= '9') {
+											const input = e.target as HTMLInputElement;
+											if (input.value.length >= 10 && input.selectionStart === 10) e.preventDefault();
+										}
+									}}
 									autoFocus
 									className="form-input"
 								/>
