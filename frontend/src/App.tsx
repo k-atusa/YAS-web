@@ -36,6 +36,15 @@ import type { AccountRecord, ContactRecord } from "./types";
 
 /* ─── Helpers ─── */
 
+function get24HoursLater() {
+        const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const pad = (n: number) => n.toString().padStart(2, "0");
+        return {
+                dateStr: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+                timeStr: `${pad(d.getHours())}:${pad(d.getMinutes())}`
+        };
+}
+
 function formatBytes(bytes: number): string {
 	if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
 	const units = ["B", "KB", "MB", "GB", "TB"];
@@ -203,16 +212,8 @@ function App() {
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
 	const [encryptResultLink, setEncryptResultLink] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
-	const [shareExpiresDate, setShareExpiresDate] = useState(() => {
-		const tomorrow = new Date();
-		tomorrow.setDate(tomorrow.getDate() + 1);
-		return tomorrow.toISOString().split('T')[0];
-	});
-	const [shareExpiresTime, setShareExpiresTime] = useState("00:00");
-	const [shareMaxDownloads, setShareMaxDownloads] = useState("3");
-	const [showShareOptions, setShowShareOptions] = useState(false);
-	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
-	const [encryptStep, setEncryptStep] = useState(1);
+	const [shareExpiresDate, setShareExpiresDate] = useState(() => get24HoursLater().dateStr);
+        const [shareExpiresTime, setShareExpiresTime] = useState(() => get24HoursLater().timeStr);
 
 	/* Decrypt */
 	const [decryptPayloadInput, setDecryptPayloadInput] = useState("");
@@ -482,10 +483,10 @@ function App() {
 		setEncryptError(null);
 		setEncryptResultLink(null);
 		setShowShareOptions(false);
-		const tomorrow = new Date();
-		tomorrow.setDate(tomorrow.getDate() + 1);
-		setShareExpiresDate(tomorrow.toISOString().split('T')[0]);
-		setShareExpiresTime("00:00");
+		
+		
+		setShareExpiresDate(get24HoursLater().dateStr);
+		setShareExpiresTime(get24HoursLater().timeStr);
 		setShareMaxDownloads("3");
 		setEncryptedBlob(null);
 		setEncryptStep(1);
@@ -780,10 +781,10 @@ function App() {
 		setEncryptError(null);
 		setEncryptResultLink(null);
 		setShowShareOptions(false);
-		const tomorrow = new Date();
-		tomorrow.setDate(tomorrow.getDate() + 1);
-		setShareExpiresDate(tomorrow.toISOString().split('T')[0]);
-		setShareExpiresTime("00:00");
+		
+		
+		setShareExpiresDate(get24HoursLater().dateStr);
+		setShareExpiresTime(get24HoursLater().timeStr);
 		setShareMaxDownloads("3");
 		setEncryptKdfMethod("arg1");
 		setEncryptEncAlgo("gcm1");
