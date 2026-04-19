@@ -268,6 +268,23 @@ export async function getInboxFiles(token: string) {
   return response.json();
 }
 
+export async function decryptTorDomain(token: string, fileId: string, decryptionToken: string) {
+  const response = await fetch(`${API_BASE}/files/inbox/${fileId}/decrypt-domain`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ decryptionToken }),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to decrypt link");
+  }
+  return response.json();
+}
+
 export async function downloadFile(token: string, domain: string) {
   const response = await fetch(`${API_BASE}/files/download/${encodeURIComponent(domain)}`, {
     headers: { Authorization: `Bearer ${token}` },

@@ -6,6 +6,7 @@ import morgan from "morgan";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import accountsRouter from "./routes/accounts";
 import authRouter from "./routes/auth";
 import contactsRouter from "./routes/contacts";
@@ -34,7 +35,8 @@ app.get("/", async (req, res, next) => {
 
   try {
     const torDomain = `http://${host}`;
-    const fileDoc = await FileModel.findOne({ torDomain });
+    const torDomainHash = crypto.createHash("sha256").update(torDomain).digest("hex");
+    const fileDoc = await FileModel.findOne({ torDomainHash });
     if (!fileDoc) {
       return res.status(404).type("text/plain").send("Not found");
     }
@@ -45,6 +47,8 @@ app.get("/", async (req, res, next) => {
     const safeDownloadCount = Number.isFinite(downloadCount) && downloadCount >= 0 ? downloadCount : 0;
 
     if (safeDownloadCount >= safeMaxDownloads) {
+      await fileDoc.deleteOne();
+      await fsPromises.unlink(fileDoc.filePath).catch(() => {});
       return res.status(404).type("text/plain").send("Not found");
     }
 
@@ -52,7 +56,14 @@ app.get("/", async (req, res, next) => {
 
     fileDoc.maxDownloads = safeMaxDownloads;
     fileDoc.downloadCount = safeDownloadCount + 1;
-    await fileDoc.save();
+    
+    const isLimitReached = fileDoc.downloadCount >= fileDoc.maxDownloads;
+    if (isLimitReached) {
+      await fileDoc.deleteOne();
+      await fsPromises.unlink(fileDoc.filePath).catch(() => {});
+    } else {
+      await fileDoc.save();
+    }
 
     const downloadName = path.basename(fileDoc.filename || "encrypted.yas").replace(/[^a-zA-Z0-9._-]/g, "_");
     res.setHeader("Content-Type", "application/octet-stream");

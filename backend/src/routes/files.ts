@@ -8,9 +8,38 @@ import { ContactModel } from "../models/Contact";
 import { UserModel } from "../models/User";
 import { requireAuth } from "../middleware/requireAuth";
 import { createEphemeralHiddenService } from "../tor";
+import jwt from "jsonwebtoken";
 
 const router = express.Router();
 const UPLOADS_DIR = path.join(__dirname, "../../uploads");
+
+const ENCRYPTION_SECRET = process.env.JWT_SECRET || "dev-secret";
+
+function encryptDomain(domain: string, salt: string) {
+  const key = crypto.createHash("sha256").update(ENCRYPTION_SECRET + salt).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  let encrypted = cipher.update(domain, "utf8", "base64");
+  encrypted += cipher.final("base64");
+  const authTag = cipher.getAuthTag().toString("base64");
+  return `${iv.toString("base64")}:${authTag}:${encrypted}`;
+}
+
+function decryptDomain(encryptedStr: string, salt: string) {
+  const parts = encryptedStr.split(":");
+  if (parts.length !== 3) return null;
+  const [iv, authTag, cipherText] = parts;
+  const key = crypto.createHash("sha256").update(ENCRYPTION_SECRET + salt).digest();
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64"));
+  decipher.setAuthTag(Buffer.from(authTag, "base64"));
+  try {
+    let decrypted = decipher.update(cipherText, "base64", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  } catch(e) {
+    return null;
+  }
+}
 
 // Ensure uploads dir exists
 fs.mkdir(UPLOADS_DIR, { recursive: true }).catch(console.error);
@@ -78,13 +107,22 @@ router.post("/upload", async (req: any, res) => {
     const filePath = path.join(UPLOADS_DIR, `${fileId.toHexString()}.enc`);
     await fs.writeFile(filePath, encryptedData, "utf8");
 
+    // Encrypt the tor domain for the recipient
+    const encryptedTorDomain = encryptDomain(torDomain, actualRecipientId);
+    if (!encryptedTorDomain) {
+      return res.status(500).json({ error: "Encryption error" });
+    }
+
+    const torDomainHash = crypto.createHash("sha256").update(torDomain).digest("hex");
+
     const file = new FileModel({
       _id: fileId,
       senderId,
       recipientId: actualRecipientId,
       filename,
       filePath, // Save physical path
-      torDomain,
+      torDomain: encryptedTorDomain,
+      torDomainHash,
       expiresAt: expiresAt_final,
       maxDownloads: parsedMaxDownloads,
       downloadCount: 0,
@@ -109,10 +147,41 @@ router.get("/inbox", async (req: any, res) => {
   }
 });
 
+router.post("/inbox/:id/decrypt-domain", async (req: any, res) => {
+  try {
+    const { decryptionToken } = req.body;
+    if (!decryptionToken) {
+      return res.status(400).json({ error: "Missing decryption token" });
+    }
+
+    const secret = process.env.JWT_SECRET || "dev-secret";
+    const payload = jwt.verify(decryptionToken, secret) as any;
+    
+    if (payload.type !== "decrypt" || payload.sub !== req.user?.sub) {
+      return res.status(403).json({ error: "Invalid decryption token" });
+    }
+
+    const fileDoc = await FileModel.findOne({ _id: req.params.id, recipientId: req.user?.sub });
+    if (!fileDoc) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    const decryptedTorDomain = decryptDomain(fileDoc.torDomain, fileDoc.recipientId);
+    if (!decryptedTorDomain) {
+       return res.status(500).json({ error: "Failed to decrypt torDomain." });
+    }
+
+    return res.json({ torDomain: decryptedTorDomain });
+  } catch(error) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
+});
+
 router.get("/download/:domain", async (req: any, res) => {
   try {
     const torDomain = `http://${req.params.domain}.onion`;
-    const fileDoc = await FileModel.findOne({ torDomain, recipientId: req.user?.sub });
+    const torDomainHash = crypto.createHash("sha256").update(torDomain).digest("hex");
+    const fileDoc = await FileModel.findOne({ torDomainHash, recipientId: req.user?.sub });
     if (!fileDoc) {
       return res.status(404).json({ error: "File not found or expired" });
     }
@@ -123,22 +192,34 @@ router.get("/download/:domain", async (req: any, res) => {
     const safeDownloadCount = Number.isFinite(downloadCount) && downloadCount >= 0 ? downloadCount : 0;
 
     if (safeDownloadCount >= safeMaxDownloads) {
+      await fileDoc.deleteOne();
+      await fs.unlink(fileDoc.filePath).catch(() => {});
       return res.status(410).json({ error: "Download limit exceeded" });
     }
 
     fileDoc.maxDownloads = safeMaxDownloads;
     fileDoc.downloadCount = safeDownloadCount + 1;
-    await fileDoc.save();
+    
+    const isLimitReached = fileDoc.downloadCount >= fileDoc.maxDownloads;
+    if (isLimitReached) {
+      await fileDoc.deleteOne();
+    } else {
+      await fileDoc.save();
+    }
     
     // Read the encrypted payload from disk
     const encryptedData = await fs.readFile(fileDoc.filePath, "utf8");
+    if (isLimitReached) {
+      await fs.unlink(fileDoc.filePath).catch(() => {});
+    }
     
+    // We send back the decrypted domain so the frontend can display it correctly, or we can just send the generated torDomain
     const file = {
       _id: fileDoc._id,
       senderId: fileDoc.senderId,
       recipientId: fileDoc.recipientId,
       filename: fileDoc.filename,
-      torDomain: fileDoc.torDomain,
+      torDomain: torDomain,
       expiresAt: fileDoc.expiresAt,
       maxDownloads: safeMaxDownloads,
       downloadCount: fileDoc.downloadCount,
