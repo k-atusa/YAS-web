@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import SparkMD5 from "spark-md5";
 import {
 	getAccountByUsername,
 	login as loginApi,
@@ -332,7 +333,10 @@ function App() {
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement("a");
 		link.href = url;
-		link.download = `encrypted-${Date.now()}.bin`;
+		
+		const md5Hash = SparkMD5.ArrayBuffer.hash(encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer);
+		link.download = `secure_file_${md5Hash.substring(0, 6)}.yas`;
+		
 		link.click();
 		URL.revokeObjectURL(url);
 	}, [encryptedBlob]);
@@ -977,7 +981,10 @@ function App() {
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement("a");
 		link.href = url;
-		link.download = `encrypted-${Date.now()}.bin`;
+		
+		const md5Hash = SparkMD5.ArrayBuffer.hash(encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer);
+		link.download = `secure_file_${md5Hash.substring(0, 6)}.yas`;
+		
 		link.click();
 		URL.revokeObjectURL(url);
 	}
@@ -1451,7 +1458,9 @@ function App() {
 										}
 
 										const b64 = u8ToBase64(encryptedBlob);
-										const fn = encryptFile ? "secure_file.yas" : "secure_message.yas";
+										const md5Hash = SparkMD5.ArrayBuffer.hash(encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer);
+										const fn = `secure_file_${md5Hash.substring(0, 6)}.yas`;
+										
 										const res = await uploadEncryptedFile(authToken!, {
 											recipientId: encryptAuthMode === "publickey" ? encryptRecipientId : undefined,
 											filename: fn,
@@ -1809,7 +1818,7 @@ function App() {
 								<label htmlFor="decrypt-file" style={{ cursor: "pointer" }}>
 									<div className="file-drop-icon">📂</div>
 									<p className="file-drop-text">암호화된 파일을 끌어놓거나 클릭하세요</p>
-									<p className="file-drop-hint">.bin 파일을 여기에 놓으세요</p>
+									<p className="file-drop-hint">.yas 파일을 여기에 놓으세요</p>
 								</label>
 							</div>
 							{decryptPayloadFile && (
