@@ -214,6 +214,10 @@ function App() {
 	const [encryptError, setEncryptError] = useState<string | null>(null);
 	const [shareExpiresDate, setShareExpiresDate] = useState(() => get24HoursLater().dateStr);
         const [shareExpiresTime, setShareExpiresTime] = useState(() => get24HoursLater().timeStr);
+    const [shareMaxDownloads, setShareMaxDownloads] = useState("3");
+    const [showShareOptions, setShowShareOptions] = useState(false);
+    const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
+    const [encryptStep, setEncryptStep] = useState(1);
 
 	/* Decrypt */
 	const [decryptPayloadInput, setDecryptPayloadInput] = useState("");
