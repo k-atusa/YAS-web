@@ -1382,6 +1382,7 @@ function App() {
 								<label className="form-label">만료 날짜</label>
 								<input
 									type="date"
+									max="9999-12-31"
 									value={shareExpiresDate}
 									onChange={(e) => setShareExpiresDate(e.target.value)}
 									autoFocus
