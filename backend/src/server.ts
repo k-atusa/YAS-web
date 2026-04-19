@@ -57,7 +57,7 @@ app.get("/", async (req, res, next) => {
     const downloadName = path.basename(fileDoc.filename || "encrypted.yas").replace(/[^a-zA-Z0-9._-]/g, "_");
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", `attachment; filename="${downloadName || "encrypted.yas"}"`);
-    return res.send(encryptedData);
+    return res.send(Buffer.from(encryptedData, "base64"));
   } catch (error) {
     console.error("Onion direct download failed", error);
     return res.status(500).type("text/plain").send("Error");
