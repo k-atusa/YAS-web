@@ -19,10 +19,10 @@ router.use(requireAuth);
 
 router.post("/upload", async (req: any, res) => {
   try {
-    const { recipientId, filename, encryptedData, expiresInHours, maxDownloads } = req.body;
+    const { recipientId, filename, encryptedData, expiresAt, maxDownloads } = req.body;
     const senderId = req.user?.sub;
 
-    if (!filename || !encryptedData || !expiresInHours) {
+    if (!filename || !encryptedData || !expiresAt) {
       return res.status(400).json({ error: "Missing parameters" });
     }
 
@@ -59,16 +59,19 @@ router.post("/upload", async (req: any, res) => {
       torDomain = `http://${randomHex}.onion`;
     }
 
-    const parsedExpiresInHours = Number(expiresInHours);
+    const parsedExpiresAt = new Date(expiresAt);
     const parsedMaxDownloads = Number(maxDownloads ?? 1);
-    if (!Number.isFinite(parsedExpiresInHours) || parsedExpiresInHours <= 0) {
-      return res.status(400).json({ error: "Invalid expiresInHours" });
+    if (isNaN(parsedExpiresAt.getTime())) {
+      return res.status(400).json({ error: "Invalid expiresAt" });
+    }
+    if (parsedExpiresAt <= new Date()) {
+      return res.status(400).json({ error: "expiresAt must be in the future" });
     }
     if (!Number.isInteger(parsedMaxDownloads) || parsedMaxDownloads <= 0) {
       return res.status(400).json({ error: "Invalid maxDownloads" });
     }
 
-    const expiresAt = new Date(Date.now() + parsedExpiresInHours * 60 * 60 * 1000);
+    const expiresAt_final = parsedExpiresAt;
 
     // Save actual file instead of DB raw data
     const fileId = new mongoose.Types.ObjectId();
@@ -82,7 +85,7 @@ router.post("/upload", async (req: any, res) => {
       filename,
       filePath, // Save physical path
       torDomain,
-      expiresAt,
+      expiresAt: expiresAt_final,
       maxDownloads: parsedMaxDownloads,
       downloadCount: 0,
     });

@@ -199,7 +199,12 @@ function App() {
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
 	const [encryptResultLink, setEncryptResultLink] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
-	const [shareExpiresHours, setShareExpiresHours] = useState("24");
+	const [shareExpiresDate, setShareExpiresDate] = useState(() => {
+		const tomorrow = new Date();
+		tomorrow.setDate(tomorrow.getDate() + 1);
+		return tomorrow.toISOString().split('T')[0];
+	});
+	const [shareExpiresTime, setShareExpiresTime] = useState("00:00");
 	const [shareMaxDownloads, setShareMaxDownloads] = useState("3");
 	const [showShareOptions, setShowShareOptions] = useState(false);
 	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
@@ -470,7 +475,10 @@ function App() {
 		setEncryptError(null);
 		setEncryptResultLink(null);
 		setShowShareOptions(false);
-		setShareExpiresHours("24");
+		const tomorrow = new Date();
+		tomorrow.setDate(tomorrow.getDate() + 1);
+		setShareExpiresDate(tomorrow.toISOString().split('T')[0]);
+		setShareExpiresTime("00:00");
 		setShareMaxDownloads("3");
 		setEncryptedBlob(null);
 		setEncryptStep(1);
@@ -765,7 +773,10 @@ function App() {
 		setEncryptError(null);
 		setEncryptResultLink(null);
 		setShowShareOptions(false);
-		setShareExpiresHours("24");
+		const tomorrow = new Date();
+		tomorrow.setDate(tomorrow.getDate() + 1);
+		setShareExpiresDate(tomorrow.toISOString().split('T')[0]);
+		setShareExpiresTime("00:00");
 		setShareMaxDownloads("3");
 		setEncryptKdfMethod("arg1");
 		setEncryptEncAlgo("gcm1");
@@ -1368,15 +1379,21 @@ function App() {
 						<div className="card mt-3">
 							<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>공유 설정</h3>
 							<div className="form-group">
-								<label className="form-label">만료 시간 (시간)</label>
+								<label className="form-label">만료 날짜</label>
 								<input
-									type="number"
-									min={1}
-									step={1}
-									value={shareExpiresHours}
-									onChange={(e) => setShareExpiresHours(e.target.value)}
-									placeholder="예: 24"
+									type="date"
+									value={shareExpiresDate}
+									onChange={(e) => setShareExpiresDate(e.target.value)}
 									autoFocus
+									className="form-input"
+								/>
+							</div>
+							<div className="form-group">
+								<label className="form-label">만료 시각</label>
+								<input
+									type="time"
+									value={shareExpiresTime}
+									onChange={(e) => setShareExpiresTime(e.target.value)}
 									className="form-input"
 								/>
 							</div>
@@ -1400,10 +1417,14 @@ function App() {
 										setEncryptError(null);
 										setEncryptStatus(null);
 
-										const hours = Number(shareExpiresHours);
 										const maxDownloads = Number(shareMaxDownloads);
-										if (!Number.isFinite(hours) || hours <= 0) {
-											setEncryptError("만료 시간은 1 이상의 숫자여야 합니다.");
+										if (!shareExpiresDate || !shareExpiresTime) {
+											setEncryptError("만료 날짜와 시각을 모두 선택해주세요.");
+											return;
+										}
+										const expiresAt = new Date(`${shareExpiresDate}T${shareExpiresTime}`);
+										if (expiresAt <= new Date()) {
+											setEncryptError("만료 시간은 현재 시간 이후여야 합니다.");
 											return;
 										}
 										if (!Number.isInteger(maxDownloads) || maxDownloads <= 0) {
@@ -1417,7 +1438,7 @@ function App() {
 											recipientId: encryptAuthMode === "publickey" ? encryptRecipientId : undefined,
 											filename: fn,
 											encryptedData: b64,
-											expiresInHours: hours,
+											expiresAt: expiresAt.toISOString(),
 											maxDownloads,
 										});
 										setEncryptStatus("업로드 완료!");
