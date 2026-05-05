@@ -1,0 +1,12 @@
+1280:									<span className="option-title">PQC</span>
+1284:									<span className="option-title">Curve448</span>
+1288:									<span className="option-title">RSA-2048</span>
+1587:								<span className="option-title">🔑 비밀번호</span>
+1591:								<span className="option-title">👤 공개키</span>
+1610:									<span className="option-title">Argon2id</span>
+1614:									<span className="option-title">PBKDF2</span>
+1659:									<span className="option-title">PQC</span>
+1667:									<span className="option-title">Curve448</span>
+1675:									<span className="option-title">RSA-2048</span>
+1730:								<span className="option-title">표준 (AES-GCM)</span>
+1734:								<span className="option-title">대용량 파일 전용 (AES-GCM 청크)</span>

@@ -1277,7 +1277,7 @@ function App() {
 							<label className="form-label">키 알고리즘</label>
 							<div className="option-cards">
 								<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
-									<span className="option-title">PQC1</span>
+									<span className="option-title">PQC</span>
 									<span className="option-desc">차세대 표준 양자내성 암호</span>
 								</button>
 								<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
@@ -1656,7 +1656,7 @@ function App() {
 									className={`option-card ${encryptAsymAlgo === "pqc1" ? "selected" : ""}`}
 									disabled
 								>
-									<span className="option-title">PQC1</span>
+									<span className="option-title">PQC</span>
 									<span className="option-desc">양자내성 하이브리드</span>
 									{encryptAsymAlgo === "pqc1" && <span className="option-badge">자동 선택</span>}
 								</button>
