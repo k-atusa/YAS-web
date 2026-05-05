@@ -686,7 +686,6 @@ function App() {
 	}
 
 	function handleRegenerate() {
-		setStoredAccount(null);
 		setShowKeySection(true);
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
@@ -1269,8 +1268,12 @@ function App() {
 				<p className="section-desc">암호화에 사용할 키 쌍을 생성하고 서버에 안전하게 저장합니다.</p>
 
 				{keyGenStep === 1 ? (
-					/* Step 1: Algorithm Selection */
 					<div className="card">
+						{storedAccount && (
+							<div className="step-header">
+								<button className="btn-back" onClick={() => setShowKeySection(false)}>← 돌아가기</button>
+							</div>
+						)}
                                         <div className="form-group">
 							<label className="form-label">키 알고리즘</label>
 							<div className="option-cards">
@@ -1396,7 +1399,7 @@ function App() {
                                                                    <div style={{ fontSize: "13px", color: "var(--text-sub)" }}>만료시간: {new Date(f.expiresAt).toLocaleString()}</div>
                                                                    <div style={{ fontSize: "13px", color: "var(--text-sub)", marginTop: "5px" }}>
                                                                            다운로드 횟수: {Number(f.downloadCount ?? 0)} / {Number(f.maxDownloads ?? 1)}
-                                                                   </div>
+                   							</div>
                                                                    <div style={{ marginTop: "10px" }}>
                                                                           <label style={{ fontSize: "12px" }}>오니온 링크 (Tor)</label>
                                                                           <div style={{ display: "flex", gap: "8px", marginTop: "4px", alignItems: "center" }}>
@@ -1414,10 +1417,10 @@ function App() {
                                                                                       {decryptTorLoadingId === f._id ? "해제 중..." : "🔐 잠금 해제"}
                                                                                   </button>
                                                                               </>
-                                                                          )}
-                                                                          </div>
-                                                                   </div>
-                                                           </div>
+                                  						)}
+                          							</div>
+                   							</div>
+           							</div>
                                                    );
                                            })}
                                    </div>
