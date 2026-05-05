@@ -1157,7 +1157,7 @@ function App() {
 		const firstPart = keyPem.substring(0, 60).trim();
 		const lastPart = keyPem.substring(keyPem.length - 60).trim();
 		
-		return `${firstPart}\n\n... [ ${(keyPem.length - 120).toLocaleString()} characters hidden ] ...\n\n${lastPart}`;
+		return `${firstPart}\n\n... [ ${(keyPem.length - 120).toLocaleString()}자 생략됨 ] ...\n\n${lastPart}`;
 	}
 
 	/* ─── Render: Main App ─── */
