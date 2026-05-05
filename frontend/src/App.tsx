@@ -1278,11 +1278,11 @@ function App() {
 							<div className="option-cards">
 								<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
 									<span className="option-title">PQC1</span>
-									<span className="option-desc">양자내성 하이브리드 키</span>
+									<span className="option-desc">차세대 표준 양자내성 암호</span>
 								</button>
 								<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
 									<span className="option-title">Curve448</span>
-									<span className="option-desc">높은 보안 강도 (추천)</span>
+									<span className="option-desc">타원곡선 암호</span>
 								</button>
 								<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setKeyAlgo("rsa1")}>
 									<span className="option-title">RSA-2048</span>
