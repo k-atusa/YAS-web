@@ -1151,15 +1151,13 @@ function App() {
 
 	/* ─── Utils ─── */
 	function maskKey(keyPem: string): string {
-		const lines = keyPem.split('\n');
-		if (lines.length < 3) return keyPem;
+		if (!keyPem) return "";
+		if (keyPem.length <= 150) return keyPem;
 		
-		const firstLine = lines[0];
-		const lastLine = lines[lines.length - 1];
-		const middleStart = lines[1].substring(0, 16);
-		const middleEnd = lines[lines.length - 2].substring(Math.max(0, lines[lines.length - 2].length - 16));
+		const firstPart = keyPem.substring(0, 60).trim();
+		const lastPart = keyPem.substring(keyPem.length - 60).trim();
 		
-		return `${firstLine}\n${middleStart}...[${lines.length - 2} lines]...\n${middleEnd}\n${lastLine}`;
+		return `${firstPart}\n\n... [ ${(keyPem.length - 120).toLocaleString()} characters hidden ] ...\n\n${lastPart}`;
 	}
 
 	/* ─── Render: Main App ─── */
