@@ -1299,7 +1299,7 @@ function App() {
 					</div>
 				) : (
 					/* Step 2: Key Preview */
-					<div className="card">
+					<div className="card" key="step2">
 						<div className="step-header">
 							<button className="btn-back" onClick={() => setKeyGenStep(1)}>← 돌아가기</button>
 							<h3 style={{ fontSize: 16, fontWeight: 600 }}>생성된 키</h3>

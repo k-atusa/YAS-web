@@ -513,7 +513,7 @@ select {
 	font-weight: 600;
 	font-family: inherit;
 	cursor: pointer;
-	transition: all 0.2s;
+	transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 	border: none;
 	white-space: nowrap;
 }
@@ -849,7 +849,7 @@ select {
 	border-radius: var(--radius);
 	background: var(--surface);
 	cursor: pointer;
-	transition: all 0.2s;
+	transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 	text-align: left;
 	font-family: inherit;
 	width: 100%;
@@ -941,7 +941,7 @@ select {
 	font-size: 14px;
 	font-weight: 500;
 	color: var(--text-hint);
-	transition: all 0.2s;
+	transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 }
 
 .tab-toggle button.active {
@@ -958,7 +958,7 @@ select {
 	padding: 40px 20px;
 	text-align: center;
 	cursor: pointer;
-	transition: all 0.2s;
+	transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 	background: var(--surface);
 }
 
