@@ -1388,3 +1388,30 @@ select {
 [data-theme="dark"] .tab-toggle button.active {
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
+
+/* Step header and back button */
+.step-header {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 20px;
+}
+
+.btn-back {
+	background: none;
+	border: none;
+	color: var(--primary);
+	cursor: pointer;
+	font-size: 14px;
+	padding: 0;
+	text-decoration: none;
+	transition: color 0.2s;
+}
+
+.btn-back:hover {
+	color: var(--primary-dark, #0066cc);
+}
+
+.step-header h3 {
+	margin: 0;
+}

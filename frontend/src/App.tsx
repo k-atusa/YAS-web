@@ -176,6 +176,7 @@ function App() {
 		setTimeout(() => setToastMsg(null), 2500);
 	}
 	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("pqc1");
+	const [keyGenStep, setKeyGenStep] = useState(1);
 
 	/* Contacts */
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
@@ -649,6 +650,7 @@ function App() {
 			setPrivateKeyPem(privateKey);
 			setCopyPrivateStatus("idle");
 			setStatus("키 쌍이 생성되었습니다. 개인키는 안전하게 보관하세요.");
+			setKeyGenStep(2);
 		} catch (err) {
 			console.error(err);
 			setError("키 쌍 생성에 실패했습니다");
@@ -689,6 +691,7 @@ function App() {
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
 		setCopyPrivateStatus("idle");
+		setKeyGenStep(1);
 		setStatus(null);
 		setError(null);
 	}
@@ -1146,6 +1149,19 @@ function App() {
 		);
 	}
 
+	/* ─── Utils ─── */
+	function maskKey(keyPem: string): string {
+		const lines = keyPem.split('\n');
+		if (lines.length < 3) return keyPem;
+		
+		const firstLine = lines[0];
+		const lastLine = lines[lines.length - 1];
+		const middleStart = lines[1].substring(0, 16);
+		const middleEnd = lines[lines.length - 2].substring(Math.max(0, lines[lines.length - 2].length - 16));
+		
+		return `${firstLine}\n${middleStart}...[${lines.length - 2} lines]...\n${middleEnd}\n${lastLine}`;
+	}
+
 	/* ─── Render: Main App ─── */
 
 	function renderStepDots(total: number, current: number) {
@@ -1254,61 +1270,72 @@ function App() {
 				<h2 className="section-title">키 생성</h2>
 				<p className="section-desc">암호화에 사용할 키 쌍을 생성하고 서버에 안전하게 저장합니다.</p>
 
-				<div className="card">
+				{keyGenStep === 1 ? (
+					/* Step 1: Algorithm Selection */
+					<div className="card">
                                         <div className="form-group">
-						<label className="form-label">키 알고리즘</label>
-						<div className="option-cards">
-							<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
-								<span className="option-title">PQC1</span>
-								<span className="option-desc">양자내성 하이브리드 키</span>
-							</button>
-							<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
-								<span className="option-title">Curve448</span>
-								<span className="option-desc">높은 보안 강도 (추천)</span>
-							</button>
-							<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setKeyAlgo("rsa1")}>
-								<span className="option-title">RSA-2048</span>
-								<span className="option-desc">호환성 우선</span>
-							</button>
-						</div>
-					</div>
-					<div className="btn-row">
-						<button className="btn btn-secondary" onClick={handleGenerateKeys}>키 쌍 생성</button>
-						<button className="btn btn-primary" onClick={handleUpload} disabled={!canUpload || busy}>
-							{busy ? "처리 중..." : "암호화하여 저장"}
-						</button>
-					</div>
-					{status && <div className="status-bar success mt-3">{status}</div>}
-					{error && <div className="status-bar error mt-3">{error}</div>}
-				</div>
-
-				{/* Key preview */}
-				<div className="card">
-					<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>미리보기</h3>
-					<div className="key-item">
-						<span className="key-label">공개키</span>
-						<div className="key-full">
-							{publicKeyPem || "(키 쌍을 생성하세요)"}
-							{publicKeyPem && (
-								<button className={`key-copy-btn ${copyPublicStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPublicKey(publicKeyPem)}>
-									{copyPublicStatus === "copied" ? "복사됨" : "복사"}
+							<label className="form-label">키 알고리즘</label>
+							<div className="option-cards">
+								<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
+									<span className="option-title">PQC1</span>
+									<span className="option-desc">양자내성 하이브리드 키</span>
 								</button>
-							)}
-						</div>
-					</div>
-					<div className="key-item">
-						<span className="key-label">개인키 (평문)</span>
-						<div className="key-full">
-							{privateKeyPem || "(키 쌍을 생성하세요)"}
-							{privateKeyPem && (
-								<button className={`key-copy-btn ${copyPrivateStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPrivateKey(privateKeyPem)}>
-									{copyPrivateStatus === "copied" ? "복사됨" : "복사"}
+								<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
+									<span className="option-title">Curve448</span>
+									<span className="option-desc">높은 보안 강도 (추천)</span>
 								</button>
-							)}
+								<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setKeyAlgo("rsa1")}>
+									<span className="option-title">RSA-2048</span>
+									<span className="option-desc">호환성 우선</span>
+								</button>
+							</div>
 						</div>
+						<div className="btn-row">
+							<button className="btn btn-secondary" onClick={handleGenerateKeys}>키 쌍 생성</button>
+						</div>
+						{status && <div className="status-bar success mt-3">{status}</div>}
+						{error && <div className="status-bar error mt-3">{error}</div>}
 					</div>
-					<p className="text-hint mt-2">개인키는 브라우저에서 암호화된 후 서버에 안전하게 저장됩니다.</p>
-				</div>
+				) : (
+					/* Step 2: Key Preview */
+					<div className="card">
+						<div className="step-header">
+							<button className="btn-back" onClick={() => setKeyGenStep(1)}>← 돌아가기</button>
+							<h3 style={{ fontSize: 16, fontWeight: 600 }}>생성된 키</h3>
+						</div>
+						<div className="key-item">
+							<span className="key-label">공개키</span>
+							<div className="key-full">
+								{maskKey(publicKeyPem)}
+								{publicKeyPem && (
+									<button className={`key-copy-btn ${copyPublicStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPublicKey(publicKeyPem)}>
+										{copyPublicStatus === "copied" ? "복사됨" : "복사"}
+									</button>
+								)}
+							</div>
+						</div>
+						<div className="key-item">
+							<span className="key-label">개인키 (평문)</span>
+							<div className="key-full">
+								{maskKey(privateKeyPem)}
+								{privateKeyPem && (
+									<button className={`key-copy-btn ${copyPrivateStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPrivateKey(privateKeyPem)}>
+										{copyPrivateStatus === "copied" ? "복사됨" : "복사"}
+									</button>
+								)}
+							</div>
+						</div>
+						<p className="text-hint mt-2">개인키는 브라우저에서 암호화된 후 서버에 안전하게 저장됩니다.</p>
+						<div className="btn-row" style={{ marginTop: 20 }}>
+							<button className="btn btn-secondary" onClick={() => setKeyGenStep(1)}>다시 생성</button>
+							<button className="btn btn-primary" onClick={handleUpload} disabled={!canUpload || busy}>
+								{busy ? "처리 중..." : "암호화하여 저장"}
+							</button>
+						</div>
+						{status && <div className="status-bar success mt-3">{status}</div>}
+						{error && <div className="status-bar error mt-3">{error}</div>}
+					</div>
+				)}
 			</>
 		);
 	}
