@@ -161,7 +161,6 @@ function App() {
 	const [username, setUsername] = useState("");
 	const [publicKeyPem, setPublicKeyPem] = useState("");
 	const [privateKeyPem, setPrivateKeyPem] = useState("");
-	const [notes, setNotes] = useState("");
 	const [status, setStatus] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -663,7 +662,7 @@ function App() {
 		setError(null);
 		setStatus("암호화하여 업로드 중...");
 		try {
-			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, notes || undefined);
+			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, undefined);
 			const result = await saveAccount(payload, authToken ?? undefined);
 			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
 			setStoredAccount(record);
@@ -690,7 +689,6 @@ function App() {
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
 		setCopyPrivateStatus("idle");
-		setNotes("");
 		setStatus(null);
 		setError(null);
 	}
@@ -1257,11 +1255,7 @@ function App() {
 				<p className="section-desc">암호화에 사용할 키 쌍을 생성하고 서버에 안전하게 저장합니다.</p>
 
 				<div className="card">
-					<div className="form-group">
-						<label className="form-label">메모 (선택)</label>
-						<input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="이 키에 대한 메모..." />
-					</div>
-					<div className="form-group">
+                                        <div className="form-group">
 						<label className="form-label">키 알고리즘</label>
 						<div className="option-cards">
 							<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
@@ -2193,9 +2187,8 @@ function App() {
 								/>
 							</div>
 							<div className="form-group">
-								<label className="form-label">메모 (선택)</label>
-								<input
-									type="text"
+									<label className="form-label">메모 (선택)</label>
+									<input type="text"
 									value={contactForm.notes}
 									onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
 									placeholder="간단한 메모"
