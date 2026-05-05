@@ -176,7 +176,7 @@ function App() {
 		setToastMsg(msg);
 		setTimeout(() => setToastMsg(null), 2500);
 	}
-	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("ecc1");
+	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("pqc1");
 
 	/* Contacts */
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
