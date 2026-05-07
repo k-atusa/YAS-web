@@ -6,14 +6,15 @@ services:
       - mongo-data:/data/db
 
   app:
-    image: d3vle0/yas-web
+    build: .
+    image: yas-web
     env_file:
       - ./backend/.env
     environment:
       MONGODB_URI: mongodb://mongo:27017/yas-web
-      CORS_ORIGIN: http://localhost:7001
-      FRONTEND_DIST: /app/public
       PORT: 7001
+      FRONTEND_DIST: /app/public
+      CORS_ORIGIN: http://localhost:7001
     depends_on:
       - mongo
     ports:
