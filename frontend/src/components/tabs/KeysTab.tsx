@@ -91,13 +91,6 @@ export const KeysTab = ({
 
 			{keyGenStep === 1 ? (
 				<div className="card">
-					{storedAccount && (
-						<div className="step-header">
-							<button className="btn-back" onClick={() => onSetShowKeySection(false)}>
-								← 돌아가기
-							</button>
-						</div>
-					)}
 					<div className="form-group">
 						<label className="form-label">키 알고리즘</label>
 						<div className="option-cards">
@@ -116,7 +109,12 @@ export const KeysTab = ({
 						</div>
 					</div>
 					<div className="btn-row">
-						<button className="btn btn-secondary" onClick={onGenerateKeys}>
+						{storedAccount && (
+							<button className="btn btn-secondary" onClick={() => onSetShowKeySection(false)}>
+								이전
+							</button>
+						)}
+						<button className="btn btn-secondary" onClick={onGenerateKeys} style={{ marginLeft: "auto" }}>
 							키 쌍 생성
 						</button>
 					</div>
@@ -126,9 +124,6 @@ export const KeysTab = ({
 			) : (
 				<div className="card" key="step2">
 					<div className="step-header">
-						<button className="btn-back" onClick={() => onSetKeyGenStep(1)}>
-							← 돌아가기
-						</button>
 						<h3 style={{ fontSize: 16, fontWeight: 600 }}>생성된 키</h3>
 					</div>
 					<div className="key-item">
@@ -162,11 +157,16 @@ export const KeysTab = ({
 					<p className="text-hint mt-2">개인키는 브라우저에서 암호화된 후 서버에 안전하게 저장됩니다.</p>
 					<div className="btn-row" style={{ marginTop: 20 }}>
 						<button className="btn btn-secondary" onClick={() => onSetKeyGenStep(1)}>
-							다시 생성
+							이전
 						</button>
-						<button className="btn btn-primary" onClick={onUpload} disabled={!canUpload || busy}>
-							{busy ? "처리 중..." : "암호화하여 저장"}
-						</button>
+						<div style={{ display: "flex", gap: "10px", marginLeft: "auto" }}>
+							<button className="btn btn-secondary" onClick={() => onSetKeyGenStep(1)}>
+								다시 생성
+							</button>
+							<button className="btn btn-primary" onClick={onUpload} disabled={!canUpload || busy}>
+								{busy ? "처리 중..." : "암호화하여 저장"}
+							</button>
+						</div>
 					</div>
 					{status && <div className="status-bar success mt-3">{status}</div>}
 					{error && <div className="status-bar error mt-3">{error}</div>}

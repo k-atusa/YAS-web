@@ -1,3 +1,4 @@
+import { KeysTab } from "./components/tabs/KeysTab";
 import { get24HoursLater, formatBytes, truncateKey, detectPublicKeyAlgo, detectPrivateKeyAlgo } from "./helpers";
 import { IconContacts, IconMessages, IconKey, IconEncrypt, IconDecrypt } from "./icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -1124,114 +1125,29 @@ const App = () => {
 	/* ─── Keys tab ─── */
 
 	function renderKeysTab() {
-		const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
-
-		if (hasStoredKey && !showKeySection) {
-			return (
-				<>
-					<br />
-					<h2 className="section-title">내 키</h2>
-					<p className="section-desc">키가 서버에 안전하게 저장되어 있어요.</p>
-					<div className="card">
-						<div className="key-item">
-							<span className="key-label">공개키</span>
-							<div className="key-value-row">
-								<code className="key-truncated">{truncateKey(storedAccount!.publicKey)}</code>
-								<button className={`btn btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`} onClick={() => handleCopyPublicKey(storedAccount?.publicKey)}>
-									{copyPublicStatus === "copied" ? "복사됨 ✓" : "복사"}
-								</button>
-							</div>
-						</div>
-						<div className="key-item">
-							<span className="key-label">개인키</span>
-							<span className="text-hint">서버에 암호화되어 저장됨</span>
-						</div>
-					</div>
-					{status && <div className="status-bar success">{status}</div>}
-					{error && <div className="status-bar error">{error}</div>}
-					<div className="btn-row">
-						<button className="btn btn-secondary" onClick={handleRegenerate}>키 재생성</button>
-					</div>
-				</>
-			);
-		}
-
 		return (
-			<>
-				<h2 className="section-title">키 생성</h2>
-				<p className="section-desc">암호화에 사용할 키 쌍을 생성하고 서버에 안전하게 저장합니다.</p>
-
-				{keyGenStep === 1 ? (
-					<div className="card">
-						{storedAccount && (
-							<div className="step-header">
-								<button className="btn-back" onClick={() => setShowKeySection(false)}>← 돌아가기</button>
-							</div>
-						)}
-                                        <div className="form-group">
-							<label className="form-label">키 알고리즘</label>
-							<div className="option-cards">
-								<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("pqc1")}>
-									<span className="option-title">PQC</span>
-									<span className="option-desc">차세대 표준 양자내성 암호</span>
-								</button>
-								<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => setKeyAlgo("ecc1")}>
-									<span className="option-title">Curve448</span>
-									<span className="option-desc">타원곡선 암호</span>
-								</button>
-								<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => setKeyAlgo("rsa1")}>
-									<span className="option-title">RSA-2048</span>
-									<span className="option-desc">호환성 우선</span>
-								</button>
-							</div>
-						</div>
-						<div className="btn-row">
-							<button className="btn btn-secondary" onClick={handleGenerateKeys}>키 쌍 생성</button>
-						</div>
-						{status && <div className="status-bar success mt-3">{status}</div>}
-						{error && <div className="status-bar error mt-3">{error}</div>}
-					</div>
-				) : (
-					/* Step 2: Key Preview */
-					<div className="card" key="step2">
-						<div className="step-header">
-							<button className="btn-back" onClick={() => setKeyGenStep(1)}>← 돌아가기</button>
-							<h3 style={{ fontSize: 16, fontWeight: 600 }}>생성된 키</h3>
-						</div>
-						<div className="key-item">
-							<span className="key-label">공개키</span>
-							<div className="key-full">
-								{maskKey(publicKeyPem)}
-								{publicKeyPem && (
-									<button className={`key-copy-btn ${copyPublicStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPublicKey(publicKeyPem)}>
-										{copyPublicStatus === "copied" ? "복사됨" : "복사"}
-									</button>
-								)}
-							</div>
-						</div>
-						<div className="key-item">
-							<span className="key-label">개인키 (평문)</span>
-							<div className="key-full">
-								{maskKey(privateKeyPem)}
-								{privateKeyPem && (
-									<button className={`key-copy-btn ${copyPrivateStatus === "copied" ? "copied" : ""}`} onClick={() => handleCopyPrivateKey(privateKeyPem)}>
-										{copyPrivateStatus === "copied" ? "복사됨" : "복사"}
-									</button>
-								)}
-							</div>
-						</div>
-						<p className="text-hint mt-2">개인키는 브라우저에서 암호화된 후 서버에 안전하게 저장됩니다.</p>
-						<div className="btn-row" style={{ marginTop: 20 }}>
-							<button className="btn btn-secondary" onClick={() => setKeyGenStep(1)}>다시 생성</button>
-							<button className="btn btn-primary" onClick={handleUpload} disabled={!canUpload || busy}>
-								{busy ? "처리 중..." : "암호화하여 저장"}
-							</button>
-						</div>
-						{status && <div className="status-bar success mt-3">{status}</div>}
-						{error && <div className="status-bar error mt-3">{error}</div>}
-					</div>
-				)}
-			</>
+			<KeysTab
+				storedAccount={storedAccount}
+				showKeySection={showKeySection}
+				status={status}
+				error={error}
+				copyPublicStatus={copyPublicStatus}
+				copyPrivateStatus={copyPrivateStatus}
+				keyGenStep={keyGenStep}
+				keyAlgo={keyAlgo as any}
+				publicKeyPem={publicKeyPem}
+				privateKeyPem={privateKeyPem}
+				canUpload={canUpload}
+				busy={busy}
+				onSetKeyAlgo={(algo: any) => setKeyAlgo(algo as any)}
+				onGenerateKeys={handleGenerateKeys}
+				onUpload={handleUpload}
+				onRegenerate={handleRegenerate}
+				onCopyPublicKey={handleCopyPublicKey}
+				onCopyPrivateKey={handleCopyPrivateKey}
+				onSetKeyGenStep={setKeyGenStep}
+				onSetShowKeySection={setShowKeySection}
+			/>
 		);
 	}
 
