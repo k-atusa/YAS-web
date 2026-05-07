@@ -74,5 +74,10 @@ jobs:
             # 서버 내 프로젝트 경로 (예: /home/ubuntu/YAS-web)로 이동 후 배포하는 스크립트입니다.
             # 이 경로는 서버 환경에 맞게 수정이 필요할 수 있습니다.
             cd ${{ secrets.SERVER_TARGET_DIR || '~/YAS-web' }}
+            
+            # backend 디렉토리를 생성하고 .env 파일을 작성합니다.
+            mkdir -p backend
+            echo "${{ secrets.BACKEND_ENV }}" > backend/.env
+            
             docker compose pull
             docker compose up -d
