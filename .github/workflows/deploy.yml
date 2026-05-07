@@ -24,16 +24,27 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push Backend image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./backend
+          file: ./backend/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: d3vle0/yas-web:latest
-          cache-from: type=registry,ref=d3vle0/yas-web:buildcache
-          cache-to: type=registry,ref=d3vle0/yas-web:buildcache,mode=max
+          tags: d3vle0/yas-web-backend:latest
+          cache-from: type=registry,ref=d3vle0/yas-web-backend:buildcache
+          cache-to: type=registry,ref=d3vle0/yas-web-backend:buildcache,mode=max
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          platforms: linux/arm64
+          tags: d3vle0/yas-web-frontend:latest
+          cache-from: type=registry,ref=d3vle0/yas-web-frontend:buildcache
+          cache-to: type=registry,ref=d3vle0/yas-web-frontend:buildcache,mode=max
 
   deploy:
     needs: build-and-push
@@ -50,5 +61,5 @@ jobs:
             # 서버 내 프로젝트 경로 (예: /home/ubuntu/YAS-web)로 이동 후 배포하는 스크립트입니다.
             # 이 경로는 서버 환경에 맞게 수정이 필요할 수 있습니다.
             cd ${{ secrets.SERVER_TARGET_DIR || '~/YAS-web' }}
-            docker compose pull app
-            docker compose up -d app
+            docker compose pull
+            docker compose up -d

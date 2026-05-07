@@ -5,21 +5,33 @@ services:
     volumes:
       - mongo-data:/data/db
 
-  app:
-    build: .
-    image: yas-web
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: d3vle0/yas-web-backend:latest
     env_file:
       - ./backend/.env
     environment:
       MONGODB_URI: mongodb://mongo:27017/yas-web
       PORT: 7001
-      FRONTEND_DIST: /app/public
-      CORS_ORIGIN: http://localhost:7001
+      CORS_ORIGIN: '*'
     depends_on:
       - mongo
+    restart: unless-stopped
     ports:
       - "7001:7001"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: d3vle0/yas-web-frontend:latest
+    depends_on:
+      - backend
     restart: unless-stopped
+    ports:
+      - "4000:80"
 
 volumes:
   mongo-data:
