@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.8
-FROM node:22-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./
 COPY tsconfig*.json ./
@@ -7,7 +7,7 @@ RUN npm install
 COPY src ./src
 RUN npm run build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=7001
