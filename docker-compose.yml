@@ -16,6 +16,7 @@ services:
       MONGODB_URI: mongodb://mongo:27017/yas-web
       PORT: 7001
       CORS_ORIGIN: '*'
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID}
     depends_on:
       - mongo
     restart: unless-stopped
