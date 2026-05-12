@@ -1937,19 +1937,7 @@ const App = () => {
 			});
 			await verifyWebAuthnRegistration(authToken!, registration.credentialId, registration.publicKey, registration.counter, registration.transports);
 			
-			setStatus("패스키 등록 완료. 개인키를 생성합니다...");
-			const { publicKey, privateKey } = await generateKeyPair(keyAlgo);
-			setPublicKeyPem(publicKey);
-			setPrivateKeyPem(privateKey);
-			
-			const payload = await buildAccountPayload(authUsername!, publicKey, privateKey, undefined);
-			const result = await saveAccount(payload, authToken!);
-			const record = { ...payload, id: result.id, createdAt: result.createdAt };
-			setStoredAccount(record);
-			
-			setStatus("가입 및 키 생성이 완료되었습니다.");
 			setWebauthnPending(null);
-			setShowKeySection(false);
 		} catch (err) {
 			setError((err as Error).message);
 		} finally {
@@ -1977,7 +1965,7 @@ const App = () => {
 				setPublicKeyPem(account.publicKey);
 				setStoredAccount(account);
 			}
-			setStatus("로그인 및 키 복호화가 완료되었습니다.");
+			
 			setWebauthnPending(null);
 			setShowKeySection(false);
 		} catch (err) {
@@ -2004,7 +1992,7 @@ const App = () => {
 					<button className="btn btn-primary btn-full mt-4" 
 						disabled={webauthnAuthBusy}
 						onClick={webauthnPending === "register" ? doWebauthnSignupFlow : doWebauthnLoginFlow}>
-						{webauthnPending === "register" ? "패스키 생성 및 계정 설정 완료하기" : "패스키로 인증하기"}
+						{webauthnPending === "register" ? "패스키 등록 완료하기" : "패스키로 인증하기"}
 					</button>
                     <p className="auth-hint">
                             <button onClick={handleSignOut}>로그아웃</button>
