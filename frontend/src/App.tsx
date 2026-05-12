@@ -134,6 +134,7 @@ const App = () => {
 	/* WebAuthn */
 	const [webauthnAvailable, setWebauthnAvailable] = useState(false);
 	const [webauthnAuthBusy, setWebauthnAuthBusy] = useState(false);
+	const [webauthnPending, setWebauthnPending] = useState<"register" | "authenticate" | null>(null);
 	const [decryptionToken, setDecryptionToken] = useState<string | null>(null);
 
 	/* Theme */
@@ -334,6 +335,7 @@ const App = () => {
 			const result = await loginApi(loginUsername, loginPass);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
+			setWebauthnPending("authenticate");
 		} catch (err) {
 			setError((err as Error).message || "로그인에 실패했습니다");
 		} finally {
@@ -352,6 +354,7 @@ const App = () => {
 			const result = await loginApi(loginUsername, loginPass);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
+			setWebauthnPending("register");
 		} catch (err) {
 			setError((err as Error).message || "회원가입에 실패했습니다");
 		} finally {
@@ -362,6 +365,7 @@ const App = () => {
 	function handleSignOut() {
 		setAuthToken(null);
 		setAuthUsername(null);
+		setWebauthnPending(null);
 		setLoginPass("");
 		setUsername("");
 		setStoredAccount(null);
@@ -567,10 +571,6 @@ const App = () => {
 			setShowKeySection(false);
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
-			if (authToken && (await isWebAuthnAvailable())) {
-				setStatus("보안 키 설정 중...");
-				setTimeout(() => startWebAuthnRegistration(), 500);
-			}
 		} catch (err) {
 			console.error(err);
 			setError((err as Error).message || "업로드에 실패했습니다");
@@ -1924,7 +1924,97 @@ const App = () => {
 		}
 	}
 
-	/* ─── Main layout ─── */
+	
+	async function doWebauthnSignupFlow() {
+		try {
+			setWebauthnAuthBusy(true);
+			setError(null);
+			const optionsResp = await getWebAuthnRegisterOptions(authToken!);
+			const registration = await registerWebAuthnCredential({
+				challenge: optionsResp.options.challenge, rp: optionsResp.options.rp, user: optionsResp.options.user,
+				pubKeyCredParams: optionsResp.options.pubKeyCredParams, timeout: optionsResp.options.timeout,
+				attestation: optionsResp.options.attestation, authenticatorSelection: optionsResp.options.authenticatorSelection,
+			});
+			await verifyWebAuthnRegistration(authToken!, registration.credentialId, registration.publicKey, registration.counter, registration.transports);
+			
+			setStatus("패스키 등록 완료. 개인키를 생성합니다...");
+			const { publicKey, privateKey } = await generateKeyPair(keyAlgo);
+			setPublicKeyPem(publicKey);
+			setPrivateKeyPem(privateKey);
+			
+			const payload = await buildAccountPayload(authUsername!, publicKey, privateKey, undefined);
+			const result = await saveAccount(payload, authToken!);
+			const record = { ...payload, id: result.id, createdAt: result.createdAt };
+			setStoredAccount(record);
+			
+			setStatus("가입 및 키 생성이 완료되었습니다.");
+			setWebauthnPending(null);
+			setShowKeySection(false);
+		} catch (err) {
+			setError((err as Error).message);
+		} finally {
+			setWebauthnAuthBusy(false);
+		}
+	}
+
+	async function doWebauthnLoginFlow() {
+		try {
+			setWebauthnAuthBusy(true);
+			setError(null);
+			const optionsResp = await getWebAuthnAuthenticateOptions(authToken!);
+			const authentication = await authenticateWithWebAuthn({
+				challenge: optionsResp.options.challenge, allowCredentials: optionsResp.options.allowCredentials || [],
+                timeout: optionsResp.options.timeout, userVerification: optionsResp.options.userVerification,
+			});
+			const verifyResp = await verifyWebAuthnAuthentication(authToken!, authentication.credentialId, authentication.counter);
+			
+			setStatus("패스키 인증 완료. 개인키를 복호화 합니다...");
+			const decResp = await decryptStoredPrivateKey(authUsername!, verifyResp.token);
+			setPrivateKeyPem(decResp.privateKey);
+			
+			const account = await getAccountByUsername(authUsername!);
+			if (account) {
+				setPublicKeyPem(account.publicKey);
+				setStoredAccount(account);
+			}
+			setStatus("로그인 및 키 복호화가 완료되었습니다.");
+			setWebauthnPending(null);
+			setShowKeySection(false);
+		} catch (err) {
+			setError((err as Error).message);
+		} finally {
+			setWebauthnAuthBusy(false);
+		}
+	}
+
+	if (webauthnPending) {
+		return (
+			<div className="auth-page" key="webauthn">
+				<div className="auth-card view-animate">
+					<h1 className="auth-title">{webauthnPending === "register" ? "패스키 등록" : "패스키 인증"}</h1>
+					<p className="section-desc">
+						{webauthnPending === "register" 
+							? "계정 보호를 위해 사용할 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 이 패스키로 회원님의 개인키가 자동으로 생성 및 보호됩니다." 
+							: "본인 확인 및 개인키 복호화를 위해 패스키 인증이 필요합니다."}
+					</p>
+					
+					{error && <div className="status-bar error">{error}</div>}
+					{(status || webauthnAuthBusy) && <div className="status-bar">{status || "처리 중..."}</div>}
+					
+					<button className="btn btn-primary btn-full mt-4" 
+						disabled={webauthnAuthBusy}
+						onClick={webauthnPending === "register" ? doWebauthnSignupFlow : doWebauthnLoginFlow}>
+						{webauthnPending === "register" ? "패스키 생성 및 계정 설정 완료하기" : "패스키로 인증하기"}
+					</button>
+                    <p className="auth-hint">
+                            <button onClick={handleSignOut}>로그아웃</button>
+                    </p>
+				</div>
+			</div>
+		);
+	}
+
+/* ─── Main layout ─── */
 
 	return (
 		<div className="page">
