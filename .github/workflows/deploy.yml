@@ -78,6 +78,7 @@ jobs:
             # backend 디렉토리를 생성하고 .env 파일을 작성합니다.
             mkdir -p backend
             echo "${{ secrets.BACKEND_ENV }}" > backend/.env
+            echo "WEBAUTHN_RP_ID=${{ secrets.WEBAUTHN_RP_ID }}" >> backend/.env
             
             docker compose pull
             docker compose up -d
