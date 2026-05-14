@@ -23,6 +23,8 @@ type KeysTabProps = {
 	onCopyPrivateKey: (value?: string) => void;
 	onSetKeyGenStep: (step: number) => void;
 	onSetShowKeySection: (show: boolean) => void;
+	onRevealPrivateKey?: () => void;
+	webauthnAvailable?: boolean;
 };
 
 export const KeysTab = ({
@@ -46,6 +48,8 @@ export const KeysTab = ({
 	onCopyPrivateKey,
 	onSetKeyGenStep,
 	onSetShowKeySection,
+	onRevealPrivateKey,
+	webauthnAvailable,
 }: KeysTabProps) => {
 	const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
 
@@ -70,7 +74,28 @@ export const KeysTab = ({
 					</div>
 					<div className="key-item">
 						<span className="key-label">개인키</span>
-						<span className="text-hint">서버에 암호화되어 저장됨</span>
+						{privateKeyPem ? (
+							<div className="key-full">
+								{maskKey(privateKeyPem)}
+								<button
+									className={`key-copy-btn ${copyPrivateStatus === "copied" ? "copied" : ""}`}
+									onClick={() => onCopyPrivateKey(privateKeyPem)}
+								>
+									{copyPrivateStatus === "copied" ? "복사됨" : "복사"}
+								</button>
+							</div>
+						) : (
+							<div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+								<span className="text-hint">서버에 암호화되어 저장됨</span>
+								<button
+									className="btn btn-secondary btn-sm"
+									onClick={onRevealPrivateKey}
+									disabled={busy || !webauthnAvailable}
+								>
+									{busy ? "인증 중..." : "패스키로 인증하여 보기"}
+								</button>
+							</div>
+						)}
 					</div>
 				</div>
 				{status && <div className="status-bar success">{status}</div>}

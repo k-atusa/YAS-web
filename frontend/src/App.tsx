@@ -1139,6 +1139,27 @@ const App = () => {
 
 	/* ─── Keys tab ─── */
 
+	async function handleRevealPrivateKey() {
+		try {
+			setBusy(true);
+			setError(null);
+			const optionsResp = await getWebAuthnAuthenticateOptions(authToken!);
+			const authentication = await authenticateWithWebAuthn({
+				challenge: optionsResp.options.challenge,
+				allowCredentials: optionsResp.options.allowCredentials || [],
+				timeout: optionsResp.options.timeout,
+				userVerification: optionsResp.options.userVerification,
+			});
+			const verifyResp = await verifyWebAuthnAuthentication(authToken!, authentication.credentialId, authentication.counter);
+			const decResp = await decryptStoredPrivateKey(authUsername!, verifyResp.token);
+			setPrivateKeyPem(decResp.privateKey);
+		} catch (err) {
+			setError((err as Error).message);
+		} finally {
+			setBusy(false);
+		}
+	}
+
 	function renderKeysTab() {
 		return (
 			<KeysTab
@@ -1162,6 +1183,8 @@ const App = () => {
 				onCopyPrivateKey={handleCopyPrivateKey}
 				onSetKeyGenStep={setKeyGenStep}
 				onSetShowKeySection={setShowKeySection}
+				onRevealPrivateKey={handleRevealPrivateKey}
+				webauthnAvailable={webauthnAvailable}
 			/>
 		);
 	}
