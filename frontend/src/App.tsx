@@ -1990,7 +1990,6 @@ const App = () => {
 			});
 			const verifyResp = await verifyWebAuthnAuthentication(authToken!, authentication.credentialId, authentication.counter);
 			
-			setStatus("패스키 인증 완료. 개인키를 복호화 합니다...");
 			const decResp = await decryptStoredPrivateKey(authUsername!, verifyResp.token);
 			setPrivateKeyPem(decResp.privateKey);
 			
