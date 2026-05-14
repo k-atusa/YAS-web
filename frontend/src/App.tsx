@@ -29,6 +29,8 @@ import {
 	detectAuthMode,
 	u8ToBase64,
 	base64ToU8,
+	encode64WithSplit,
+	decode64WithSplit,
 	registerWebAuthnCredential,
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
@@ -92,7 +94,7 @@ const App = () => {
 
 	/* Encrypt */
 	const [encryptAuthMode, setEncryptAuthMode] = useState<AuthMode>("password");
-	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("arg1");
+	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("arg2");
 	const [encryptEncAlgo, setEncryptEncAlgo] = useState<EncAlgo>("gcm1");
 	const [encryptAsymAlgo, setEncryptAsymAlgo] = useState<AsymAlgo | null>(null);
 	const [encryptPassword, setEncryptPassword] = useState("");
@@ -685,7 +687,7 @@ const App = () => {
 		setShareExpiresDate(get24HoursLater().dateStr);
 		setShareExpiresTime(get24HoursLater().timeStr);
 		setShareMaxDownloads("3");
-		setEncryptKdfMethod("arg1");
+		setEncryptKdfMethod("arg2");
 		setEncryptEncAlgo("gcm1");
 		setEncryptAsymAlgo(null);
 		setEncryptRecipientId("");
@@ -817,7 +819,14 @@ const App = () => {
 		if (decryptPayloadFile) return new Uint8Array(await decryptPayloadFile.arrayBuffer());
 		const raw = decryptPayloadInput.trim();
 		if (!raw) throw new Error("Base64 텍스트를 붙여넣거나 파일을 업로드하세요");
-		try { return base64ToU8(raw); } catch { throw new Error("올바르지 않은 Base64 형식입니다"); }
+		try {
+			if (raw.includes("#START#") || raw.includes("#END#")) {
+				return decode64WithSplit(raw, "#");
+			}
+			return base64ToU8(raw);
+		} catch {
+			throw new Error("올바르지 않은 Base64 형식입니다");
+		}
 	}
 
 	/* ─── Encrypt submit ─── */
@@ -894,7 +903,12 @@ const App = () => {
 
 	async function handleCopyEncryptedBase64() {
 		if (!encryptedBlob) return;
-		try { await navigator.clipboard.writeText(u8ToBase64(encryptedBlob)); } catch (err) { console.error(err); }
+		try {
+			const encoded = encode64WithSplit(encryptedBlob, "#", 80, 10);
+			await navigator.clipboard.writeText(encoded);
+		} catch (err) {
+			console.error(err);
+		}
 	}
 
 	/* ─── Decrypt submit ─── */
@@ -926,7 +940,8 @@ const App = () => {
 				}
 				const peerPub = finalPeerPub || undefined;
 				
-				result = await decryptOpsecPub(dataU8, priB64, peerPub);
+				const myPub = storedAccount?.publicKey || publicKeyPem || "";
+				result = await decryptOpsecPub(dataU8, priB64, peerPub, myPub.trim() || undefined);
 			}
 			setDecryptedResult(result);
 			setDecryptStatus("복호화 완료");
@@ -1095,7 +1110,7 @@ const App = () => {
 									<div className="contact-name-row">
 										<span className="contact-name">{c.contactUsername}</span>
 										<span className={`contact-algo-badge algo-${detectPublicKeyAlgo(c.publicKey)}`}>
-											{detectPublicKeyAlgo(c.publicKey) === "pqc1" ? "PQC" : detectPublicKeyAlgo(c.publicKey) === "ecc1" ? "ECC" : "RSA"}
+											{detectPublicKeyAlgo(c.publicKey) === "pqc1" ? "PQC" : detectPublicKeyAlgo(c.publicKey) === "ecc1" ? "ECC" : detectPublicKeyAlgo(c.publicKey) === "rsa2" ? "RSA-4096" : "RSA"}
 										</span>
 									</div>
 									{c.notes && (
@@ -1417,13 +1432,17 @@ const App = () => {
 						<div className="form-group">
 							<label className="form-label">키 유도 방식</label>
 							<div className="option-cards row-layout">
-								<button className={`option-card ${encryptKdfMethod === "arg1" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg1")}>
+								<button className={`option-card ${encryptKdfMethod === "arg2" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg2")}>
 									<span className="option-title">Argon2id</span>
 									<span className="option-desc">높은 보안 강도 (추천)</span>
 								</button>
-								<button className={`option-card ${encryptKdfMethod === "pbk1" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("pbk1")}>
+								<button className={`option-card ${encryptKdfMethod === "pbk2" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("pbk2")}>
 									<span className="option-title">PBKDF2</span>
 									<span className="option-desc">호환성 우선</span>
+								</button>
+								<button className={`option-card ${encryptKdfMethod === "sha3" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("sha3")}>
+									<span className="option-title">SHA3</span>
+									<span className="option-desc">빠른 처리 (텍스트 권장)</span>
 								</button>
 							</div>
 						</div>
@@ -1486,6 +1505,14 @@ const App = () => {
 									<span className="option-title">RSA-2048</span>
 									<span className="option-desc">호환성 우선</span>
 									{encryptAsymAlgo === "rsa1" && <span className="option-badge">자동 선택</span>}
+								</button>
+								<button
+									className={`option-card ${encryptAsymAlgo === "rsa2" ? "selected" : ""}`}
+									disabled
+								>
+									<span className="option-title">RSA-4096</span>
+									<span className="option-desc">추가 보안 (대용량 키)</span>
+									{encryptAsymAlgo === "rsa2" && <span className="option-badge">자동 선택</span>}
 								</button>
 							</div>
 							<span className="form-hint">상대방의 공개키 형식에 따라 자동으로 선택됩니다</span>
@@ -1734,7 +1761,14 @@ const App = () => {
 									setDecryptPayloadFile(null);
 									setDecryptError(null);
 									if (val.trim()) {
-										try { tryAutoDetect(base64ToU8(val.trim())); } catch { setDecryptDetected(null); }
+										try {
+											const decoded = val.includes("#START#") || val.includes("#END#")
+												? decode64WithSplit(val.trim(), "#")
+												: base64ToU8(val.trim());
+											tryAutoDetect(decoded);
+										} catch {
+											setDecryptDetected(null);
+										}
 									} else { setDecryptDetected(null); }
 								}}
 								placeholder="Base64로 인코딩된 암호문..."

@@ -6,7 +6,7 @@
  *
  * Algorithms:
  *   Symmetric  — AES-GCM (gcm1), AES-GCM chunked (gcmx1)
- *   KDF        — Argon2id (arg1), PBKDF2-SHA512 (pbk1)
+ *   KDF        — Argon2id (arg2), PBKDF2-SHA512 (pbk2), SHA3 (sha3)
  *   Asymmetric — RSA-2048 OAEP-SHA512 + PKCS1v1.5-SHA256 (rsa1), Curve448 X448+Ed448 (ecc1)
  *   Protocol   — Opsec YAS2 binary header format
  */
@@ -61,6 +61,53 @@ export function base64ToU8(b64: string): Uint8Array {
   const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   return u8;
+}
+
+const splitable = new Set(["!", "@", "#", "$", "%", "^", "&", "*", "~", "|"]);
+
+export function encode64WithSplit(
+  data: Uint8Array,
+  spliter = "",
+  linenum = 80,
+  colnum = 10
+): string {
+  const raw = data.length > 0 ? u8ToBase64(data) : "";
+  if (spliter === "") return raw;
+  if (!splitable.has(spliter)) throw new Error("invalid spliter option");
+
+  const lines: string[] = [];
+  for (let i = 0; i < raw.length; i += linenum) {
+    lines.push(raw.slice(i, i + linenum));
+  }
+  const cols: string[][] = [];
+  for (let i = 0; i < lines.length; i += colnum) {
+    cols.push(lines.slice(i, i + colnum));
+  }
+
+  let res = `${spliter}START${spliter}\n`;
+  const totalCols = cols.length;
+  for (let i = 0; i < totalCols; i++) {
+    res += `${spliter}${i + 1}/${totalCols}${spliter}\n${cols[i].join("\n")}\n`;
+  }
+  res += `${spliter}END${spliter}`;
+  return res;
+}
+
+export function decode64WithSplit(data: string, spliter = ""): Uint8Array {
+  let raw = data.replace(/[\r\n \t]/g, "");
+  if (spliter !== "" && !splitable.has(spliter)) {
+    throw new Error("invalid spliter option");
+  }
+  if (spliter !== "") {
+    const parts = raw.split(spliter);
+    let pureData = "";
+    for (let i = 0; i < parts.length; i += 2) {
+      pureData += parts[i];
+    }
+    raw = pureData;
+  }
+  if (raw === "") return new Uint8Array(0);
+  return base64ToU8(raw);
 }
 
 function strToU8(s: string): Uint8Array {
@@ -224,6 +271,67 @@ async function argon2Hash(
   const derived = await pbkdf2Derive(pwBuf, saltBuf, 1000000, 64);
   // Return base64-encoded result (mimics argon2.hash().encoded format)
   return u8ToBase64(derived);
+}
+
+async function argon2Raw(pw: Uint8Array, salt: Uint8Array): Promise<Uint8Array> {
+  try {
+    const mod = await import("argon2-browser/dist/argon2-bundled.min.js");
+    const argon2 = (mod as any).default || mod;
+    const argonType = argon2?.ArgonType?.Argon2id ?? 2;
+    const res = await argon2.hash({
+      pass: pw,
+      salt,
+      type: argonType,
+      time: 3,
+      mem: 262144,
+      parallelism: 4,
+      hashLen: 48,
+    });
+    return new Uint8Array(res.hash);
+  } catch (err) {
+    throw new Error("Argon2 모듈을 불러올 수 없습니다. PBKDF2 또는 SHA3를 선택하세요.");
+  }
+}
+
+class HashMaster {
+  algo: "sha3" | "pbk2" | "arg2";
+  hashSize: number;
+  keySize: number;
+
+  constructor(algo: "sha3" | "pbk2" | "arg2", hashSize = 32, keySize = 44) {
+    this.algo = algo;
+    this.hashSize = hashSize;
+    this.keySize = keySize;
+  }
+
+  async kdf(pw: Uint8Array | string, salt: Uint8Array | string): Promise<[Uint8Array, Uint8Array]> {
+    const pwBuf = toU8(pw);
+    const saltBuf = toU8(salt);
+    let lblStore = "";
+    let lblKeygen = "";
+    let master: Uint8Array;
+
+    if (this.algo === "sha3") {
+      lblStore = "PWHASH_SHA3";
+      lblKeygen = "KEYGEN_SHA3";
+      const combined = new Uint8Array(saltBuf.length + pwBuf.length);
+      combined.set(saltBuf, 0);
+      combined.set(pwBuf, saltBuf.length);
+      master = sha3512(combined);
+    } else if (this.algo === "pbk2") {
+      lblStore = "PWHASH_PBK2";
+      lblKeygen = "KEYGEN_PBK2";
+      master = await pbkdf2Derive(pwBuf, saltBuf);
+    } else {
+      lblStore = "PWHASH_ARG2";
+      lblKeygen = "KEYGEN_ARG2";
+      master = await argon2Raw(pwBuf, saltBuf);
+    }
+
+    const storeKey = genkey(master, lblStore, this.hashSize);
+    const userKey = genkey(master, lblKeygen, this.keySize);
+    return [storeKey, userKey];
+  }
 }
 
 // ==================== Stream Helpers ====================
@@ -729,7 +837,7 @@ class AsymMaster {
   worker: RSA1 | ECC1 | PQC1;
 
   constructor(algo: string) {
-    const valid = ["rsa1", "rsa1-2k", "rsa1-3k", "rsa1-4k", "ecc1", "pqc1"];
+    const valid = ["rsa1", "rsa2", "rsa1-2k", "rsa1-3k", "rsa1-4k", "ecc1", "pqc1"];
     if (!valid.includes(algo)) throw new Error(`Unsupported algorithm: ${algo}`);
     this.algo = algo;
     if (algo === "ecc1") this.worker = new ECC1();
@@ -740,6 +848,7 @@ class AsymMaster {
   async genkey(): Promise<[Uint8Array, Uint8Array]> {
     if (this.algo === "rsa1" || this.algo === "rsa1-2k")
       return (this.worker as RSA1).genkey(2048);
+    if (this.algo === "rsa2") return (this.worker as RSA1).genkey(4096);
     if (this.algo === "rsa1-3k") return (this.worker as RSA1).genkey(3072);
     if (this.algo === "rsa1-4k") return (this.worker as RSA1).genkey(4096);
     if (this.algo === "pqc1") return (this.worker as PQC1).genkey();
@@ -768,6 +877,7 @@ class AsymMaster {
 class Opsec {
   // Outer Layer
   msg = "";
+  msgInfo: Uint8Array = new Uint8Array(0);
   _headAlgo = "";
   _salt: Uint8Array = new Uint8Array(0);
   _pwHash: Uint8Array = new Uint8Array(0);
@@ -776,6 +886,7 @@ class Opsec {
 
   // Inner Layer
   smsg = "";
+  smsgInfo: Uint8Array = new Uint8Array(0);
   size = -1;
   name = "";
   bodyKey: Uint8Array = new Uint8Array(0);
@@ -785,12 +896,14 @@ class Opsec {
 
   reset(): void {
     this.msg = "";
+    this.msgInfo = new Uint8Array(0);
     this._headAlgo = "";
     this._salt = new Uint8Array(0);
     this._pwHash = new Uint8Array(0);
     this._encHeadKey = new Uint8Array(0);
     this._encHeadData = new Uint8Array(0);
     this.smsg = "";
+    this.smsgInfo = new Uint8Array(0);
     this.size = -1;
     this.name = "";
     this.bodyKey = new Uint8Array(0);
@@ -841,28 +954,33 @@ class Opsec {
   private _wrapHead(): Uint8Array {
     const cfg: Record<string, Uint8Array | string> = {};
     if (this.smsg !== "") cfg["smsg"] = this.smsg;
+    if (this.smsgInfo.length > 0) cfg["sinf"] = this.smsgInfo;
+    if (this._sign.length > 0) cfg["sgn"] = this._sign;
+    if (this.bodyAlgo !== "") cfg["bal"] = this.bodyAlgo;
+    if (this.bodyKey.length > 0) cfg["bkey"] = this.bodyKey;
     if (this.size >= 0) {
-      if (this.size < 65536) cfg["sz"] = encodeInt(this.size, 2);
-      else if (this.size < 4294967296) cfg["sz"] = encodeInt(this.size, 4);
-      else cfg["sz"] = encodeInt(this.size, 8);
+      if (this.size < 65536) cfg["bsz"] = encodeInt(this.size, 2);
+      else if (this.size < 4294967296) cfg["bsz"] = encodeInt(this.size, 4);
+      else cfg["bsz"] = encodeInt(this.size, 8);
     }
     if (this.name !== "") cfg["nm"] = this.name;
-    if (this.bodyKey.length > 0) cfg["bkey"] = this.bodyKey;
-    if (this.bodyAlgo !== "") cfg["bodyal"] = this.bodyAlgo;
-    if (this.contAlgo !== "") cfg["contal"] = this.contAlgo;
-    if (this._sign.length > 0) cfg["sgn"] = this._sign;
+    if (this.contAlgo !== "") cfg["binf"] = strToU8(this.contAlgo);
     return encodeCfg(cfg);
   }
 
   private _unwrapHead(data: Uint8Array): void {
     const cfg = decodeCfg(data);
     if (cfg["smsg"]) this.smsg = u8ToStr(cfg["smsg"]);
-    if (cfg["sz"]) this.size = decodeInt(cfg["sz"]);
-    if (cfg["nm"]) this.name = u8ToStr(cfg["nm"]);
-    if (cfg["bkey"]) this.bodyKey = cfg["bkey"];
-    if (cfg["bodyal"]) this.bodyAlgo = u8ToStr(cfg["bodyal"]);
-    if (cfg["contal"]) this.contAlgo = u8ToStr(cfg["contal"]);
+    if (cfg["sinf"]) this.smsgInfo = cfg["sinf"];
     if (cfg["sgn"]) this._sign = cfg["sgn"];
+    if (cfg["bal"]) this.bodyAlgo = u8ToStr(cfg["bal"]);
+    if (cfg["bodyal"]) this.bodyAlgo = u8ToStr(cfg["bodyal"]);
+    if (cfg["bkey"]) this.bodyKey = cfg["bkey"];
+    if (cfg["bsz"]) this.size = decodeInt(cfg["bsz"]);
+    if (cfg["sz"]) this.size = decodeInt(cfg["sz"]);
+    if (cfg["binf"]) this.contAlgo = u8ToStr(cfg["binf"]);
+    if (cfg["contal"]) this.contAlgo = u8ToStr(cfg["contal"]);
+    if (cfg["nm"]) this.name = u8ToStr(cfg["nm"]);
   }
 
   /** Encrypt with password, returns serialised header */
@@ -871,25 +989,34 @@ class Opsec {
     pw: string | Uint8Array,
     kf: Uint8Array = new Uint8Array(0)
   ): Promise<Uint8Array> {
-    if (method !== "arg1" && method !== "pbk1") throw new Error(`Unsupported KDF: ${method}`);
+    if (!"arg1 pbk1 arg2 pbk2 sha3".split(" ").includes(method)) {
+      throw new Error(`Unsupported KDF: ${method}`);
+    }
     this._headAlgo = method;
-    this._salt = random(16);
+    this._salt = random(method === "arg1" || method === "pbk1" ? 16 : 32);
     if (this.size >= 0) this.bodyKey = random(44);
 
     const pwBytes = typeof pw === "string" ? strToU8(pw) : toU8(pw);
     const combined = concat([pwBytes, toU8(kf)]);
 
-    let mkey: Uint8Array;
     let hkey: Uint8Array;
-    if (method === "arg1") {
-      const hash = await argon2Hash(combined, this._salt);
-      mkey = strToU8(hash);
-      this._pwHash = genkey(mkey, "PWHASH_OPSEC_ARGON2", 32);
-      hkey = genkey(mkey, "KEYGEN_OPSEC_ARGON2", 44);
+    if (method === "arg1" || method === "pbk1") {
+      let mkey: Uint8Array;
+      if (method === "arg1") {
+        const hash = await argon2Hash(combined, this._salt);
+        mkey = strToU8(hash);
+        this._pwHash = genkey(mkey, "PWHASH_OPSEC_ARGON2", 32);
+        hkey = genkey(mkey, "KEYGEN_OPSEC_ARGON2", 44);
+      } else {
+        mkey = await pbkdf2Derive(combined, this._salt);
+        this._pwHash = genkey(mkey, "PWHASH_OPSEC_PBKDF2", 32);
+        hkey = genkey(mkey, "KEYGEN_OPSEC_PBKDF2", 44);
+      }
     } else {
-      mkey = await pbkdf2Derive(combined, this._salt);
-      this._pwHash = genkey(mkey, "PWHASH_OPSEC_PBKDF2", 32);
-      hkey = genkey(mkey, "KEYGEN_OPSEC_PBKDF2", 44);
+      const hm = new HashMaster(method as "sha3" | "pbk2" | "arg2");
+      const [pwHash, key] = await hm.kdf(combined, this._salt);
+      this._pwHash = pwHash;
+      hkey = key;
     }
 
     const sm = new SymMaster("gcm1", hkey);
@@ -897,7 +1024,8 @@ class Opsec {
 
     const cfg: Record<string, Uint8Array | string> = {};
     if (this.msg !== "") cfg["msg"] = this.msg;
-    cfg["headal"] = this._headAlgo;
+    if (this.msgInfo.length > 0) cfg["minf"] = this.msgInfo;
+    cfg["hal"] = this._headAlgo;
     cfg["salt"] = this._salt;
     cfg["pwh"] = this._pwHash;
     cfg["ehd"] = this._encHeadData;
@@ -910,7 +1038,7 @@ class Opsec {
     publicBytes: Uint8Array,
     privateBytes: Uint8Array | null = null
   ): Promise<Uint8Array> {
-    if (method !== "rsa1" && method !== "ecc1" && method !== "pqc1")
+    if (method !== "rsa1" && method !== "rsa2" && method !== "ecc1" && method !== "pqc1")
       throw new Error(`Unsupported method: ${method}`);
     this._headAlgo = method;
     if (this.size >= 0) this.bodyKey = random(44);
@@ -927,20 +1055,21 @@ class Opsec {
 
     // Sign
     if (privateBytes !== null) {
-      if (this.bodyKey.length > 0) this._sign = await am.sign(this.bodyKey);
-      else if (this.smsg !== "") this._sign = await am.sign(strToU8(this.smsg));
-      else if (this.msg !== "") this._sign = await am.sign(strToU8(this.msg));
-      else {
-        // If everything is empty but we wanted to sign, sign an empty array
-        this._sign = await am.sign(new Uint8Array(0));
-      }
+      const peerPub = toU8(publicBytes);
+      const signTarget = concat([
+        strToU8(method),
+        peerPub,
+        strToU8(this.smsg),
+        this.smsgInfo,
+      ]);
+      this._sign = await am.sign(signTarget);
     }
 
     // Encrypt header
     const headData = this._wrapHead();
-    if (method === "rsa1") {
+    if (method === "rsa1" || method === "rsa2") {
       const hkey = random(44);
-      this._encHeadKey = await am.encrypt(hkey);
+      this.msgInfo = await am.encrypt(hkey);
       const sm = new SymMaster("gcm1", hkey);
       this._encHeadData = await sm.enBin(headData);
     } else {
@@ -949,8 +1078,8 @@ class Opsec {
 
     const cfg: Record<string, Uint8Array | string> = {};
     if (this.msg !== "") cfg["msg"] = this.msg;
-    cfg["headal"] = this._headAlgo;
-    if (this._encHeadKey.length > 0) cfg["ehk"] = this._encHeadKey;
+    if (this.msgInfo.length > 0) cfg["minf"] = this.msgInfo;
+    cfg["hal"] = this._headAlgo;
     cfg["ehd"] = this._encHeadData;
     return encodeCfg(cfg);
   }
@@ -960,43 +1089,55 @@ class Opsec {
     this.reset();
     const cfg = decodeCfg(data);
     if (cfg["msg"]) this.msg = u8ToStr(cfg["msg"]);
+    if (cfg["minf"]) this.msgInfo = cfg["minf"];
+    if (cfg["ehk"]) this.msgInfo = cfg["ehk"];
+    if (cfg["hal"]) this._headAlgo = u8ToStr(cfg["hal"]);
     if (cfg["headal"]) this._headAlgo = u8ToStr(cfg["headal"]);
     if (cfg["salt"]) this._salt = cfg["salt"];
     if (cfg["pwh"]) this._pwHash = cfg["pwh"];
-    if (cfg["ehk"]) this._encHeadKey = cfg["ehk"];
     if (cfg["ehd"]) this._encHeadData = cfg["ehd"];
   }
 
   /** Decrypt with password (call view() first) */
   async decpw(pw: string | Uint8Array, kf: Uint8Array = new Uint8Array(0)): Promise<void> {
     if (!this._headAlgo) throw new Error("Call view() first");
-    if (this._headAlgo !== "arg1" && this._headAlgo !== "pbk1")
+    if (!"arg1 pbk1 arg2 pbk2 sha3".split(" ").includes(this._headAlgo)) {
       throw new Error(`Unsupported KDF: ${this._headAlgo}`);
+    }
     const pwBytes = typeof pw === "string" ? strToU8(pw) : toU8(pw);
     const combined = concat([pwBytes, toU8(kf)]);
 
-    let mkey: Uint8Array;
-    let vLbl: string;
-    let kLbl: string;
-    if (this._headAlgo === "arg1") {
-      mkey = strToU8(await argon2Hash(combined, this._salt));
-      vLbl = "PWHASH_OPSEC_ARGON2";
-      kLbl = "KEYGEN_OPSEC_ARGON2";
+    let hkey: Uint8Array;
+    if (this._headAlgo === "arg1" || this._headAlgo === "pbk1") {
+      let mkey: Uint8Array;
+      let vLbl: string;
+      let kLbl: string;
+      if (this._headAlgo === "arg1") {
+        mkey = strToU8(await argon2Hash(combined, this._salt));
+        vLbl = "PWHASH_OPSEC_ARGON2";
+        kLbl = "KEYGEN_OPSEC_ARGON2";
+      } else {
+        mkey = await pbkdf2Derive(combined, this._salt);
+        vLbl = "PWHASH_OPSEC_PBKDF2";
+        kLbl = "KEYGEN_OPSEC_PBKDF2";
+      }
+
+      const hash = genkey(mkey, vLbl, 32);
+      if (hash.length !== this._pwHash.length) throw new Error("비밀번호가 일치하지 않습니다");
+      let diff = 0;
+      for (let i = 0; i < hash.length; i++) diff |= hash[i] ^ this._pwHash[i];
+      if (diff !== 0) throw new Error("비밀번호가 일치하지 않습니다");
+      hkey = genkey(mkey, kLbl, 44);
     } else {
-      mkey = await pbkdf2Derive(combined, this._salt);
-      vLbl = "PWHASH_OPSEC_PBKDF2";
-      kLbl = "KEYGEN_OPSEC_PBKDF2";
+      const hm = new HashMaster(this._headAlgo as "sha3" | "pbk2" | "arg2");
+      const [pwHash, key] = await hm.kdf(combined, this._salt);
+      if (pwHash.length !== this._pwHash.length) throw new Error("비밀번호가 일치하지 않습니다");
+      let diff = 0;
+      for (let i = 0; i < pwHash.length; i++) diff |= pwHash[i] ^ this._pwHash[i];
+      if (diff !== 0) throw new Error("비밀번호가 일치하지 않습니다");
+      hkey = key;
     }
 
-    // Verify password
-    const hash = genkey(mkey, vLbl, 32);
-    if (hash.length !== this._pwHash.length) throw new Error("비밀번호가 일치하지 않습니다");
-    let diff = 0;
-    for (let i = 0; i < hash.length; i++) diff |= hash[i] ^ this._pwHash[i];
-    if (diff !== 0) throw new Error("비밀번호가 일치하지 않습니다");
-
-    // Decrypt header
-    const hkey = genkey(mkey, kLbl, 44);
     const sm = new SymMaster("gcm1", hkey);
     this._unwrapHead(await sm.deBin(this._encHeadData));
   }
@@ -1004,10 +1145,11 @@ class Opsec {
   /** Decrypt with private key (call view() first) */
   async decpub(
     privateBytes: Uint8Array,
-    publicBytes: Uint8Array | null = null
+    myPub: Uint8Array | null = null,
+    peerPub: Uint8Array | null = null
   ): Promise<void> {
     if (!this._headAlgo) throw new Error("Call view() first");
-    if (this._headAlgo !== "rsa1" && this._headAlgo !== "ecc1" && this._headAlgo !== "pqc1")
+    if (this._headAlgo !== "rsa1" && this._headAlgo !== "rsa2" && this._headAlgo !== "ecc1" && this._headAlgo !== "pqc1")
       throw new Error(`Unsupported method: ${this._headAlgo}`);
     const am = new AsymMaster(this._headAlgo);
 
@@ -1015,8 +1157,10 @@ class Opsec {
     await am.loadkey(null, privateBytes);
 
     let decHead: Uint8Array;
-    if (this._headAlgo === "rsa1") {
-      const hkey = await am.decrypt(this._encHeadKey);
+    if (this._headAlgo === "rsa1" || this._headAlgo === "rsa2") {
+      const headKeySrc = this.msgInfo.length > 0 ? this.msgInfo : this._encHeadKey;
+      if (headKeySrc.length === 0) throw new Error("Missing header key for RSA decryption");
+      const hkey = await am.decrypt(headKeySrc);
       const sm = new SymMaster("gcm1", hkey);
       decHead = await sm.deBin(this._encHeadData);
     } else {
@@ -1025,22 +1169,29 @@ class Opsec {
     this._unwrapHead(decHead);
 
     // Load public key and verify signature separately
-    if (publicBytes !== null && this._sign.length > 0) {
-      await am.loadkey(publicBytes, null);
-      let s: Uint8Array = new Uint8Array(0);
-      if (this.bodyKey.length > 0) s = this.bodyKey;
-      else if (this.smsg !== "") s = strToU8(this.smsg);
-      else if (this.msg !== "") s = strToU8(this.msg);
-      const ok = await am.verify(s, this._sign);
-      if (!ok) throw new Error(`${this._headAlgo.toUpperCase()} 서명이 유효하지 않습니다`);
+    if (myPub === null && peerPub === null) return;
+    if (myPub === null || peerPub === null) {
+      if (this._sign.length > 0) throw new Error("Both myPub and peerPub should be provided to verify sign");
+      return;
     }
+
+    const amVerify = new AsymMaster(this._headAlgo);
+    await amVerify.loadkey(peerPub, null);
+    const signTarget = concat([
+      strToU8(this._headAlgo),
+      myPub,
+      strToU8(this.smsg),
+      this.smsgInfo,
+    ]);
+    const ok = await amVerify.verify(signTarget, this._sign);
+    if (!ok) throw new Error("Sign verification failed");
   }
 }
 
 // ==================== Exported Types ====================
 
-export type AsymAlgo = "rsa1" | "ecc1" | "pqc1";
-export type KdfMethod = "arg1" | "pbk1";
+export type AsymAlgo = "rsa1" | "rsa2" | "ecc1" | "pqc1";
+export type KdfMethod = "arg1" | "pbk1" | "arg2" | "pbk2" | "sha3";
 export type EncAlgo = "gcm1" | "gcmx1";
 export type AuthMode = "password" | "publickey";
 
@@ -1052,6 +1203,7 @@ export interface EncryptPasswordOptions {
   smsg?: string;
   msg?: string;
   files?: File[];
+  packAlgo?: "zip1" | "tar1";
 }
 
 export interface EncryptPublicKeyOptions {
@@ -1063,6 +1215,7 @@ export interface EncryptPublicKeyOptions {
   smsg?: string;
   msg?: string;
   files?: File[];
+  packAlgo?: "zip1" | "tar1";
 }
 
 export type EncryptOptions = EncryptPasswordOptions | EncryptPublicKeyOptions;
@@ -1073,6 +1226,72 @@ export interface DecryptResult {
   files: { name: string; data: Uint8Array }[];
   verified?: boolean;
   verifyError?: string;
+}
+
+function encodeOctal(value: number, length: number): string {
+  const oct = value.toString(8);
+  return oct.padStart(length - 1, "0") + "\0";
+}
+
+function writeTar(files: { name: string; data: Uint8Array }[]): Uint8Array {
+  const blocks: Uint8Array[] = [];
+  const encoder = new TextEncoder();
+
+  for (const file of files) {
+    const header = new Uint8Array(512);
+    const nameBytes = encoder.encode(file.name);
+    header.set(nameBytes.slice(0, 100), 0);
+    header.set(encoder.encode(encodeOctal(0o644, 8)), 100);
+    header.set(encoder.encode(encodeOctal(0, 8)), 108);
+    header.set(encoder.encode(encodeOctal(0, 8)), 116);
+    header.set(encoder.encode(encodeOctal(file.data.length, 12)), 124);
+    header.set(encoder.encode(encodeOctal(Math.floor(Date.now() / 1000), 12)), 136);
+    header.fill(0x20, 148, 156);
+    header[156] = "0".charCodeAt(0);
+    header.set(encoder.encode("ustar\0"), 257);
+    header.set(encoder.encode("00"), 263);
+
+    let sum = 0;
+    for (let i = 0; i < 512; i++) sum += header[i];
+    const checksum = sum.toString(8).padStart(6, "0") + "\0 ";
+    header.set(encoder.encode(checksum), 148);
+
+    blocks.push(header);
+    blocks.push(file.data);
+    const pad = (512 - (file.data.length % 512)) % 512;
+    if (pad > 0) blocks.push(new Uint8Array(pad));
+  }
+
+  blocks.push(new Uint8Array(512));
+  blocks.push(new Uint8Array(512));
+
+  let total = 0;
+  for (const b of blocks) total += b.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const b of blocks) {
+    out.set(b, off);
+    off += b.length;
+  }
+  return out;
+}
+
+function readTar(data: Uint8Array): { name: string; data: Uint8Array }[] {
+  const files: { name: string; data: Uint8Array }[] = [];
+  let pos = 0;
+  while (pos + 512 <= data.length) {
+    const header = data.slice(pos, pos + 512);
+    pos += 512;
+    const isEmpty = header.every((b) => b === 0);
+    if (isEmpty) break;
+    const name = new TextDecoder().decode(header.slice(0, 100)).replace(/\0.*$/, "");
+    const sizeStr = new TextDecoder().decode(header.slice(124, 136)).replace(/\0.*$/, "").trim();
+    const size = sizeStr ? parseInt(sizeStr, 8) : 0;
+    const fileData = data.slice(pos, pos + size);
+    files.push({ name, data: fileData });
+    pos += Math.ceil(size / 512) * 512;
+  }
+  return files;
 }
 
 // ==================== App-level Encrypt / Decrypt ====================
@@ -1108,17 +1327,25 @@ export async function encryptOpsec(options: EncryptOptions): Promise<Uint8Array>
   let packedData: Uint8Array | null = null;
 
   if (options.files && options.files.length > 0) {
-    // Pack files into zip
-    const JSZip = (await import("jszip")).default;
-    const zip = new JSZip();
-    for (const file of options.files) {
-      zip.file(file.name, await file.arrayBuffer());
+    const packAlgo = options.packAlgo || "zip1";
+    if (packAlgo === "tar1") {
+      const fileEntries: { name: string; data: Uint8Array }[] = [];
+      for (const file of options.files) {
+        fileEntries.push({ name: file.name, data: new Uint8Array(await file.arrayBuffer()) });
+      }
+      packedData = writeTar(fileEntries);
+    } else {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      for (const file of options.files) {
+        zip.file(file.name, await file.arrayBuffer());
+      }
+      packedData = new Uint8Array(await zip.generateAsync({ type: "arraybuffer" }));
     }
-    packedData = new Uint8Array(await zip.generateAsync({ type: "arraybuffer" }));
 
     const dummySm = new SymMaster(options.encAlgo, new Uint8Array(44));
     ops.size = dummySm.aftersize(packedData.length);
-    ops.contAlgo = "zip1";
+    ops.contAlgo = packAlgo;
     ops.bodyAlgo = options.encAlgo;
   }
 
@@ -1179,6 +1406,8 @@ export async function decryptOpsecPw(
         if (file.dir) continue;
         result.files.push({ name, data: await file.async("uint8array") });
       }
+    } else if (ops.contAlgo === "tar1") {
+      result.files = readTar(decBody);
     }
   }
   return result;
@@ -1188,7 +1417,8 @@ export async function decryptOpsecPw(
 export async function decryptOpsecPub(
   dataU8: Uint8Array,
   myPrivateKey: string,
-  peerPublicKey?: string
+  peerPublicKey?: string,
+  myPublicKey?: string
 ): Promise<DecryptResult> {
   const reader = new TestReader(dataU8);
   const ops = new Opsec();
@@ -1198,38 +1428,38 @@ export async function decryptOpsecPub(
   ops.view(hdr);
   const myPri = base64ToU8(myPrivateKey);
   const peerPub = peerPublicKey ? base64ToU8(peerPublicKey) : null;
+  const myPub = myPublicKey ? base64ToU8(myPublicKey) : null;
 
-  // First: decrypt (private key only)
-  // Then: verify signature separately (peer public key)
+  await ops.decpub(myPri, null, null);
+
   let verified: boolean | undefined;
   let verifyError: string | undefined;
-  try {
-    await ops.decpub(myPri, peerPub);
-    const hasSignature = ops._sign.length > 0;
-    if (peerPub) {
-      if (hasSignature) {
-        verified = true;
-      } else {
-        verified = undefined;
-        verifyError = "파일본에 서명이 포함되어 있지 않습니다.";
-      }
+  const hasSignature = ops._sign.length > 0;
+  if (peerPub && myPub) {
+    if (!hasSignature) {
+      verifyError = "파일본에 서명이 포함되어 있지 않습니다.";
     } else {
-      verified = undefined;
-      // No verifyError, so we don't show a red alert when intentionally skipped
+      try {
+        const amVerify = new AsymMaster(ops._headAlgo);
+        await amVerify.loadkey(peerPub, null);
+        const signTarget = concat([
+          strToU8(ops._headAlgo),
+          myPub,
+          strToU8(ops.smsg),
+          ops.smsgInfo,
+        ]);
+        const ok = await amVerify.verify(signTarget, ops._sign);
+        verified = ok;
+        if (!ok) verifyError = "서명 검증에 실패했습니다.";
+      } catch (err) {
+        verified = false;
+        verifyError = (err as Error).message || "서명 검증에 실패했습니다.";
+      }
     }
-  } catch (err) {
-    // If decryption itself fails (no peer key case would also fail), re-throw
-    // If only verification fails, try again without peer key to get decrypted data
-    try {
-      await ops.decpub(myPri, null);
-      // Decryption succeeded without verification — verification was the problem
-      verified = false;
-      verifyError = (err as Error).message || "서명 검증에 실패했습니다";
-    } catch {
-      // Decryption itself failed — throw original error
-      throw err;
-    }
+  } else if (hasSignature && (peerPub || myPub)) {
+    verifyError = "서명 검증을 위해 발신자/내 공개키가 모두 필요합니다.";
   }
+
   const result: DecryptResult = { msg: ops.msg, smsg: ops.smsg, files: [], verified, verifyError };
 
   if (ops.size >= 0) {
@@ -1243,6 +1473,8 @@ export async function decryptOpsecPub(
         if (file.dir) continue;
         result.files.push({ name, data: await file.async("uint8array") });
       }
+    } else if (ops.contAlgo === "tar1") {
+      result.files = readTar(decBody);
     }
   }
   return result;
@@ -1269,10 +1501,11 @@ export function detectAuthMode(
       }
       const hdrData = dataU8.slice(hdrStart, hdrStart + size);
       const cfg = decodeCfg(hdrData);
-      const algo = cfg["headal"] ? u8ToStr(cfg["headal"]) : "";
+      const algo = cfg["hal"] ? u8ToStr(cfg["hal"]) : cfg["headal"] ? u8ToStr(cfg["headal"]) : "";
       const msg = cfg["msg"] ? u8ToStr(cfg["msg"]) : "";
+      const pwAlgos = new Set(["arg1", "pbk1", "arg2", "pbk2", "sha3"]);
       return {
-        mode: algo === "arg1" || algo === "pbk1" ? "password" : "publickey",
+        mode: pwAlgos.has(algo) ? "password" : "publickey",
         algo,
         msg,
       };

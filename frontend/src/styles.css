@@ -709,6 +709,12 @@ select {
 	background: rgba(193, 125, 18, 0.12);
 }
 
+.contact-algo-badge.algo-rsa2 {
+	color: #a24b8c;
+	border-color: rgba(162, 75, 140, 0.35);
+	background: rgba(162, 75, 140, 0.12);
+}
+
 .contact-meta-row {
 	display: flex;
 	align-items: center;

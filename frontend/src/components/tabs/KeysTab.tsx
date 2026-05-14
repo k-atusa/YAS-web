@@ -106,6 +106,10 @@ export const KeysTab = ({
 								<span className="option-title">RSA-2048</span>
 								<span className="option-desc">호환성 우선</span>
 							</button>
+							<button className={`option-card ${keyAlgo === "rsa2" ? "selected" : ""}`} onClick={() => onSetKeyAlgo("rsa2")}>
+								<span className="option-title">RSA-4096</span>
+								<span className="option-desc">추가 보안 (대용량 키)</span>
+							</button>
 						</div>
 					</div>
 					<div className="btn-row">
