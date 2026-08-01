@@ -272,13 +272,13 @@ export const EncryptTab = ({
 					<div className="form-group">
 						<label className="form-label">키 유도 방식</label>
 						<div className="option-cards row-layout">
-							<button className={`option-card ${encryptKdfMethod === "arg2" ? "selected" : ""}`} onClick={() => onSetEncryptKdfMethod("arg2")}>
-								<span className="option-title">Argon2id</span>
+							<button className={`option-card ${encryptKdfMethod === "arg2st" ? "selected" : ""}`} onClick={() => onSetEncryptKdfMethod("arg2st")}>
+								<span className="option-title">Argon2id (Standard)</span>
 								<span className="option-desc">높은 보안 강도 (추천)</span>
 							</button>
-							<button className={`option-card ${encryptKdfMethod === "pbk2" ? "selected" : ""}`} onClick={() => onSetEncryptKdfMethod("pbk2")}>
-								<span className="option-title">PBKDF2</span>
-								<span className="option-desc">호환성 우선</span>
+							<button className={`option-card ${encryptKdfMethod === "arg2low" ? "selected" : ""}`} onClick={() => onSetEncryptKdfMethod("arg2low")}>
+								<span className="option-title">Argon2id (Low)</span>
+								<span className="option-desc">저메모리 환경 호환</span>
 							</button>
 							<button className={`option-card ${encryptKdfMethod === "sha3" ? "selected" : ""}`} onClick={() => onSetEncryptKdfMethod("sha3")}>
 								<span className="option-title">SHA3</span>
@@ -338,18 +338,8 @@ export const EncryptTab = ({
 							</button>
 							<button className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`} disabled>
 								<span className="option-title">Curve448</span>
-								<span className="option-desc">높은 보안 강도 (추천)</span>
+								<span className="option-desc">X448+Ed448 (호환)</span>
 								{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
-							</button>
-							<button className={`option-card ${encryptAsymAlgo === "rsa1" ? "selected" : ""}`} disabled>
-								<span className="option-title">RSA-2048</span>
-								<span className="option-desc">호환성 우선</span>
-								{encryptAsymAlgo === "rsa1" && <span className="option-badge">자동 선택</span>}
-							</button>
-							<button className={`option-card ${encryptAsymAlgo === "rsa2" ? "selected" : ""}`} disabled>
-								<span className="option-title">RSA-4096</span>
-								<span className="option-desc">추가 보안 (대용량 키)</span>
-								{encryptAsymAlgo === "rsa2" && <span className="option-badge">자동 선택</span>}
 							</button>
 						</div>
 						<span className="form-hint">상대방의 공개키 형식에 따라 자동으로 선택됩니다</span>

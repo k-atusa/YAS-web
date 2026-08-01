@@ -11,6 +11,36 @@
 
 <body>
   <div id="root"></div>
+  <!--
+    Preload USAG-lib modules from jsdelivr CDN and expose them on window.USAG.
+    YAS-web delegates ALL encryption/decryption/key-management to USAG-lib so
+    that files are wire-compatible with the YAS-web-lite reference implementation.
+  -->
+  <script>
+    (async () => {
+      try {
+        const [
+          bencrypt,
+          bencode,
+          opsec,
+          szip,
+          star,
+        ] = await Promise.all([
+          import("https://cdn.jsdelivr.net/gh/k-atusa/USAG-Lib@main/Bencrypt/Bencrypt.js"),
+          import("https://cdn.jsdelivr.net/gh/k-atusa/USAG-Lib@main/Bencode/Bencode.js"),
+          import("https://cdn.jsdelivr.net/gh/k-atusa/USAG-Lib@main/Opsec/Opsec.js"),
+          import("https://cdn.jsdelivr.net/gh/k-atusa/USAG-Lib@main/Szip/Szip.js"),
+          import("https://cdn.jsdelivr.net/gh/k-atusa/USAG-Lib@main/Star/Star.js"),
+        ]);
+        window.USAG = { bencrypt, bencode, opsec, szip, star };
+        window.dispatchEvent(new Event("usag-ready"));
+      } catch (e) {
+        console.error("[USAG] Failed to load USAG-lib:", e);
+        window.USAG_LOAD_ERROR = e;
+        window.dispatchEvent(new Event("usag-error"));
+      }
+    })();
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 

@@ -88,6 +88,7 @@
 	box-sizing: border-box;
 	margin: 0;
 	padding: 0;
+	-webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -99,7 +100,7 @@ body {
 	-moz-osx-font-smoothing: grayscale;
 }
 
-button {
+button, a {
 	font-family: inherit;
 	font-size: inherit;
 	color: inherit;
@@ -107,6 +108,19 @@ button {
 	border: none;
 	cursor: pointer;
 	padding: 0;
+	outline: none;
+	-webkit-tap-highlight-color: transparent;
+}
+
+button:focus,
+button:focus-visible,
+button:active,
+a:focus,
+a:focus-visible,
+a:active {
+	outline: none !important;
+	box-shadow: none;
+	-webkit-tap-highlight-color: transparent;
 }
 
 /* ─── Landing ─── */
@@ -192,7 +206,8 @@ button {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 20px 0 8px;
+	padding: 20px 0 0;
+	margin-bottom: 24px;
 }
 
 .topbar-left {
@@ -304,6 +319,19 @@ button {
 	position: relative;
 	z-index: 2;
 	color: var(--text-sub);
+	outline: none !important;
+	-webkit-tap-highlight-color: transparent !important;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.pill-nav-item:focus,
+.pill-nav-item:focus-visible,
+.pill-nav-item:active {
+	outline: none !important;
+	box-shadow: none !important;
+	background: transparent;
+	-webkit-tap-highlight-color: transparent !important;
 }
 
 .pill-nav-item:hover {
@@ -336,6 +364,8 @@ button {
 .section-title {
 	font-size: 22px;
 	font-weight: 700;
+	margin-top: 0;
+	margin-bottom: 4px;
 }
 
 .section-desc {
@@ -910,7 +940,8 @@ select {
 	display: flex;
 	gap: 8px;
 	justify-content: center;
-	margin-bottom: 28px;
+	align-items: center;
+	margin-bottom: 0;
 }
 
 .step-dot {

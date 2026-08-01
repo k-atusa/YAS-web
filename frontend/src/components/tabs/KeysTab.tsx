@@ -56,7 +56,6 @@ export const KeysTab = ({
 	if (hasStoredKey && !showKeySection) {
 		return (
 			<>
-				<br />
 				<h2 className="section-title">내 키</h2>
 				<p className="section-desc">키가 서버에 안전하게 저장되어 있어요.</p>
 				<div className="card">
@@ -126,14 +125,6 @@ export const KeysTab = ({
 							<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => onSetKeyAlgo("ecc1")}>
 								<span className="option-title">Curve448</span>
 								<span className="option-desc">타원곡선 암호</span>
-							</button>
-							<button className={`option-card ${keyAlgo === "rsa1" ? "selected" : ""}`} onClick={() => onSetKeyAlgo("rsa1")}>
-								<span className="option-title">RSA-2048</span>
-								<span className="option-desc">호환성 우선</span>
-							</button>
-							<button className={`option-card ${keyAlgo === "rsa2" ? "selected" : ""}`} onClick={() => onSetKeyAlgo("rsa2")}>
-								<span className="option-title">RSA-4096</span>
-								<span className="option-desc">추가 보안 (대용량 키)</span>
 							</button>
 						</div>
 					</div>

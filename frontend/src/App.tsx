@@ -94,7 +94,7 @@ const App = () => {
 
 	/* Encrypt */
 	const [encryptAuthMode, setEncryptAuthMode] = useState<AuthMode>("password");
-	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("arg2");
+	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("arg2st");
 	const [encryptEncAlgo, setEncryptEncAlgo] = useState<EncAlgo>("gcm1");
 	const [encryptAsymAlgo, setEncryptAsymAlgo] = useState<AsymAlgo | null>(null);
 	const [encryptPassword, setEncryptPassword] = useState("");
@@ -687,7 +687,7 @@ const App = () => {
 		setShareExpiresDate(get24HoursLater().dateStr);
 		setShareExpiresTime(get24HoursLater().timeStr);
 		setShareMaxDownloads("3");
-		setEncryptKdfMethod("arg2");
+		setEncryptKdfMethod("arg2st");
 		setEncryptEncAlgo("gcm1");
 		setEncryptAsymAlgo(null);
 		setEncryptRecipientId("");
@@ -1086,7 +1086,6 @@ const App = () => {
 	function renderContactsTab() {
 		return (
 			<>
-				<br />
 				<div className="section-header">
 					<h2 className="section-title">주소록</h2>
 					<button className="btn btn-secondary btn-sm" onClick={openAddContactModal}>+ 추가</button>
@@ -1109,8 +1108,8 @@ const App = () => {
 								<div className="contact-info">
 									<div className="contact-name-row">
 										<span className="contact-name">{c.contactUsername}</span>
-										<span className={`contact-algo-badge algo-${detectPublicKeyAlgo(c.publicKey)}`}>
-											{detectPublicKeyAlgo(c.publicKey) === "pqc1" ? "PQC" : detectPublicKeyAlgo(c.publicKey) === "ecc1" ? "ECC" : detectPublicKeyAlgo(c.publicKey) === "rsa2" ? "RSA-4096" : "RSA"}
+											<span className={`contact-algo-badge algo-${detectPublicKeyAlgo(c.publicKey)}`}>
+											{detectPublicKeyAlgo(c.publicKey) === "pqc1" ? "PQC" : "ECC"}
 										</span>
 									</div>
 									{c.notes && (
@@ -1227,14 +1226,14 @@ const App = () => {
    function renderMessagesTab() {
            return (
                    <>
-                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                               <h2 className="section-title" style={{ margin: 0 }}>메시지함</h2>
+                           <div className="section-header">
+                               <h2 className="section-title">메시지함</h2>
                                <button className="btn btn-secondary btn-sm" onClick={handleRefreshInbox} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
                                    새로고침
                                </button>
                            </div>
-                           <p className="section-desc" style={{ marginTop: "10px" }}>수신된 암호화 파일 목록입니다.</p>
+                           <p className="section-desc">수신된 암호화 파일 목록입니다.</p>
                            {inboxFiles.length === 0 ? (
                                    <div className="status-bar info">수신된 파일이 없습니다.</div>
                            ) : (
@@ -1284,8 +1283,7 @@ const App = () => {
 			return (
 				<>
 					<h2 className="section-title">암호화 완료</h2>
-					<br />
-					<div className="card">
+					<div className="card mt-3">
 						<div className="result-grid">
 							<div className="result-item">
 								<span className="result-label">방식</span>
@@ -1425,11 +1423,12 @@ const App = () => {
 
 		return (
 			<div className="view-animate" key={`enc-step-${encryptStep}`}>
-				{renderStepDots(4, encryptStep)}
-
 				{encryptStep === 1 && (
 					<>
-						<h2 className="section-title">암호화</h2>
+						<div className="section-header">
+							<h2 className="section-title">암호화</h2>
+							{renderStepDots(4, encryptStep)}
+						</div>
 						<p className="section-desc">어떤 방식으로 데이터를 보호할까요?</p>
 						<div className="option-cards">
 							<button className="option-card" onClick={() => { setEncryptAuthMode("password"); setEncryptStep(2); }}>
@@ -1446,7 +1445,10 @@ const App = () => {
 
 				{encryptStep === 2 && encryptAuthMode === "password" && (
 					<>
-						<h2 className="section-title">비밀번호 설정</h2>
+						<div className="section-header">
+							<h2 className="section-title">비밀번호 설정</h2>
+							{renderStepDots(4, encryptStep)}
+						</div>
 						<p className="section-desc">암호화에 사용할 비밀번호를 입력하세요.</p>
 						<div className="form-group">
 							<label className="form-label">비밀번호</label>
@@ -1455,18 +1457,18 @@ const App = () => {
 						<div className="form-group">
 							<label className="form-label">키 유도 방식</label>
 							<div className="option-cards row-layout">
-								<button className={`option-card ${encryptKdfMethod === "arg2" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg2")}>
-									<span className="option-title">Argon2id</span>
-									<span className="option-desc">높은 보안 강도 (추천)</span>
-								</button>
-								<button className={`option-card ${encryptKdfMethod === "pbk2" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("pbk2")}>
-									<span className="option-title">PBKDF2</span>
-									<span className="option-desc">호환성 우선</span>
-								</button>
-								<button className={`option-card ${encryptKdfMethod === "sha3" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("sha3")}>
-									<span className="option-title">SHA3</span>
-									<span className="option-desc">빠른 처리 (텍스트 권장)</span>
-								</button>
+							<button className={`option-card ${encryptKdfMethod === "arg2st" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg2st")}>
+								<span className="option-title">Argon2id (Standard)</span>
+								<span className="option-desc">높은 보안 강도 (추천)</span>
+							</button>
+							<button className={`option-card ${encryptKdfMethod === "arg2low" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg2low")}>
+								<span className="option-title">Argon2id (Low)</span>
+								<span className="option-desc">저메모리 환경 호환</span>
+							</button>
+							<button className={`option-card ${encryptKdfMethod === "sha3" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("sha3")}>
+								<span className="option-title">SHA3</span>
+								<span className="option-desc">빠른 처리 (텍스트 권장)</span>
+							</button>
 							</div>
 						</div>
 						<div className="btn-row">
@@ -1478,7 +1480,10 @@ const App = () => {
 
 				{encryptStep === 2 && encryptAuthMode === "publickey" && (
 					<>
-						<h2 className="section-title">수신자 설정</h2>
+						<div className="section-header">
+							<h2 className="section-title">수신자 설정</h2>
+							{renderStepDots(4, encryptStep)}
+						</div>
 						<p className="section-desc">암호화된 데이터를 받을 사람을 선택하세요.</p>
 						<div className="form-group">
 							<label className="form-label">수신자</label>
@@ -1505,38 +1510,22 @@ const App = () => {
 						<div className="form-group">
 							<label className="form-label">비대칭 알고리즘</label>
 							<div className="option-cards">
-								<button
-									className={`option-card ${encryptAsymAlgo === "pqc1" ? "selected" : ""}`}
-									disabled
-								>
-									<span className="option-title">PQC</span>
-									<span className="option-desc">양자내성 하이브리드</span>
-									{encryptAsymAlgo === "pqc1" && <span className="option-badge">자동 선택</span>}
-								</button>
-								<button
-									className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`}
-									disabled
-								>
-									<span className="option-title">Curve448</span>
-									<span className="option-desc">높은 보안 강도 (추천)</span>
-									{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
-								</button>
-								<button
-									className={`option-card ${encryptAsymAlgo === "rsa1" ? "selected" : ""}`}
-									disabled
-								>
-									<span className="option-title">RSA-2048</span>
-									<span className="option-desc">호환성 우선</span>
-									{encryptAsymAlgo === "rsa1" && <span className="option-badge">자동 선택</span>}
-								</button>
-								<button
-									className={`option-card ${encryptAsymAlgo === "rsa2" ? "selected" : ""}`}
-									disabled
-								>
-									<span className="option-title">RSA-4096</span>
-									<span className="option-desc">추가 보안 (대용량 키)</span>
-									{encryptAsymAlgo === "rsa2" && <span className="option-badge">자동 선택</span>}
-								</button>
+							<button
+								className={`option-card ${encryptAsymAlgo === "pqc1" ? "selected" : ""}`}
+								disabled
+							>
+								<span className="option-title">PQC</span>
+								<span className="option-desc">양자내성 하이브리드</span>
+								{encryptAsymAlgo === "pqc1" && <span className="option-badge">자동 선택</span>}
+							</button>
+							<button
+								className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`}
+								disabled
+							>
+								<span className="option-title">Curve448</span>
+								<span className="option-desc">X448+Ed448 (호환)</span>
+								{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
+							</button>
 							</div>
 							<span className="form-hint">상대방의 공개키 형식에 따라 자동으로 선택됩니다</span>
 						</div>
@@ -1584,7 +1573,10 @@ const App = () => {
 
 				{encryptStep === 3 && (
 					<>
-						<h2 className="section-title">암호화 방식</h2>
+						<div className="section-header">
+							<h2 className="section-title">암호화 방식</h2>
+							{renderStepDots(4, encryptStep)}
+						</div>
 						<p className="section-desc">데이터를 암호화할 방식을 선택하세요.</p>
 						<div className="option-cards">
 							<button className="option-card" onClick={() => { setEncryptEncAlgo("gcm1"); setEncryptStep(4); }}>
@@ -1604,7 +1596,10 @@ const App = () => {
 
 				{encryptStep === 4 && (
 					<>
-						<h2 className="section-title">데이터 입력</h2>
+						<div className="section-header">
+							<h2 className="section-title">데이터 입력</h2>
+							{renderStepDots(4, encryptStep)}
+						</div>
 						<p className="section-desc">암호화할 내용을 입력하세요.</p>
 
 						<div className="form-group">
@@ -1678,8 +1673,7 @@ const App = () => {
 			return (
 				<>
 					<h2 className="section-title">복호화 결과</h2>
-					<br />
-					{decryptStatus && <div className="status-bar success">{decryptStatus}</div>}
+					{decryptStatus && <div className="status-bar success mt-3">{decryptStatus}</div>}
 					
 					{/* Signature verification result */}
 					{decryptedResult.verified === true && (
@@ -1741,11 +1735,12 @@ const App = () => {
 
 		return (
 			<div className="view-animate" key={`dec-step-${decryptStep}`}>
-				{decryptDetected?.mode === "publickey" ? renderStepDots(3, decryptStep) : renderStepDots(2, decryptStep)}
-
 				{decryptStep === 1 && (
 					<>
-						<h2 className="section-title">복호화</h2>
+						<div className="section-header">
+							<h2 className="section-title">복호화</h2>
+							{decryptDetected?.mode === "publickey" ? renderStepDots(3, decryptStep) : renderStepDots(2, decryptStep)}
+						</div>
 						<p className="section-desc">암호화된 데이터를 불러오세요.</p>
 
 						<div className="form-group">
@@ -1811,8 +1806,10 @@ const App = () => {
 
 				{decryptStep === 2 && (
 					<>
-						<h2 className="section-title">복호화 설정</h2>
-						<br />
+						<div className="section-header">
+							<h2 className="section-title">복호화 설정</h2>
+							{decryptDetected?.mode === "publickey" ? renderStepDots(3, decryptStep) : renderStepDots(2, decryptStep)}
+						</div>
 						{decryptDetected && (
 							<div className="card mb-3">
 								<div className="result-grid">
@@ -1917,7 +1914,10 @@ const App = () => {
 
 				{decryptStep === 3 && decryptDetected?.mode === "publickey" && (
 					<>
-						<h2 className="section-title">서명 검증</h2>
+						<div className="section-header">
+							<h2 className="section-title">서명 검증</h2>
+							{renderStepDots(3, decryptStep)}
+						</div>
 						<p className="section-desc">발신자의 공개키를 입력하여 서명을 검증할 수 있습니다 (선택).</p>
 
 						<div className="form-group">
