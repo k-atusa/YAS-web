@@ -23,7 +23,6 @@ export const ContactsTab = ({
 	onDelete,
 }: ContactsTabProps) => (
 	<>
-		<br />
 		<div className="section-header">
 			<h2 className="section-title">주소록</h2>
 			<button className="btn btn-secondary btn-sm" onClick={onOpenAdd}>

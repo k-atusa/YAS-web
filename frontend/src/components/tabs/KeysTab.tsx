@@ -56,7 +56,6 @@ export const KeysTab = ({
 	if (hasStoredKey && !showKeySection) {
 		return (
 			<>
-				<br />
 				<h2 className="section-title">내 키</h2>
 				<p className="section-desc">키가 서버에 안전하게 저장되어 있어요.</p>
 				<div className="card">

@@ -192,7 +192,8 @@ button {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 20px 0 8px;
+	padding: 20px 0 0;
+	margin-bottom: 24px;
 }
 
 .topbar-left {
@@ -336,6 +337,8 @@ button {
 .section-title {
 	font-size: 22px;
 	font-weight: 700;
+	margin-top: 0;
+	margin-bottom: 4px;
 }
 
 .section-desc {
@@ -910,7 +913,8 @@ select {
 	display: flex;
 	gap: 8px;
 	justify-content: center;
-	margin-bottom: 28px;
+	align-items: center;
+	margin-bottom: 0;
 }
 
 .step-dot {

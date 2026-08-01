@@ -18,8 +18,9 @@ export const MessagesTab = ({
 	onUnlockTorDomain,
 }: MessagesTabProps) => (
 	<>
+		<br />
 		<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-			<h2 className="section-title" style={{ margin: 0 }}>메시지함</h2>
+			<h2 className="section-title">메시지함</h2>
 			<button
 				className="btn btn-secondary btn-sm"
 				onClick={onRefresh}
