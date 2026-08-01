@@ -45,11 +45,10 @@ export const detectPublicKeyAlgo = (publicKeyB64: string): AsymAlgo => {
 		if (u8.length === 4273) return "pqc1";
 		// Curve448 public key is exactly 113 bytes
 		if (u8.length === 113) return "ecc1";
-		// RSA public key size heuristic (rsa2 is much larger)
-		if (u8.length > 500) return "rsa2";
-		return "rsa1";
+		// Default to ecc1 (only remaining option)
+		return "ecc1";
 	} catch {
-		return "ecc1"; // Default to ecc1
+		return "ecc1";
 	}
 };
 
@@ -60,8 +59,8 @@ export const detectPrivateKeyAlgo = (privateKeyB64: string): AsymAlgo => {
 		if (u8.length === 8177) return "pqc1";
 		// Curve448 private key is exactly 113 bytes
 		if (u8.length === 113) return "ecc1";
-		if (u8.length > 2000) return "rsa2";
-		return "rsa1";
+		// Default to ecc1
+		return "ecc1";
 	} catch {
 		return "ecc1";
 	}
