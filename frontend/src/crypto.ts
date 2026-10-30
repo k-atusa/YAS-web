@@ -126,9 +126,24 @@ function u8ToBase64(u8: Uint8Array): string {
   return btoa(bin);
 }
 
+export function base64UrlToBase64(str: string): string {
+  if (!str) return "";
+  let output = str.replace(/-/g, "+").replace(/_/g, "/").replace(/\s/g, "");
+  const mod4 = output.length % 4;
+  if (mod4 === 2) {
+    output += "==";
+  } else if (mod4 === 3) {
+    output += "=";
+  } else if (mod4 === 1) {
+    throw new Error("Invalid base64 string length");
+  }
+  return output;
+}
+
 export function base64ToU8(b64: string): Uint8Array {
   if (!b64) return new Uint8Array(0);
-  const bin = atob(b64);
+  const normalized = base64UrlToBase64(b64);
+  const bin = atob(normalized);
   const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   return u8;
@@ -632,14 +647,13 @@ export async function buildAccountPayload(
 // ==================== WebAuthn utilities (UNRELATED to USAG-lib) ====================
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  return u8ToBase64(new Uint8Array(buffer));
 }
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
+  if (!base64) return new ArrayBuffer(0);
+  const normalized = base64UrlToBase64(base64);
+  const binary = atob(normalized);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes.buffer;
@@ -690,14 +704,16 @@ export async function registerWebAuthnCredential(options: {
   if ("rawId" in credential && credential.rawId) {
     credentialId = arrayBufferToBase64(credential.rawId as ArrayBuffer);
   } else if (credential.id) {
-    const idArray = new Uint8Array(credential.id as unknown as ArrayBuffer);
-    credentialId = arrayBufferToBase64(idArray as unknown as ArrayBuffer);
+    credentialId = base64UrlToBase64(credential.id);
   }
   if (!credentialId) throw new Error("Failed to extract credential ID");
 
-  const publicKeyBuffer = response.getPublicKey();
-  if (!publicKeyBuffer) throw new Error("Failed to extract public key");
-  const publicKey = arrayBufferToBase64(publicKeyBuffer as unknown as ArrayBuffer);
+  let publicKey = "";
+  if (typeof response.getPublicKey === "function") {
+    const pkBuf = response.getPublicKey();
+    if (pkBuf) publicKey = arrayBufferToBase64(pkBuf);
+  }
+  if (!publicKey) throw new Error("Failed to extract public key");
   const counter = 0;
   const transports = response.getTransports?.() || [];
   const clientDataJSON = arrayBufferToBase64(response.clientDataJSON as unknown as ArrayBuffer);
@@ -743,8 +759,7 @@ export async function authenticateWithWebAuthn(options: {
   if ("rawId" in assertion && assertion.rawId) {
     credentialId = arrayBufferToBase64(assertion.rawId as ArrayBuffer);
   } else if (assertion.id) {
-    const idArray = new Uint8Array(assertion.id as unknown as ArrayBuffer);
-    credentialId = arrayBufferToBase64(idArray as unknown as ArrayBuffer);
+    credentialId = base64UrlToBase64(assertion.id);
   }
   if (!credentialId) throw new Error("Failed to extract credential ID");
 
