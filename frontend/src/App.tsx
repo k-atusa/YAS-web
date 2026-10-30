@@ -1823,7 +1823,7 @@ const App = () => {
 								className={`pill-nav-item ${tab === t ? "active" : ""}`}
 								onClick={() => { setPressedTab(null); setTab(t); }}
 								onPointerDown={() => { if (t !== tab) setPressedTab(t); }}
-								onPointerUp={() => setPressedTab(null)}
+								onPointerUp={() => { setTimeout(() => setPressedTab(null), 30); }}
 								onPointerLeave={() => setPressedTab(null)}
 								onPointerCancel={() => setPressedTab(null)}
 								title={title}
