@@ -16,7 +16,7 @@ export async function signup(username: string, password: string): Promise<{ id: 
   return response.json();
 }
 
-export async function login(username: string, password: string): Promise<{ token: string; user: { id: string; username: string } }> {
+export async function login(username: string, password: string): Promise<{ token: string; user: { id: string; username: string }; hasPasskey?: boolean }> {
   const response = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -311,7 +311,11 @@ const App = () => {
 			const result = await loginApi(loginUsername, loginPass);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
-			setWebauthnPending("authenticate");
+			if (result.hasPasskey === false) {
+				setWebauthnPending("register");
+			} else {
+				setWebauthnPending("authenticate");
+			}
 		} catch (err) {
 			setError((err as Error).message || "로그인에 실패했습니다");
 		} finally {
@@ -1688,6 +1692,12 @@ const App = () => {
 				registration.transports
 			);
 			
+			const account = await getAccountByUsername(authUsername!);
+			if (account) {
+				setPublicKeyPem(account.publicKey);
+				setStoredAccount(account);
+				setShowKeySection(false);
+			}
 			setWebauthnPending(null);
 		} catch (err) {
 			setError((err as Error).message);
@@ -1725,7 +1735,13 @@ const App = () => {
 			setWebauthnPending(null);
 			setShowKeySection(false);
 		} catch (err) {
-			setError((err as Error).message);
+			const msg = (err as Error).message || "";
+			if (msg.includes("No WebAuthn credentials registered")) {
+				setWebauthnPending("register");
+				setError("등록된 패스키가 없습니다. 먼저 패스키를 등록해주세요.");
+			} else {
+				setError(msg);
+			}
 		} finally {
 			setWebauthnAuthBusy(false);
 		}
@@ -1738,7 +1754,7 @@ const App = () => {
 					<h1 className="auth-title">{webauthnPending === "register" ? "패스키 등록" : "패스키 인증"}</h1>
 					<p className="section-desc">
 						{webauthnPending === "register" 
-							? "계정 보호를 위해 사용할 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 이 패스키로 회원님의 개인키가 자동으로 생성 및 보호됩니다." 
+							? "계정 보호 및 본인 확인을 위해 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 등록된 패스키로 개인키가 안전하게 보호됩니다." 
 							: "본인 확인 및 개인키 복호화를 위해 패스키 인증이 필요합니다."}
 					</p>
 					
@@ -1751,7 +1767,16 @@ const App = () => {
 						{webauthnPending === "register" ? "패스키 등록 완료하기" : "패스키로 인증하기"}
 					</button>
                     <p className="auth-hint">
-                            <button onClick={handleSignOut}>로그아웃</button>
+                        {webauthnPending === "authenticate" && (
+                            <button
+                                type="button"
+                                onClick={() => { setError(null); setWebauthnPending("register"); }}
+                                style={{ marginRight: "12px" }}
+                            >
+                                패스키 신규 등록
+                            </button>
+                        )}
+                        <button type="button" onClick={handleSignOut}>로그아웃</button>
                     </p>
 				</div>
 			</div>

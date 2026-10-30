@@ -134,5 +134,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			"id":       user.ID,
 			"username": user.Username,
 		},
+		"hasPasskey": len(user.WebAuthnCredentials) > 0,
 	})
 }
