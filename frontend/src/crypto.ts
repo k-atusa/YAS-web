@@ -946,6 +946,7 @@ export async function registerWebAuthnCredential(options: {
   publicKey: string;
   counter: number;
   transports?: string[];
+  clientDataJSON: string;
 }> {
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const userIdBuffer = base64ToArrayBuffer(options.user.id);
@@ -987,8 +988,9 @@ export async function registerWebAuthnCredential(options: {
   const publicKey = arrayBufferToBase64(publicKeyBuffer as unknown as ArrayBuffer);
   const counter = 0;
   const transports = response.getTransports?.() || [];
+  const clientDataJSON = arrayBufferToBase64(response.clientDataJSON as unknown as ArrayBuffer);
 
-  return { credentialId, publicKey, counter, transports };
+  return { credentialId, publicKey, counter, transports, clientDataJSON };
 }
 
 export async function authenticateWithWebAuthn(options: {

@@ -138,6 +138,7 @@ export async function verifyWebAuthnRegistration(
   credentialId: string,
   publicKey: string,
   counter: number,
+  clientDataJSON?: string,
   transports?: string[]
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/webauthn/register-verify`, {
@@ -150,6 +151,7 @@ export async function verifyWebAuthnRegistration(
       credentialId,
       publicKey,
       counter,
+      clientDataJSON,
       transports,
     }),
   });
@@ -182,7 +184,9 @@ export async function getWebAuthnAuthenticateOptions(token: string): Promise<any
 export async function verifyWebAuthnAuthentication(
   token: string,
   credentialId: string,
-  counter: number
+  clientDataJSON: string,
+  authenticatorData: string,
+  signature: string
 ): Promise<{ token: string; expiresAt: string }> {
   const response = await fetch(`${API_BASE}/webauthn/authenticate-verify`, {
     method: "POST",
@@ -192,7 +196,9 @@ export async function verifyWebAuthnAuthentication(
     },
     body: JSON.stringify({
       credentialId,
-      counter,
+      clientDataJSON,
+      authenticatorData,
+      signature,
     }),
   });
 

@@ -573,7 +573,13 @@ const App = () => {
 				timeout: options.timeout, userVerification: options.userVerification,
 			});
 			setTargetStatus("확인 중...");
-			const verifyResp = await verifyWebAuthnAuthentication(authToken, assertion.credentialId, assertion.counter);
+			const verifyResp = await verifyWebAuthnAuthentication(
+				authToken,
+				assertion.credentialId,
+				assertion.clientDataJSON,
+				assertion.authenticatorData,
+				assertion.signature
+			);
 			setDecryptionToken(verifyResp.token);
 			setTargetStatus(null);
 			setTargetError(null);
@@ -1065,7 +1071,13 @@ const App = () => {
 				timeout: optionsResp.options.timeout,
 				userVerification: optionsResp.options.userVerification,
 			});
-			const verifyResp = await verifyWebAuthnAuthentication(authToken!, authentication.credentialId, authentication.counter);
+			const verifyResp = await verifyWebAuthnAuthentication(
+				authToken!,
+				authentication.credentialId,
+				authentication.clientDataJSON,
+				authentication.authenticatorData,
+				authentication.signature
+			);
 			const decResp = await decryptStoredPrivateKey(authUsername!, verifyResp.token);
 			setPrivateKeyPem(decResp.privateKey);
 		} catch (err) {
@@ -1711,7 +1723,14 @@ const App = () => {
 				pubKeyCredParams: optionsResp.options.pubKeyCredParams, timeout: optionsResp.options.timeout,
 				attestation: optionsResp.options.attestation, authenticatorSelection: optionsResp.options.authenticatorSelection,
 			});
-			await verifyWebAuthnRegistration(authToken!, registration.credentialId, registration.publicKey, registration.counter, registration.transports);
+			await verifyWebAuthnRegistration(
+				authToken!,
+				registration.credentialId,
+				registration.publicKey,
+				registration.counter,
+				registration.clientDataJSON,
+				registration.transports
+			);
 			
 			setWebauthnPending(null);
 		} catch (err) {
@@ -1730,7 +1749,13 @@ const App = () => {
 				challenge: optionsResp.options.challenge, allowCredentials: optionsResp.options.allowCredentials || [],
                 timeout: optionsResp.options.timeout, userVerification: optionsResp.options.userVerification,
 			});
-			const verifyResp = await verifyWebAuthnAuthentication(authToken!, authentication.credentialId, authentication.counter);
+			const verifyResp = await verifyWebAuthnAuthentication(
+				authToken!,
+				authentication.credentialId,
+				authentication.clientDataJSON,
+				authentication.authenticatorData,
+				authentication.signature
+			);
 			
 			const decResp = await decryptStoredPrivateKey(authUsername!, verifyResp.token);
 			setPrivateKeyPem(decResp.privateKey);

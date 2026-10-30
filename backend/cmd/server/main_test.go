@@ -4,9 +4,15 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -145,22 +151,42 @@ func TestEndToEndFlow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 6. WebAuthn Register + Authenticate
+	// 6. WebAuthn Register + Authenticate (Real cryptographic signature verification)
+	// 6.1 Generate mock WebAuthn P-256 Authenticator Key
+	authenticatorKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate ecdsa key: %v", err)
+	}
+	pubKeyDer, err := x509.MarshalPKIXPublicKey(&authenticatorKey.PublicKey)
+	if err != nil {
+		t.Fatalf("failed to marshal pkix: %v", err)
+	}
+	credID := base64.RawURLEncoding.EncodeToString([]byte("alice-passkey-cred-1"))
+	pubKeyB64 := base64.StdEncoding.EncodeToString(pubKeyDer)
+
+	// 6.2 Get Registration Options
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/register-options", nil)
 	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("webauthn register-options failed: %v, status=%d", err, resp.StatusCode)
 	}
+	var regOptions struct {
+		Options struct {
+			Challenge string `json:"challenge"`
+		} `json:"options"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&regOptions)
 	resp.Body.Close()
 
-	credID := base64.StdEncoding.EncodeToString([]byte("test-cred-id-1234"))
-	pubKey := base64.StdEncoding.EncodeToString([]byte("test-pub-key-1234"))
+	// 6.3 Register Verify
+	regClientDataJSON := fmt.Sprintf(`{"type":"webauthn.create","challenge":"%s","origin":"http://localhost:4000"}`, regOptions.Options.Challenge)
 	regVerifyBody, _ := json.Marshal(map[string]any{
-		"credentialId": credID,
-		"publicKey":    pubKey,
-		"counter":      1,
-		"transports":   []string{"internal"},
+		"credentialId":   credID,
+		"publicKey":      pubKeyB64,
+		"clientDataJSON": base64.StdEncoding.EncodeToString([]byte(regClientDataJSON)),
+		"counter":        1,
+		"transports":     []string{"internal"},
 	})
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/register-verify", bytes.NewReader(regVerifyBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -171,11 +197,76 @@ func TestEndToEndFlow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	authVerifyBody, _ := json.Marshal(map[string]any{
-		"credentialId": credID,
-		"counter":      2,
+	// 6.4 Get Authentication Options
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-options", nil)
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("webauthn authenticate-options failed: %v, status=%d", err, resp.StatusCode)
+	}
+	var authOptions struct {
+		Options struct {
+			Challenge string `json:"challenge"`
+		} `json:"options"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&authOptions)
+	resp.Body.Close()
+
+	// 6.5 Prepare clientDataJSON, authenticatorData, and sign
+	authClientDataJSON := fmt.Sprintf(`{"type":"webauthn.get","challenge":"%s","origin":"http://localhost:4000"}`, authOptions.Options.Challenge)
+	authClientDataBytes := []byte(authClientDataJSON)
+
+	rpIdHash := sha256.Sum256([]byte("localhost"))
+	authData := make([]byte, 37)
+	copy(authData[0:32], rpIdHash[:])
+	authData[32] = 0x01                            // UP: User Present flag
+	binary.BigEndian.PutUint32(authData[33:37], 2) // counter = 2
+
+	// 6.6 Verify invalid signature is rejected with 400
+	badVerifyBody, _ := json.Marshal(map[string]any{
+		"credentialId":      credID,
+		"clientDataJSON":    base64.StdEncoding.EncodeToString(authClientDataBytes),
+		"authenticatorData": base64.StdEncoding.EncodeToString(authData),
+		"signature":         base64.StdEncoding.EncodeToString([]byte("invalid-fake-signature")),
 	})
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-verify", bytes.NewReader(authVerifyBody))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-verify", bytes.NewReader(badVerifyBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("fake signature should be rejected with 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Re-fetch authenticate options because challenge was consumed/attempted
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-options", nil)
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("re-fetch authenticate options failed: %v, status=%d", err, resp.StatusCode)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&authOptions)
+	resp.Body.Close()
+
+	// Re-sign with new challenge
+	authClientDataJSON = fmt.Sprintf(`{"type":"webauthn.get","challenge":"%s","origin":"http://localhost:4000"}`, authOptions.Options.Challenge)
+	authClientDataBytes = []byte(authClientDataJSON)
+	cdataHash := sha256.Sum256(authClientDataBytes)
+	signedData := append(authData, cdataHash[:]...)
+	digest := sha256.Sum256(signedData)
+	signature, err := ecdsa.SignASN1(rand.Reader, authenticatorKey, digest[:])
+	if err != nil {
+		t.Fatalf("failed to sign: %v", err)
+	}
+
+	// 6.7 Verify valid cryptographic signature succeeds!
+	goodVerifyBody, _ := json.Marshal(map[string]any{
+		"credentialId":      credID,
+		"clientDataJSON":    base64.StdEncoding.EncodeToString(authClientDataBytes),
+		"authenticatorData": base64.StdEncoding.EncodeToString(authData),
+		"signature":         base64.StdEncoding.EncodeToString(signature),
+	})
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-verify", bytes.NewReader(goodVerifyBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
 	resp, err = client.Do(req)
