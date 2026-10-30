@@ -53,7 +53,7 @@ All settings have safe defaults, so **no `.env` file is required** to run locall
 
 To customize settings (e.g. in production), create a `.env` file in the same directory as the binary (see `.env.example`):
 - `PORT` – Server port (default: `4000`)
-- `JWT_SECRET` – Secret key for JWT signing (recommended in production)
+- `JWT_SECRET` – Secret key for JWT signing (optional; auto-generated random 32-byte secret in memory if omitted)
 - `DOMAIN` – Domain name for WebAuthn passkeys (default: `localhost`, set to your domain like `example.com` in production)
 
 *(SQLite database is automatically stored in `./data/yas-web.db`)*

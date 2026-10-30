@@ -2,6 +2,8 @@ package config
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net"
 	"os"
@@ -29,8 +31,12 @@ func Load() Config {
 
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
-		log.Println("JWT_SECRET is not set; using insecure dev fallback. Set JWT_SECRET in production.")
-		jwtSecret = "dev-secret"
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			log.Fatalf("Failed to generate random JWT secret: %v", err)
+		}
+		jwtSecret = hex.EncodeToString(b)
+		log.Println("JWT_SECRET not set; generated secure ephemeral in-memory secret (sessions will reset on restart)")
 	}
 
 	domain := cleanDomain(os.Getenv("DOMAIN"))
