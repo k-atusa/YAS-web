@@ -12,7 +12,8 @@ Encrypted-key storage & client-side encryption platform. Key pairs (PQC / Curve4
 - **Data shape**: `{ username, publicKey, encryptedPrivateKey: { cipherText, iv, authTag? }, kdf: { algorithm, salt, keyLength, iterations?, memoryCost?, parallelism?, hash? }, notes, timestamps }`.
 
 ## Quick start
-Prereqs: Go 1.27+ (and Node 18+ if rebuilding the frontend).
+Prereqs: Go 1.26+ (and Node 18+ if rebuilding the frontend).
+*(Note: If you run the pre-built release binary directly, neither Go nor Node is required.)*
 
 ### Single-binary execution (Backend + Embedded Frontend)
 The compiled frontend (`index.html`, JS, CSS) is embedded directly into the Go binary via `embed.FS`.
