@@ -1766,18 +1766,17 @@ const App = () => {
 						onClick={webauthnPending === "register" ? doWebauthnSignupFlow : doWebauthnLoginFlow}>
 						{webauthnPending === "register" ? "패스키 등록 완료하기" : "패스키로 인증하기"}
 					</button>
-                    <p className="auth-hint">
-                        {webauthnPending === "authenticate" && (
-                            <button
-                                type="button"
-                                onClick={() => { setError(null); setWebauthnPending("register"); }}
-                                style={{ marginRight: "12px" }}
-                            >
-                                패스키 신규 등록
-                            </button>
-                        )}
-                        <button type="button" onClick={handleSignOut}>로그아웃</button>
-                    </p>
+					<div className="auth-hint">
+						{webauthnPending === "authenticate" && (
+							<button
+								type="button"
+								onClick={() => { setError(null); setWebauthnPending("register"); }}
+							>
+								패스키 신규 등록
+							</button>
+						)}
+						<button type="button" onClick={handleSignOut}>로그아웃</button>
+					</div>
 				</div>
 			</div>
 		);
