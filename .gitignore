@@ -1,5 +1,7 @@
 yas-web-*
 backend/yas-web-*
+backend/internal/webui/static/*
+!backend/internal/webui/static/.gitkeep
 uploads/
 data/
 *.db
