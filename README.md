@@ -12,18 +12,40 @@ Encrypted-key storage & client-side encryption platform. Key pairs (PQC / Curve4
 - **Data shape**: `{ username, publicKey, encryptedPrivateKey: { cipherText, iv, authTag? }, kdf: { algorithm, salt, keyLength, iterations?, memoryCost?, parallelism?, hash? }, notes, timestamps }`.
 
 ## Quick start
-Prereqs: Go 1.26+ (and Node 18+ if rebuilding the frontend).
-*(Note: If you run the pre-built release binary directly, neither Go nor Node is required.)*
 
-### Single-binary execution (Backend + Embedded Frontend)
+### 1. Pre-built Binary (Recommended)
+No Go or Node.js runtime is required.
+
+1. Download the binary matching your platform from the [GitHub Releases](https://github.com/k-atusa/YAS-web/releases) page.
+
+2. Grant execution permission (Linux / macOS):
+   ```bash
+   chmod +x yas-web*
+   ```
+
+3. Run the binary (starts both backend API & embedded frontend on default `http://localhost:4000`):
+   ```bash
+   # Linux / macOS
+   ./yas-web-2.0.0-<os>-<arch>
+
+   # Windows (PowerShell / Command Prompt)
+   .\yas-web-2.0.0-windows-<arch>.exe
+   ```
+
+### 2. Manual Build from Source
+Prerequisites: Go 1.26+ and Node.js 18+.
+
 The compiled frontend (`index.html`, JS, CSS) is embedded directly into the Go binary via `embed.FS`.
+
 ```bash
-# Build frontend + embed into Go binary (v2.0.0)
+# 1. Build frontend
 cd frontend && npm install && npm run build && cd ..
+
+# 2. Build Go single-binary with embedded frontend
 cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../yas-web-2.0.0-$(go env GOOS)-$(go env GOARCH) ./cmd/server && cd ..
 
-# Run both frontend & backend at once (default http://localhost:4000)
-./yas-web-2.0.0-darwin-arm64
+# 3. Run the compiled binary for your current OS & architecture
+./yas-web-2.0.0-$(go env GOOS)-$(go env GOARCH)
 ```
 
 ## Environment variables
