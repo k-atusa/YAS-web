@@ -79,13 +79,6 @@ func validateAccountPayload(p models.AccountPayload) error {
 		if p.Kdf.Hash == "" {
 			return errors.New("PBKDF2 requires hash")
 		}
-	case "scrypt", "argon2":
-		if p.Kdf.MemoryCost == nil || *p.Kdf.MemoryCost <= 0 {
-			return errors.New(p.Kdf.Algorithm + " requires memoryCost")
-		}
-		if p.Kdf.Parallelism == nil || *p.Kdf.Parallelism <= 0 {
-			return errors.New(p.Kdf.Algorithm + " requires parallelism")
-		}
 	default:
 		return errors.New("invalid kdf algorithm")
 	}

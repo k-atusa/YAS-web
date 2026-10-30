@@ -1,5 +1,5 @@
 import { KeysTab } from "./components/tabs/KeysTab";
-import { formatBytes, detectPublicKeyAlgo, detectPrivateKeyAlgo } from "./helpers";
+import { formatBytes } from "./helpers";
 import { IconContacts, IconKey, IconEncrypt, IconDecrypt } from "./icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import SparkMD5 from "spark-md5";
@@ -31,7 +31,7 @@ import {
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
 } from "./crypto";
-import type { AsymAlgo, KdfMethod, EncAlgo, AuthMode, DecryptResult } from "./crypto";
+import type { EncAlgo, AuthMode, DecryptResult } from "./crypto";
 import type { AccountRecord, ContactRecord } from "./types";
 
 
@@ -61,7 +61,6 @@ const App = () => {
 	const [showKeySection, setShowKeySection] = useState(true);
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
 	const [copyPrivateStatus, setCopyPrivateStatus] = useState<"idle" | "copied" | "error">("idle");
-	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("pqc1");
 	const [keyGenStep, setKeyGenStep] = useState(1);
 
 	/* Contacts */
@@ -79,9 +78,7 @@ const App = () => {
 
 	/* Encrypt */
 	const [encryptAuthMode, setEncryptAuthMode] = useState<AuthMode>("password");
-	const [encryptKdfMethod, setEncryptKdfMethod] = useState<KdfMethod>("arg2st");
 	const [encryptEncAlgo, setEncryptEncAlgo] = useState<EncAlgo>("gcm1");
-	const [encryptAsymAlgo, setEncryptAsymAlgo] = useState<AsymAlgo | null>(null);
 	const [encryptPassword, setEncryptPassword] = useState("");
 	const [encryptRecipientId, setEncryptRecipientId] = useState<string>("");
 	const [encryptMsg, setEncryptMsg] = useState("");
@@ -503,7 +500,7 @@ const App = () => {
 		setError(null);
 		setStatus("키 쌍 생성 중...");
 		try {
-			const { publicKey, privateKey } = await generateKeyPair(keyAlgo);
+			const { publicKey, privateKey } = await generateKeyPair();
 			setPublicKeyPem(publicKey);
 			setPrivateKeyPem(privateKey);
 			setCopyPrivateStatus("idle");
@@ -620,9 +617,7 @@ const App = () => {
 		setEncryptStep(1);
 		setEncryptStatus(null);
 		setEncryptError(null);
-		setEncryptKdfMethod("arg2st");
 		setEncryptEncAlgo("gcm1");
-		setEncryptAsymAlgo(null);
 		setEncryptRecipientId("");
 		setEncryptSignWithKey(false);
 	}
@@ -787,7 +782,7 @@ const App = () => {
 			let result: Uint8Array;
 			if (encryptAuthMode === "password") {
 				result = await encryptOpsec({
-					mode: "password", kdfMethod: encryptKdfMethod, password: encryptPassword,
+					mode: "password", kdfMethod: "arg2st", password: encryptPassword,
 					encAlgo: encryptEncAlgo, smsg: encryptSmsg || undefined, msg: encryptMsg || undefined, files,
 				});
 			} else {
@@ -795,13 +790,9 @@ const App = () => {
 				let myPrivateKey: string | undefined;
 				if (encryptSignWithKey) {
 					myPrivateKey = await resolveSigningPrivateKeyB64();
-					const signAlgo = detectPrivateKeyAlgo(myPrivateKey);
-					if (signAlgo !== encryptAsymAlgo) {
-						throw new Error(`서명 키 알고리즘(${signAlgo})과 수신자 키 알고리즘(${encryptAsymAlgo})이 달라 서명할 수 없습니다.`);
-					}
 				}
 				result = await encryptOpsec({
-					mode: "publickey", asymAlgo: encryptAsymAlgo!, peerPublicKey: recipient.publicKey,
+					mode: "publickey", asymAlgo: "pqc1", peerPublicKey: recipient.publicKey,
 					myPrivateKey, encAlgo: encryptEncAlgo, smsg: encryptSmsg || undefined, msg: encryptMsg || undefined, files,
 				});
 			}
@@ -1030,8 +1021,8 @@ const App = () => {
 								<div className="contact-info">
 									<div className="contact-name-row">
 										<span className="contact-name">{c.contactUsername}</span>
-											<span className={`contact-algo-badge algo-${detectPublicKeyAlgo(c.publicKey)}`}>
-											{detectPublicKeyAlgo(c.publicKey) === "pqc1" ? "PQC" : "ECC"}
+										<span className="contact-algo-badge algo-pqc1">
+											PQC
 										</span>
 									</div>
 									{c.notes && (
@@ -1097,12 +1088,10 @@ const App = () => {
 				copyPublicStatus={copyPublicStatus}
 				copyPrivateStatus={copyPrivateStatus}
 				keyGenStep={keyGenStep}
-				keyAlgo={keyAlgo as any}
 				publicKeyPem={publicKeyPem}
 				privateKeyPem={privateKeyPem}
 				canUpload={canUpload}
 				busy={busy}
-				onSetKeyAlgo={(algo: any) => setKeyAlgo(algo as any)}
 				onGenerateKeys={handleGenerateKeys}
 				onUpload={handleUpload}
 				onRegenerate={handleRegenerate}
@@ -1189,18 +1178,10 @@ const App = () => {
 						<div className="form-group">
 							<label className="form-label">키 유도 방식</label>
 							<div className="option-cards row-layout">
-							<button className={`option-card ${encryptKdfMethod === "arg2st" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg2st")}>
-								<span className="option-title">Argon2id (Standard)</span>
-								<span className="option-desc">높은 보안 강도 (추천)</span>
-							</button>
-							<button className={`option-card ${encryptKdfMethod === "arg2low" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("arg2low")}>
-								<span className="option-title">Argon2id (Low)</span>
-								<span className="option-desc">저메모리 환경 호환</span>
-							</button>
-							<button className={`option-card ${encryptKdfMethod === "sha3" ? "selected" : ""}`} onClick={() => setEncryptKdfMethod("sha3")}>
-								<span className="option-title">SHA3</span>
-								<span className="option-desc">빠른 처리 (텍스트 권장)</span>
-							</button>
+								<div className="option-card selected" style={{ cursor: "default" }}>
+									<span className="option-title">Argon2id (Standard)</span>
+									<span className="option-desc">높은 보안 강도의 표준 키 유도 함수</span>
+								</div>
 							</div>
 						</div>
 						<div className="btn-row">
@@ -1219,19 +1200,7 @@ const App = () => {
 						<p className="section-desc">암호화된 데이터를 받을 사람을 선택하세요.</p>
 						<div className="form-group">
 							<label className="form-label">수신자</label>
-							<select value={encryptRecipientId} onChange={(e) => {
-								const value = e.target.value;
-								setEncryptRecipientId(value);
-								if (value) {
-									const selected = contacts.find((c) => c.id === value);
-									if (selected) {
-										const detectedAlgo = detectPublicKeyAlgo(selected.publicKey);
-										setEncryptAsymAlgo(detectedAlgo);
-									}
-								} else {
-									setEncryptAsymAlgo(null);
-								}
-							}}>
+							<select value={encryptRecipientId} onChange={(e) => setEncryptRecipientId(e.target.value)}>
 								<option value="">연락처에서 선택...</option>
 								{contacts.map((c) => (
 									<option key={c.id} value={c.id}>{c.contactUsername}</option>
@@ -1242,24 +1211,11 @@ const App = () => {
 						<div className="form-group">
 							<label className="form-label">비대칭 알고리즘</label>
 							<div className="option-cards">
-							<button
-								className={`option-card ${encryptAsymAlgo === "pqc1" ? "selected" : ""}`}
-								disabled
-							>
-								<span className="option-title">PQC</span>
-								<span className="option-desc">양자내성 하이브리드</span>
-								{encryptAsymAlgo === "pqc1" && <span className="option-badge">자동 선택</span>}
-							</button>
-							<button
-								className={`option-card ${encryptAsymAlgo === "ecc1" ? "selected" : ""}`}
-								disabled
-							>
-								<span className="option-title">Curve448</span>
-								<span className="option-desc">X448+Ed448 (호환)</span>
-								{encryptAsymAlgo === "ecc1" && <span className="option-badge">자동 선택</span>}
-							</button>
+								<div className="option-card selected" style={{ cursor: "default" }}>
+									<span className="option-title">PQC</span>
+									<span className="option-desc">차세대 표준 양자내성 암호</span>
+								</div>
 							</div>
-							<span className="form-hint">상대방의 공개키 형식에 따라 자동으로 선택됩니다</span>
 						</div>
 						<label className="checkbox-row">
 							<input

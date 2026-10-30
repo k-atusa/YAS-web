@@ -727,24 +727,6 @@ select {
 	background: rgba(15, 142, 93, 0.12);
 }
 
-.contact-algo-badge.algo-ecc1 {
-	color: #1276c8;
-	border-color: rgba(18, 118, 200, 0.35);
-	background: rgba(18, 118, 200, 0.12);
-}
-
-.contact-algo-badge.algo-rsa1 {
-	color: #c17d12;
-	border-color: rgba(193, 125, 18, 0.35);
-	background: rgba(193, 125, 18, 0.12);
-}
-
-.contact-algo-badge.algo-rsa2 {
-	color: #a24b8c;
-	border-color: rgba(162, 75, 140, 0.35);
-	background: rgba(162, 75, 140, 0.12);
-}
-
 .contact-meta-row {
 	display: flex;
 	align-items: center;

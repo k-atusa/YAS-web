@@ -1,6 +1,6 @@
 # YAS-web
 
-Encrypted-key storage & client-side encryption platform. Key pairs (PQC / Curve448) are generated in the browser, the private key is wrapped with a PBKDF2-derived AES-GCM key, and only ciphertext plus KDF metadata ever reach the server. A JWT-protected API lets you sync encrypted key material, manage contacts, and authenticate via WebAuthn passkeys.
+Encrypted-key storage & client-side encryption platform. Key pairs (PQC) are generated in the browser, the private key is wrapped with a PBKDF2-derived AES-GCM key, and only ciphertext plus KDF metadata ever reach the server. A JWT-protected API lets you sync encrypted key material, manage contacts, and authenticate via WebAuthn passkeys.
 
 ## Architecture
 - **Backend**: Go (`net/http` + `chi` router) + SQLite (`modernc.org/sqlite`).
@@ -53,7 +53,7 @@ All settings have safe defaults, so **no `.env` file is required** to run locall
 
 To customize settings (e.g. in production), create a `.env` file in the same directory as the binary (see `.env.example`):
 - `PORT` – Server port (default: `4000`)
-- `JWT_SECRET` – Secret key for JWT signing (optional; auto-generated random 32-byte secret in memory if omitted)
 - `DOMAIN` – Domain name for WebAuthn passkeys (default: `localhost`, set to your domain like `example.com` in production)
+- `JWT_SECRET` – Secret key for JWT signing (optional; auto-generated random 32-byte secret in memory if omitted)
 
 *(SQLite database is automatically stored in `./data/yas-web.db`)*

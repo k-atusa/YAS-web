@@ -1,4 +1,3 @@
-import { base64ToU8 } from "./crypto";
 import type { AsymAlgo } from "./crypto";
 
 export const formatBytes = (bytes: number): string => {
@@ -29,30 +28,10 @@ export const maskKey = (keyPem: string): string => {
 	return `${firstPart}\n\n... [ ${(keyPem.length - 120).toLocaleString()}자 생략됨 ] ...\n\n${lastPart}`;
 };
 
-export const detectPublicKeyAlgo = (publicKeyB64: string): AsymAlgo => {
-	try {
-		const u8 = base64ToU8(publicKeyB64);
-		// PQC1 public key is exactly 4273 bytes
-		if (u8.length === 4273) return "pqc1";
-		// Curve448 public key is exactly 113 bytes
-		if (u8.length === 113) return "ecc1";
-		// Default to ecc1 (only remaining option)
-		return "ecc1";
-	} catch {
-		return "ecc1";
-	}
+export const detectPublicKeyAlgo = (_publicKeyB64: string): AsymAlgo => {
+	return "pqc1";
 };
 
-export const detectPrivateKeyAlgo = (privateKeyB64: string): AsymAlgo => {
-	try {
-		const u8 = base64ToU8(privateKeyB64);
-		// PQC1 private key is exactly 8177 bytes
-		if (u8.length === 8177) return "pqc1";
-		// Curve448 private key is exactly 113 bytes
-		if (u8.length === 113) return "ecc1";
-		// Default to ecc1
-		return "ecc1";
-	} catch {
-		return "ecc1";
-	}
+export const detectPrivateKeyAlgo = (_privateKeyB64: string): AsymAlgo => {
+	return "pqc1";
 };

@@ -1,6 +1,5 @@
 import { maskKey, truncateKey } from "../../helpers";
 import type { AccountRecord } from "../../types";
-import type { AsymAlgo } from "../../crypto";
 
 type KeysTabProps = {
 	storedAccount: AccountRecord | null;
@@ -10,12 +9,10 @@ type KeysTabProps = {
 	copyPublicStatus: "idle" | "copied" | "error";
 	copyPrivateStatus: "idle" | "copied" | "error";
 	keyGenStep: number;
-	keyAlgo: AsymAlgo;
 	publicKeyPem: string;
 	privateKeyPem: string;
 	canUpload: boolean;
 	busy: boolean;
-	onSetKeyAlgo: (algo: AsymAlgo) => void;
 	onGenerateKeys: () => void;
 	onUpload: () => void;
 	onRegenerate: () => void;
@@ -35,12 +32,10 @@ export const KeysTab = ({
 	copyPublicStatus,
 	copyPrivateStatus,
 	keyGenStep,
-	keyAlgo,
 	publicKeyPem,
 	privateKeyPem,
 	canUpload,
 	busy,
-	onSetKeyAlgo,
 	onGenerateKeys,
 	onUpload,
 	onRegenerate,
@@ -118,14 +113,10 @@ export const KeysTab = ({
 					<div className="form-group">
 						<label className="form-label">키 알고리즘</label>
 						<div className="option-cards">
-							<button className={`option-card ${keyAlgo === "pqc1" ? "selected" : ""}`} onClick={() => onSetKeyAlgo("pqc1")}>
+							<div className="option-card selected" style={{ cursor: "default" }}>
 								<span className="option-title">PQC</span>
 								<span className="option-desc">차세대 표준 양자내성 암호</span>
-							</button>
-							<button className={`option-card ${keyAlgo === "ecc1" ? "selected" : ""}`} onClick={() => onSetKeyAlgo("ecc1")}>
-								<span className="option-title">Curve448</span>
-								<span className="option-desc">타원곡선 암호</span>
-							</button>
+							</div>
 						</div>
 					</div>
 					<div className="btn-row">
