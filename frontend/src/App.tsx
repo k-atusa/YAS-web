@@ -1,6 +1,6 @@
 import { KeysTab } from "./components/tabs/KeysTab";
-import { get24HoursLater, formatBytes, truncateKey, detectPublicKeyAlgo, detectPrivateKeyAlgo } from "./helpers";
-import { IconContacts, IconMessages, IconKey, IconEncrypt, IconDecrypt } from "./icons";
+import { formatBytes, truncateKey, detectPublicKeyAlgo, detectPrivateKeyAlgo } from "./helpers";
+import { IconContacts, IconKey, IconEncrypt, IconDecrypt } from "./icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import SparkMD5 from "spark-md5";
 import {
@@ -8,9 +8,6 @@ import {
 	login as loginApi,
 	saveAccount,
 	signup,
-	uploadEncryptedFile,
-	getInboxFiles,
-	decryptTorDomain,
 	listContacts,
 	createContact,
 	deleteContact,
@@ -27,7 +24,6 @@ import {
 	decryptOpsecPw,
 	decryptOpsecPub,
 	detectAuthMode,
-	u8ToBase64,
 	base64ToU8,
 	encode64WithSplit,
 	decode64WithSplit,
@@ -42,7 +38,7 @@ import type { AccountRecord, ContactRecord } from "./types";
 
 /* ─── App ─── */
 
-type Tab = "contacts" | "keys" | "encrypt" | "decrypt" | "messages";
+type Tab = "contacts" | "keys" | "encrypt" | "decrypt";
 
 const App = () => {
 	/* Auth */
@@ -66,21 +62,11 @@ const App = () => {
 	const [showKeySection, setShowKeySection] = useState(true);
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
 	const [copyPrivateStatus, setCopyPrivateStatus] = useState<"idle" | "copied" | "error">("idle");
-	const [toastMsg, setToastMsg] = useState<string | null>(null);
-
-	function showToast(msg: string) {
-		setToastMsg(msg);
-		setTimeout(() => setToastMsg(null), 2500);
-	}
 	const [keyAlgo, setKeyAlgo] = useState<AsymAlgo>("pqc1");
 	const [keyGenStep, setKeyGenStep] = useState(1);
 
 	/* Contacts */
 	const [contacts, setContacts] = useState<ContactRecord[]>([]);
-	const [inboxFiles, setInboxFiles] = useState<any[]>([]);
-    const [decryptedTorLinks, setDecryptedTorLinks] = useState<Record<string, string>>({});
-    const [decryptTorLoadingId, setDecryptTorLoadingId] = useState<string | null>(null);
-	const [copiedTorFileId, setCopiedTorFileId] = useState<string | null>(null);
 	const [contactsLoading, setContactsLoading] = useState(false);
 	const [contactForm, setContactForm] = useState({ contactUsername: "", notes: "" });
 	const [contactError, setContactError] = useState<string | null>(null);
@@ -107,14 +93,9 @@ const App = () => {
 	const [encryptSignWithKey, setEncryptSignWithKey] = useState(false);
 	const [encryptBusy, setEncryptBusy] = useState(false);
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
-	const [encryptResultLink, setEncryptResultLink] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
-	const [shareExpiresDate, setShareExpiresDate] = useState(() => get24HoursLater().dateStr);
-        const [shareExpiresTime, setShareExpiresTime] = useState(() => get24HoursLater().timeStr);
-    const [shareMaxDownloads, setShareMaxDownloads] = useState("3");
-    const [showShareOptions, setShowShareOptions] = useState(false);
-    const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
-    const [encryptStep, setEncryptStep] = useState(1);
+	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
+	const [encryptStep, setEncryptStep] = useState(1);
 
 	/* Decrypt */
 	const [decryptPayloadInput, setDecryptPayloadInput] = useState("");
@@ -156,7 +137,6 @@ const App = () => {
 	const navKeysRef = useRef<HTMLButtonElement>(null);
 	const navEncryptRef = useRef<HTMLButtonElement>(null);
 	const navDecryptRef = useRef<HTMLButtonElement>(null);
-	const navMessagesRef = useRef<HTMLButtonElement>(null);
 	const [pressedTab, setPressedTab] = useState<Tab | null>(null);
 	/* Tooltip */
 	const [showUsernameTooltip, setShowUsernameTooltip] = useState(false);
@@ -198,7 +178,7 @@ const App = () => {
 
 	/* Animate navigation pill position + squish */
 	const updateNavHighlight = () => {
-		const refMap: Record<Tab, React.RefObject<HTMLButtonElement | null>> = { contacts: navContactsRef, keys: navKeysRef, messages: navMessagesRef, encrypt: navEncryptRef, decrypt: navDecryptRef };
+		const refMap: Record<Tab, React.RefObject<HTMLButtonElement | null>> = { contacts: navContactsRef, keys: navKeysRef, encrypt: navEncryptRef, decrypt: navDecryptRef };
 		const activeEl = refMap[tab]?.current;
 		const inner = navInnerRef.current;
 		if (!activeEl || !inner) return;
@@ -271,10 +251,8 @@ const App = () => {
 			if (!cancelled) { setContactsLoading(true); setContactError(null); }
 			try {
 				const items = await listContacts(authToken);
-				const inboxData = await getInboxFiles(authToken).catch(() => ({ files: [] }));
 				if (!cancelled) {
 					setContacts(items);
-					setInboxFiles(inboxData.files || []);
 				}
 			} catch (err) {
 				const msg = (err as Error).message || "연락처 불러오기 실패";
@@ -386,13 +364,6 @@ const App = () => {
 		setIsFileDragActive(false);
 		setEncryptStatus(null);
 		setEncryptError(null);
-		setEncryptResultLink(null);
-		setShowShareOptions(false);
-		
-		
-		setShareExpiresDate(get24HoursLater().dateStr);
-		setShareExpiresTime(get24HoursLater().timeStr);
-		setShareMaxDownloads("3");
 		setEncryptedBlob(null);
 		setEncryptStep(1);
 		setDecryptPayloadInput("");
@@ -432,19 +403,6 @@ const App = () => {
 		} catch {
 			setCopyPrivateStatus("error");
 			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
-		}
-	}
-
-	async function handleCopyTorLink(fileId: string, value?: string) {
-		if (!value) return;
-		try {
-			await navigator.clipboard.writeText(value);
-			setCopiedTorFileId(fileId);
-			setTimeout(() => {
-				setCopiedTorFileId((current) => (current === fileId ? null : current));
-			}, 2000);
-		} catch {
-			showToast("링크 복사 실패");
 		}
 	}
 
@@ -680,13 +638,6 @@ const App = () => {
 		setEncryptStep(1);
 		setEncryptStatus(null);
 		setEncryptError(null);
-		setEncryptResultLink(null);
-		setShowShareOptions(false);
-		
-		
-		setShareExpiresDate(get24HoursLater().dateStr);
-		setShareExpiresTime(get24HoursLater().timeStr);
-		setShareMaxDownloads("3");
 		setEncryptKdfMethod("arg2st");
 		setEncryptEncAlgo("gcm1");
 		setEncryptAsymAlgo(null);
@@ -1188,95 +1139,7 @@ const App = () => {
 		);
 	}
 
-	/* ─── Messages tab ─── */
-
-   async function handleRefreshInbox() {
-           if (!authToken) return;
-           try {
-                   const data = await getInboxFiles(authToken);
-                   setInboxFiles(data.files || []);
-           } catch(e) {
-                   console.error(e);
-           }
-   }
-
-   async function handleUnlockTorDomain(fileId: string) {
-           if (!authToken) return;
-           setDecryptTorLoadingId(fileId);
-           try {
-                   const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
-                   const options = optionsResp.options;
-                   const assertion = await authenticateWithWebAuthn({
-                           challenge: options.challenge, allowCredentials: options.allowCredentials || [],
-                           timeout: options.timeout, userVerification: options.userVerification,
-                   });
-                   const verifyResp = await verifyWebAuthnAuthentication(authToken, assertion.credentialId, assertion.counter);
-                   const activeToken = verifyResp.token;
-
-                   const res = await decryptTorDomain(authToken, fileId, activeToken);
-                   setDecryptedTorLinks(prev => ({ ...prev, [fileId]: res.torDomain }));
-           } catch(e: any) {
-                   console.error(e);
-                   alert(e.message || "Failed to unlock link");
-           } finally {
-                   setDecryptTorLoadingId(null);
-           }
-   }
-
-   function renderMessagesTab() {
-           return (
-                   <>
-                           <div className="section-header">
-                               <h2 className="section-title">메시지함</h2>
-                               <button className="btn btn-secondary btn-sm" onClick={handleRefreshInbox} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-                                   새로고침
-                               </button>
-                           </div>
-                           <p className="section-desc">수신된 암호화 파일 목록입니다.</p>
-                           {inboxFiles.length === 0 ? (
-                                   <div className="status-bar info">수신된 파일이 없습니다.</div>
-                           ) : (
-                                   <div className="card" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                                           {inboxFiles.map((f: any) => {
-                                                   const decryptedLink = decryptedTorLinks[f._id];
-                                                   return (
-                                                           <div key={f._id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: "14px" }}>
-                                                                   <div style={{ fontWeight: "bold", marginBottom: "7px" }}>파일명: {f.filename}</div>
-                                                                   <div style={{ fontSize: "13px", color: "var(--text-sub)" }}>만료시간: {new Date(f.expiresAt).toLocaleString()}</div>
-                                                                   <div style={{ fontSize: "13px", color: "var(--text-sub)", marginTop: "5px" }}>
-                                                                           다운로드 횟수: {Number(f.downloadCount ?? 0)} / {Number(f.maxDownloads ?? 1)}
-                   							</div>
-                                                                   <div style={{ marginTop: "10px" }}>
-                                                                          <label style={{ fontSize: "12px" }}>오니온 링크 (Tor)</label>
-                                                                          <div style={{ display: "flex", gap: "8px", marginTop: "4px", alignItems: "center" }}>
-                                                                          {decryptedLink ? (
-                                                                              <>
-                                                                                  <input type="text" readOnly className="form-input" value={decryptedLink} style={{ fontSize: "11px", marginTop: 0 }} />
-                                                                                  <button className="btn btn-secondary btn-sm" onClick={() => { void handleCopyTorLink(f._id, decryptedLink); }}>
-                                                                                     {copiedTorFileId === f._id ? "복사됨" : "복사"}
-                                                                                  </button>
-                                                                              </>
-                                                                          ) : (
-                                                                              <>
-                                                                                  <input type="password" readOnly className="form-input" value="••••••••••••••••••••••••••••••••" style={{ fontSize: "11px", marginTop: 0 }} />
-                                                                                  <button className="btn btn-primary btn-sm" onClick={() => handleUnlockTorDomain(f._id)} disabled={decryptTorLoadingId === f._id}>
-                                                                                      {decryptTorLoadingId === f._id ? "해제 중..." : "🔐 잠금 해제"}
-                                                                                  </button>
-                                                                              </>
-                                  						)}
-                          							</div>
-                   							</div>
-           							</div>
-                                                   );
-                                           })}
-                                   </div>
-                           )}
-                   </>
-           );
-   }
-
-   /* ─── Encrypt tab (wizard) ─── */
+	/* ─── Encrypt tab (wizard) ─── */
 
 	function renderEncryptTab() {
 		if (encryptedBlob) {
@@ -1303,117 +1166,9 @@ const App = () => {
 								<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>Base64 복사</button>
 							)}
 							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>다운로드</button>
-							<button className="btn btn-primary btn-sm" onClick={() => {
-								setEncryptError(null);
-								setEncryptStatus(null);
-								setShowShareOptions(true);
-							}}>공유하기</button>
 						</div>
 					</div>
-					{showShareOptions && (
-						<div className="card mt-3">
-							<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>공유 설정</h3>
-							<div className="form-group">
-								<label className="form-label">만료 날짜</label>
-								<input
-									type="date"
-									min={new Date().toISOString().split('T')[0]}
-									max="9999-12-31"
-									value={shareExpiresDate}
-									onChange={(e) => {
-										let val = e.target.value;
-										if (val && val.length > 10) {
-											const parts = val.split('-');
-											if (parts.length > 0 && parts[0].length > 4) {
-												parts[0] = parts[0].slice(0, 4);
-												val = parts.join('-');
-											}
-										}
-										setShareExpiresDate(val);
-									}}
-									onKeyDown={(e) => {
-										if (e.key >= '0' && e.key <= '9') {
-											const input = e.target as HTMLInputElement;
-											if (input.value.length >= 10 && input.selectionStart === 10) e.preventDefault();
-										}
-									}}
-									autoFocus
-									className="form-input"
-								/>
-							</div>
-							<div className="form-group">
-								<label className="form-label">만료 시각</label>
-								<input
-									type="time"
-									value={shareExpiresTime}
-									onChange={(e) => setShareExpiresTime(e.target.value)}
-									className="form-input"
-								/>
-							</div>
-							<div className="form-group">
-								<label className="form-label">다운로드 횟수 제한</label>
-								<input
-									type="number"
-									min={1}
-									step={1}
-									value={shareMaxDownloads}
-									onChange={(e) => setShareMaxDownloads(e.target.value)}
-									placeholder="예: 3"
-									className="form-input"
-								/>
-								<span className="form-hint">설정한 횟수만큼 다운로드되면 링크가 자동 만료됩니다.</span>
-							</div>
-							<div className="btn-row">
-								<button className="btn btn-secondary" onClick={() => setShowShareOptions(false)}>취소</button>
-								<button className="btn btn-primary" onClick={async () => {
-									try {
-										setEncryptError(null);
-										setEncryptStatus(null);
-
-										const maxDownloads = Number(shareMaxDownloads);
-										if (!shareExpiresDate || !shareExpiresTime) {
-											setEncryptError("만료 날짜와 시각을 모두 선택해주세요.");
-											return;
-										}
-										const expiresAt = new Date(`${shareExpiresDate}T${shareExpiresTime}`);
-										if (expiresAt <= new Date()) {
-											setEncryptError("만료 시간은 현재 시간 이후여야 합니다.");
-											return;
-										}
-										if (!Number.isInteger(maxDownloads) || maxDownloads <= 0) {
-											setEncryptError("다운로드 횟수 제한은 1 이상의 정수여야 합니다.");
-											return;
-										}
-
-										const b64 = u8ToBase64(encryptedBlob);
-										const md5Hash = SparkMD5.ArrayBuffer.hash(encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer);
-										const fn = `secure_file_${md5Hash.substring(0, 6)}.yas`;
-										
-										const res = await uploadEncryptedFile(authToken!, {
-											recipientId: encryptAuthMode === "publickey" ? encryptRecipientId : undefined,
-											filename: fn,
-											encryptedData: b64,
-											expiresAt: expiresAt.toISOString(),
-											maxDownloads,
-										});
-										setEncryptStatus("업로드 완료!");
-										setEncryptResultLink(res.torDomain);
-										setShowShareOptions(false);
-									} catch (err: any) {
-										setEncryptError(`업로드 실패: ${err.message}`);
-									}
-								}}>확인</button>
-							</div>
-							{encryptError && <div className="status-bar error mt-3">{encryptError}</div>}
-						</div>
-					)}
 					{encryptStatus && <div className="status-bar success mt-3">{encryptStatus}</div>}
-					{encryptResultLink && (
-						<div className="card mt-3">
-							<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>다운로드 링크 (Tor Onion)</h3>
-							<input type="text" readOnly className="form-input" value={encryptResultLink} style={{ fontSize: "14px", marginTop: "4px" }} />
-						</div>
-					)}
 					<div className="btn-row mt-3">
 						<button className="btn btn-primary" onClick={resetEncryptionForm}>처음으로</button>
 					</div>
@@ -1975,7 +1730,6 @@ const App = () => {
 		switch (tab) {
 			case "contacts": return renderContactsTab();
 			case "keys": return renderKeysTab();
-			case "messages": return renderMessagesTab();
 			case "encrypt": return renderEncryptTab();
 			case "decrypt": return renderDecryptTab();
 		}
@@ -2087,10 +1841,10 @@ const App = () => {
 
 			<nav className="pill-nav">
 				<div className="pill-nav-inner" ref={navInnerRef}>
-					{(["keys", "contacts", "messages", "encrypt", "decrypt"] as Tab[]).map((t) => {
-						const ref = { contacts: navContactsRef, keys: navKeysRef, messages: navMessagesRef, encrypt: navEncryptRef, decrypt: navDecryptRef }[t];
-						const Icon = { contacts: IconContacts, keys: IconKey, messages: IconMessages, encrypt: IconEncrypt, decrypt: IconDecrypt }[t];
-						const title = { contacts: "주소록", keys: "내 키", messages: "메시지", encrypt: "암호화", decrypt: "복호화" }[t];
+					{(["keys", "contacts", "encrypt", "decrypt"] as Tab[]).map((t) => {
+						const ref = { contacts: navContactsRef, keys: navKeysRef, encrypt: navEncryptRef, decrypt: navDecryptRef }[t];
+						const Icon = { contacts: IconContacts, keys: IconKey, encrypt: IconEncrypt, decrypt: IconDecrypt }[t];
+						const title = { contacts: "주소록", keys: "내 키", encrypt: "암호화", decrypt: "복호화" }[t];
 						return (
 							<button
 								key={t}
@@ -2113,8 +1867,6 @@ const App = () => {
 			<div className="view-animate" key={tab}>
 				{renderTabContent()}
 			</div>
-
-			{toastMsg && <div className="toast-message">{toastMsg}</div>}
 
 			{/* Contact modal */}
 			{(contactModalOpen || contactModalClosing) && (

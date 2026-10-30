@@ -1,25 +1,21 @@
 # syntax=docker/dockerfile:1.8
-FROM node:26-bookworm-slim AS build
+FROM golang:1.27-bookworm AS build
 WORKDIR /app
-COPY package*.json ./
-COPY tsconfig*.json ./
-RUN npm install
-COPY src ./src
-RUN npm run build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/server ./cmd/server
 
-FROM node:26-bookworm-slim AS runner
+FROM debian:bookworm-slim AS runner
 WORKDIR /app
-ENV NODE_ENV=production
 ENV PORT=7001
+ENV DB_PATH=/app/data/yas-web.db
 
-# Install Tor
-RUN apt-get update && apt-get install -y tor && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /app/data
 
-COPY package*.json ./
-RUN npm install --omit=dev && npm cache clean --force
-COPY --from=build /app/dist ./dist
-COPY start.sh ./start.sh
-RUN chmod +x ./start.sh
+COPY --from=build /app/server ./server
+RUN chmod +x ./server
 
 EXPOSE 7001
-CMD ["./start.sh"]
+CMD ["./server"]

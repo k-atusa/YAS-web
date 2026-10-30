@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && mkdir -p ../backend/internal/webui/static && rm -rf ../backend/internal/webui/static/* && cp -R dist/* ../backend/internal/webui/static/",
     "preview": "vite preview"
   },
   "dependencies": {

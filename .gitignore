@@ -1,4 +1,9 @@
 uploads/
+data/
+*.db
+*.db-shm
+*.db-wal
+backend/server
 # Logs
 logs
 *.log

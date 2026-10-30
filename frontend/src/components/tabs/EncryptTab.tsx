@@ -19,12 +19,7 @@ type EncryptTabProps = {
 	encryptSignWithKey: boolean;
 	encryptBusy: boolean;
 	encryptStatus: string | null;
-	encryptResultLink: string | null;
 	encryptError: string | null;
-	shareExpiresDate: string;
-	shareExpiresTime: string;
-	shareMaxDownloads: string;
-	showShareOptions: boolean;
 	encryptStep: number;
 	contacts: ContactRecord[];
 	webauthnAuthBusy: boolean;
@@ -37,9 +32,6 @@ type EncryptTabProps = {
 	onSetEncryptRecipientId: (value: string) => void;
 	onSetEncryptMsg: (value: string) => void;
 	onSetEncryptSmsg: (value: string) => void;
-	onSetShareExpiresDate: (value: string) => void;
-	onSetShareExpiresTime: (value: string) => void;
-	onSetShareMaxDownloads: (value: string) => void;
 	onToggleSignWithKey: (checked: boolean) => void;
 	onEncryptionModeChange: (mode: "text" | "file") => void;
 	onApplySelectedEncryptFile: (file: File | null) => void;
@@ -51,9 +43,6 @@ type EncryptTabProps = {
 	onEncryptSubmit: () => void;
 	onDownloadEncryptedBlob: () => void;
 	onCopyEncryptedBase64: () => void;
-	onOpenShareOptions: () => void;
-	onCloseShareOptions: () => void;
-	onShareConfirm: () => void;
 	onResetEncryptionForm: () => void;
 	onSetEncryptError: (value: string | null) => void;
 	onSetEncryptStatus: (value: string | null) => void;
@@ -75,12 +64,7 @@ export const EncryptTab = ({
 	encryptSignWithKey,
 	encryptBusy,
 	encryptStatus,
-	encryptResultLink,
 	encryptError,
-	shareExpiresDate,
-	shareExpiresTime,
-	shareMaxDownloads,
-	showShareOptions,
 	encryptStep,
 	contacts,
 	webauthnAuthBusy,
@@ -93,9 +77,6 @@ export const EncryptTab = ({
 	onSetEncryptRecipientId,
 	onSetEncryptMsg,
 	onSetEncryptSmsg,
-	onSetShareExpiresDate,
-	onSetShareExpiresTime,
-	onSetShareMaxDownloads,
 	onToggleSignWithKey,
 	onEncryptionModeChange,
 	onApplySelectedEncryptFile,
@@ -107,9 +88,6 @@ export const EncryptTab = ({
 	onEncryptSubmit,
 	onDownloadEncryptedBlob,
 	onCopyEncryptedBase64,
-	onOpenShareOptions,
-	onCloseShareOptions,
-	onShareConfirm,
 	onResetEncryptionForm,
 	onSetEncryptError,
 	onSetEncryptStatus,
@@ -143,82 +121,9 @@ export const EncryptTab = ({
 						<button className="btn btn-secondary btn-sm" onClick={onDownloadEncryptedBlob}>
 							다운로드
 						</button>
-						<button className="btn btn-primary btn-sm" onClick={onOpenShareOptions}>
-							공유하기
-						</button>
 					</div>
 				</div>
-				{showShareOptions && (
-					<div className="card mt-3">
-						<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>공유 설정</h3>
-						<div className="form-group">
-							<label className="form-label">만료 날짜</label>
-							<input
-								type="date"
-								min={new Date().toISOString().split("T")[0]}
-								max="9999-12-31"
-								value={shareExpiresDate}
-								onChange={(e) => {
-									let val = e.target.value;
-									if (val && val.length > 10) {
-										const parts = val.split("-");
-										if (parts.length > 0 && parts[0].length > 4) {
-											parts[0] = parts[0].slice(0, 4);
-											val = parts.join("-");
-										}
-									}
-									onSetShareExpiresDate(val);
-								}}
-								onKeyDown={(e) => {
-									if (e.key >= "0" && e.key <= "9") {
-										const input = e.target as HTMLInputElement;
-										if (input.value.length >= 10 && input.selectionStart === 10) e.preventDefault();
-									}
-								}}
-								autoFocus
-								className="form-input"
-							/>
-						</div>
-						<div className="form-group">
-							<label className="form-label">만료 시각</label>
-							<input
-								type="time"
-								value={shareExpiresTime}
-								onChange={(e) => onSetShareExpiresTime(e.target.value)}
-								className="form-input"
-							/>
-						</div>
-						<div className="form-group">
-							<label className="form-label">다운로드 횟수 제한</label>
-							<input
-								type="number"
-								min={1}
-								step={1}
-								value={shareMaxDownloads}
-								onChange={(e) => onSetShareMaxDownloads(e.target.value)}
-								placeholder="예: 3"
-								className="form-input"
-							/>
-							<span className="form-hint">설정한 횟수만큼 다운로드되면 링크가 자동 만료됩니다.</span>
-						</div>
-						<div className="btn-row">
-							<button className="btn btn-secondary" onClick={onCloseShareOptions}>
-								취소
-							</button>
-							<button className="btn btn-primary" onClick={onShareConfirm}>
-								확인
-							</button>
-						</div>
-						{encryptError && <div className="status-bar error mt-3">{encryptError}</div>}
-					</div>
-				)}
 				{encryptStatus && <div className="status-bar success mt-3">{encryptStatus}</div>}
-				{encryptResultLink && (
-					<div className="card mt-3">
-						<h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>다운로드 링크 (Tor Onion)</h3>
-						<input type="text" readOnly className="form-input" value={encryptResultLink} style={{ fontSize: "14px", marginTop: "4px" }} />
-					</div>
-				)}
 				<div className="btn-row mt-3">
 					<button className="btn btn-primary" onClick={onResetEncryptionForm}>
 						처음으로

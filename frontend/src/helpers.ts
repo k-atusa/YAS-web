@@ -1,15 +1,6 @@
 import { base64ToU8 } from "./crypto";
 import type { AsymAlgo } from "./crypto";
 
-export const get24HoursLater = () => {
-	const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
-	const pad = (n: number) => n.toString().padStart(2, "0");
-	return {
-		dateStr: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-		timeStr: `${pad(d.getHours())}:${pad(d.getMinutes())}`
-	};
-};
-
 export const formatBytes = (bytes: number): string => {
 	if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
 	const units = ["B", "KB", "MB", "GB", "TB"];
