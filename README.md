@@ -17,12 +17,12 @@ Prereqs: Go 1.27+ (and Node 18+ if rebuilding the frontend).
 ### Single-binary execution (Backend + Embedded Frontend)
 The compiled frontend (`index.html`, JS, CSS) is embedded directly into the Go binary via `embed.FS`.
 ```bash
-# Build frontend + embed into Go binary
+# Build frontend + embed into Go binary (v2.0.0)
 cd frontend && npm install && npm run build && cd ..
-cd backend && go build -o ../server ./cmd/server && cd ..
+cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../yas-web-2.0.0-$(go env GOOS)-$(go env GOARCH) ./cmd/server && cd ..
 
 # Run both frontend & backend at once (default http://localhost:4000)
-./server
+./yas-web-2.0.0-darwin-arm64
 ```
 
 ## Environment variables
