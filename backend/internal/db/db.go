@@ -258,15 +258,6 @@ func GetAccountByUsername(username string) (*models.Account, error) {
 	return scanAccount(row)
 }
 
-func GetAccountByID(id string) (*models.Account, error) {
-	row := DB.QueryRow(
-		`SELECT id, username, public_key, encrypted_private_key, kdf, notes, created_at, updated_at
-		 FROM keys WHERE id = ?`,
-		id,
-	)
-	return scanAccount(row)
-}
-
 func scanAccount(row *sql.Row) (*models.Account, error) {
 	var a models.Account
 	var encKeyRaw, kdfRaw string
@@ -304,22 +295,6 @@ func ListContactsByOwner(ownerID string) ([]models.Contact, error) {
 		contacts = append(contacts, c)
 	}
 	return contacts, rows.Err()
-}
-
-func GetContactByID(id string) (*models.Contact, error) {
-	var c models.Contact
-	err := DB.QueryRow(
-		`SELECT id, owner_id, owner_username, contact_username, public_key, label, notes, created_at, updated_at
-		 FROM contacts WHERE id = ?`,
-		id,
-	).Scan(&c.ID, &c.OwnerID, &c.OwnerUsername, &c.ContactUsername, &c.PublicKey, &c.Label, &c.Notes, &c.CreatedAt, &c.UpdatedAt)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return &c, nil
 }
 
 func UpsertContact(ownerID, ownerUsername, contactUsername, publicKey, label, notes string) (*models.Contact, bool, error) {

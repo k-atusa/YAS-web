@@ -15,11 +15,7 @@ import (
 
 	"yas-web-backend/internal/config"
 	"yas-web-backend/internal/db"
-	"yas-web-backend/internal/middleware"
-	"yas-web-backend/internal/routes"
-	"yas-web-backend/internal/webui"
 
-	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -28,50 +24,20 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	tmpDir := t.TempDir()
 
 	config.App = config.Config{
-		Port:         4000,
-		DBPath:       filepath.Join(tmpDir, "test.db"),
-		CorsOrigin:   "*",
-		JWTSecret:    "test-secret-key",
-		WebAuthnRPID: "localhost",
+		Port:      4000,
+		DBPath:    filepath.Join(tmpDir, "test.db"),
+		JWTSecret: "test-secret-key",
+		Domain:    "localhost",
 	}
 
 	if err := db.Connect(config.App.DBPath); err != nil {
 		t.Fatalf("failed to connect db: %v", err)
 	}
 
-	r := chi.NewRouter()
-	r.Use(middleware.SecurityHeaders)
-	r.Use(middleware.CORS)
-
-	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		middleware.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	r.Mount("/api/auth", routes.AuthRouter())
-	r.Mount("/api/accounts", routes.AccountsRouter())
-	r.Mount("/api/contacts", routes.ContactsRouter())
-	r.Mount("/api/webauthn", routes.WebAuthnRouter())
-
-	embeddedFS, err := webui.FS()
+	r, err := newRouter()
 	if err != nil {
-		t.Fatalf("failed to load embedded frontend: %v", err)
+		t.Fatalf("failed to build router: %v", err)
 	}
-	embeddedFileServer := http.FileServer(http.FS(embeddedFS))
-
-	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			http.NotFound(w, r)
-			return
-		}
-		cleanPath := strings.TrimPrefix(r.URL.Path, "/")
-		if cleanPath != "" {
-			if f, err := embeddedFS.Open(cleanPath); err == nil {
-				_ = f.Close()
-				embeddedFileServer.ServeHTTP(w, r)
-				return
-			}
-		}
-		serveEmbeddedIndexHTML(w, r, embeddedFS)
-	})
 
 	return httptest.NewServer(r)
 }
@@ -168,23 +134,16 @@ func TestEndToEndFlow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 5. Decrypt Alice's Private Key
+	// 5. Verify that decrypt fails with standard login token
 	decBody, _ := json.Marshal(map[string]string{"username": "alice"})
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
 	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("decrypt account failed: %v, status=%d", err, resp.StatusCode)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("decrypt with login token should fail with 401, got status=%d", resp.StatusCode)
 	}
-	var decRes struct {
-		PrivateKey string `json:"privateKey"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&decRes)
 	resp.Body.Close()
-	if decRes.PrivateKey != plainPrivKey {
-		t.Fatalf("decrypted private key mismatch: got %q", decRes.PrivateKey)
-	}
 
 	// 6. WebAuthn Register + Authenticate
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/register-options", nil)
@@ -222,6 +181,42 @@ func TestEndToEndFlow(t *testing.T) {
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("webauthn authenticate-verify failed: %v, status=%d", err, resp.StatusCode)
+	}
+	var authVerifyRes struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&authVerifyRes)
+	resp.Body.Close()
+	if authVerifyRes.Token == "" {
+		t.Fatalf("expected decryption token from webauthn authenticate-verify")
+	}
+
+	// 7. Decrypt Alice's Private Key using the WebAuthn Decryption Token
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authVerifyRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("decrypt account with passkey token failed: %v, status=%d", err, resp.StatusCode)
+	}
+	var decRes struct {
+		PrivateKey string `json:"privateKey"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&decRes)
+	resp.Body.Close()
+	if decRes.PrivateKey != plainPrivKey {
+		t.Fatalf("decrypted private key mismatch: got %q", decRes.PrivateKey)
+	}
+
+	// 8. Verify that decrypting another user's account with Alice's token fails with 403
+	decBodyBob, _ := json.Marshal(map[string]string{"username": "bob"})
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBodyBob))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authVerifyRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("decrypting another username should return 403, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
 }

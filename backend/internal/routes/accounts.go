@@ -17,6 +17,7 @@ import (
 	"yas-web-backend/internal/db"
 	"yas-web-backend/internal/middleware"
 	"yas-web-backend/internal/models"
+	"yas-web-backend/internal/webauthn"
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/pbkdf2"
@@ -25,9 +26,8 @@ import (
 func AccountsRouter() http.Handler {
 	r := chi.NewRouter()
 	r.With(middleware.RequireAuth).Post("/", handleUpsertAccount)
-	r.With(middleware.RequireAuth).Post("/decrypt", handleDecryptAccount)
+	r.Post("/decrypt", handleDecryptAccount)
 	r.Get("/username/{username}", handleGetAccountByUsername)
-	r.Get("/{id}", handleGetAccountByID)
 	return r
 }
 
@@ -150,25 +150,17 @@ func handleGetAccountByUsername(w http.ResponseWriter, r *http.Request) {
 	middleware.WriteJSON(w, http.StatusOK, acc)
 }
 
-func handleGetAccountByID(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	acc, err := db.GetAccountByID(id)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "Not found"})
-			return
-		}
-		log.Printf("Lookup failed: %v", err)
-		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to fetch account"})
+func handleDecryptAccount(w http.ResponseWriter, r *http.Request) {
+	header := r.Header.Get("Authorization")
+	if header == "" || !strings.HasPrefix(strings.ToLower(header), "bearer ") {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
 		return
 	}
-	middleware.WriteJSON(w, http.StatusOK, acc)
-}
+	tokenStr := strings.TrimSpace(header[len("bearer "):])
 
-func handleDecryptAccount(w http.ResponseWriter, r *http.Request) {
-	requester := middleware.GetUser(r)
-	if requester == nil || requester.Sub == "" {
-		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+	userID, err := webauthn.VerifyDecryptionToken(tokenStr)
+	if err != nil {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Invalid or expired decryption token"})
 		return
 	}
 
@@ -177,6 +169,12 @@ func handleDecryptAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Username) == "" {
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid payload"})
+		return
+	}
+
+	user, err := db.GetUserByID(userID)
+	if err != nil || user.Username != body.Username {
+		middleware.WriteJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
 		return
 	}
 

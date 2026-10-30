@@ -25,11 +25,11 @@ No Go or Node.js runtime is required.
 
 3. Run the binary (starts both backend API & embedded frontend on default `http://localhost:4000`):
    ```bash
-   # Linux / macOS
-   ./yas-web-2.0.0-<os>-<arch>
+   # Linux / macOS (wildcard matches any downloaded version)
+   ./yas-web-*
 
    # Windows (PowerShell / Command Prompt)
-   .\yas-web-2.0.0-windows-<arch>.exe
+   .\yas-web-*.exe
    ```
 
 ### 2. Manual Build from Source
@@ -42,18 +42,18 @@ The compiled frontend (`index.html`, JS, CSS) is embedded directly into the Go b
 cd frontend && npm install && npm run build && cd ..
 
 # 2. Build Go single-binary with embedded frontend
-cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../yas-web-2.0.0-$(go env GOOS)-$(go env GOARCH) ./cmd/server && cd ..
+cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../yas-web-$(go env GOOS)-$(go env GOARCH) ./cmd/server && cd ..
 
 # 3. Run the compiled binary for your current OS & architecture
-./yas-web-2.0.0-$(go env GOOS)-$(go env GOARCH)
+./yas-web-*
 ```
 
 ## Environment variables
-- `backend/.env`
-  - `DB_PATH` – SQLite database file path (default `./data/yas-web.db`)
-  - `PORT` – API port (default `4000`, `.env.example` sets `7001`)
-  - `JWT_SECRET` – signing key for auth tokens (required in prod)
-  - `CORS_ORIGIN` – frontend origin allowed by CORS (default `*`)
-  - `WEBAUTHN_RP_ID` – WebAuthn Relying Party ID (default `localhost`)
-- `frontend/.env`
-  - `VITE_API_BASE` – base URL for API requests (default `http://localhost:4000/api`)
+All settings have safe defaults, so **no `.env` file is required** to run locally.
+
+To customize settings (e.g. in production), create a `.env` file in the same directory as the binary (see `.env.example`):
+- `PORT` – Server port (default: `4000`)
+- `JWT_SECRET` – Secret key for JWT signing (recommended in production)
+- `DOMAIN` – Domain name for WebAuthn passkeys (default: `localhost`, set to your domain like `example.com` in production)
+
+*(SQLite database is automatically stored in `./data/yas-web.db`)*

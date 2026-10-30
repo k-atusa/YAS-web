@@ -179,14 +179,9 @@ export const KeysTab = ({
 						<button className="btn btn-secondary" onClick={() => onSetKeyGenStep(1)}>
 							이전
 						</button>
-						<div style={{ display: "flex", gap: "10px", marginLeft: "auto" }}>
-							<button className="btn btn-secondary" onClick={() => onSetKeyGenStep(1)}>
-								다시 생성
-							</button>
-							<button className="btn btn-primary" onClick={onUpload} disabled={!canUpload || busy}>
-								{busy ? "처리 중..." : "암호화하여 저장"}
-							</button>
-						</div>
+						<button className="btn btn-primary" onClick={onUpload} disabled={!canUpload || busy}>
+							{busy ? "처리 중..." : "암호화하여 저장"}
+						</button>
 					</div>
 					{status && <div className="status-bar success mt-3">{status}</div>}
 					{error && <div className="status-bar error mt-3">{error}</div>}

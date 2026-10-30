@@ -46,27 +46,6 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func CORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := config.App.CorsOrigin
-		if origin == "" {
-			origin = "*"
-		}
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-CSRF-Token")
-		if origin != "*" {
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		}
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func MaxBodyBytes(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,16 +67,11 @@ func RequireAuth(next http.Handler) http.Handler {
 		}
 
 		tokenStr := strings.TrimSpace(header[len("bearer "):])
-		secret := config.App.JWTSecret
-		if secret == "" {
-			secret = "dev-secret"
-		}
-
 		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, errors.New("unexpected signing method")
 			}
-			return []byte(secret), nil
+			return []byte(config.App.JWTSecret), nil
 		})
 		if err != nil || !token.Valid {
 			log.Printf("[requireAuth] Token verification failed: %v", err)

@@ -204,31 +204,6 @@ export async function verifyWebAuthnAuthentication(
   return response.json();
 }
 
-export async function listWebAuthnCredentials(token: string): Promise<Array<{ id: string; transports: string[] }>> {
-  const response = await fetch(`${API_BASE}/webauthn/credentials`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || "Failed to list credentials");
-  }
-
-  return response.json().then((data) => data.credentials);
-}
-
-export async function removeWebAuthnCredential(token: string, credentialId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/webauthn/credentials/${encodeURIComponent(credentialId)}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || "Failed to remove credential");
-  }
-}
-
 export async function decryptStoredPrivateKey(username: string, token: string): Promise<{ privateKey: string }> {
   const response = await fetch(`${API_BASE}/accounts/decrypt`, {
     method: "POST",

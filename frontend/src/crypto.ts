@@ -49,7 +49,7 @@ declare global {
 let _usagReady: Promise<UsagBundle> | null = null;
 
 /** Wait for USAG-lib (preloaded in index.html) to be ready. */
-export function waitForUsag(): Promise<UsagBundle> {
+function waitForUsag(): Promise<UsagBundle> {
   if (_usagReady) return _usagReady;
   _usagReady = new Promise<UsagBundle>((resolve, reject) => {
     if (typeof window === "undefined") {
@@ -79,10 +79,10 @@ export function waitForUsag(): Promise<UsagBundle> {
 export type AsymAlgo = "ecc1" | "pqc1";
 export type KdfMethod = "arg2low" | "arg2st" | "sha3";
 export type EncAlgo = "gcm1" | "gcmx1";
-export type PackAlgo = "zip1" | "tar1";
+type PackAlgo = "zip1" | "tar1";
 export type AuthMode = "password" | "publickey";
 
-export interface EncryptPasswordOptions {
+interface EncryptPasswordOptions {
   mode: "password";
   kdfMethod: KdfMethod;
   password: string;
@@ -93,7 +93,7 @@ export interface EncryptPasswordOptions {
   packAlgo?: PackAlgo;
 }
 
-export interface EncryptPublicKeyOptions {
+interface EncryptPublicKeyOptions {
   mode: "publickey";
   asymAlgo: AsymAlgo;
   peerPublicKey: string; // base64
@@ -120,7 +120,7 @@ export interface DecryptResult {
 const _enc = new TextEncoder();
 const _dec = new TextDecoder();
 
-export function u8ToBase64(u8: Uint8Array): string {
+function u8ToBase64(u8: Uint8Array): string {
   if (u8.length === 0) return "";
   const chunkSize = 0x8000;
   let bin = "";
@@ -139,53 +139,7 @@ export function base64ToU8(b64: string): Uint8Array {
   return u8;
 }
 
-export function encodeUtf8(data: string): ArrayBuffer {
-  return _enc.encode(data).buffer as ArrayBuffer;
-}
-export function decodeUtf8(buffer: ArrayBuffer): string {
-  return _dec.decode(buffer);
-}
-
 // ==================== YAS2 inner config helpers (used for detect + legacy) ====================
-
-/**
- * Encode the YAS2 inner config dictionary.
- * Format: for each entry: [keyLen:1B][keyBytes][dataLen:1B or 2B][dataBytes]
- *   - dataLen 1B when < 256
- *   - dataLen 2B (with keyLen+128 flag) when >= 256
- */
-function encodeCfg(data: Record<string, Uint8Array | string>): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  for (const [key, val] of Object.entries(data)) {
-    const valU8 = typeof val === "string" ? _enc.encode(val) : val;
-    const keyBytes = _enc.encode(key);
-    const kl = keyBytes.length;
-    const dl = valU8.length;
-    if (kl > 127) throw new Error(`Key length too long: ${kl}`);
-    if (dl > 65535) throw new Error(`Data size too big: ${dl}`);
-    if (dl > 255) {
-      chunks.push(new Uint8Array([kl + 128]));
-      chunks.push(keyBytes);
-      const sz = new Uint8Array(2);
-      new DataView(sz.buffer).setUint16(0, dl, true);
-      chunks.push(sz);
-    } else {
-      chunks.push(new Uint8Array([kl]));
-      chunks.push(keyBytes);
-      chunks.push(new Uint8Array([dl]));
-    }
-    chunks.push(valU8);
-  }
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.length;
-  }
-  return out;
-}
 
 /** Decode YAS2 inner config. Returns {key -> Uint8Array}. */
 function decodeCfg(data: Uint8Array): Record<string, Uint8Array> {
@@ -657,16 +611,6 @@ async function sha3_512(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
-async function sha3_256(data: Uint8Array): Promise<Uint8Array> {
-  const U = (window as any).USAG;
-  if (U?.bencrypt?.SHA3256) {
-    return U.bencrypt.SHA3256(data);
-  }
-  const subtle = (globalThis as any).crypto.subtle;
-  const buf = await subtle.digest("SHA-256", data);
-  return new Uint8Array(buf);
-}
-
 async function hmacSha3_512(key: Uint8Array, msg: Uint8Array): Promise<Uint8Array> {
   const B = 72;
   let k = key;
@@ -798,21 +742,6 @@ function symMasterLegacyDecrypt(hkey: Uint8Array, ehd: Uint8Array): Promise<Uint
   return legacyAesGcmDecrypt(hkey.slice(12), hkey.slice(0, 12), ehd);
 }
 
-function symMasterLegacyEncrypt(hkey: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  return legacyAesGcmEncrypt(hkey.slice(12), hkey.slice(0, 12), data);
-}
-
-async function legacyAesGcmEncrypt(
-  key: Uint8Array,
-  iv: Uint8Array,
-  data: Uint8Array
-): Promise<Uint8Array> {
-  const subtle = (globalThis as any).crypto.subtle;
-  const wk = await subtle.importKey("raw", asBuf(key), "AES-GCM", false, ["encrypt"]);
-  const res = await subtle.encrypt({ name: "AES-GCM", iv: asBuf(iv) }, wk, asBuf(data));
-  return new Uint8Array(res);
-}
-
 async function legacyAesGcmDecrypt(
   key: Uint8Array,
   iv: Uint8Array,
@@ -832,33 +761,6 @@ async function legacyAesGcmDecrypt(
 async function legacyBodyDecrypt(bodyKey: Uint8Array, enc: Uint8Array): Promise<Uint8Array> {
   // bodyKey is also 44B in legacy v1
   return symMasterLegacyDecrypt(bodyKey, enc);
-}
-
-function legacyEcc1Decrypt(myPri: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  // Legacy format: [1B PubLen][EphPub][Enc] -- only first 56B of pri
-  const keyLen = data[0];
-  const ephPub = data.slice(1, 1 + keyLen);
-  const enc = data.slice(1 + keyLen);
-  // Derive 44-byte AES key (X448 shared -> HMAC-SHA3-512 truncated to 44)
-  // We can't easily call noble here without re-importing; instead use USAG-lib's
-  // ECC1 (which expects [EphPub 56B][Enc], no length byte). Strip the length
-  // byte and delegate.
-  const U = (window as any).USAG;
-  if (!U) throw new Error("USAG-lib not ready");
-  const AsymMaster = U.bencrypt.AsymMaster as new (a: string) => {
-    Loadkey(pub: Uint8Array | null, pri: Uint8Array | null): Promise<void>;
-    Decrypt(d: Uint8Array): Promise<Uint8Array>;
-  };
-  const am = new AsymMaster("ecc1");
-  // Legacy pri is 113B (X448 56 + Ed448 57). USAG-lib accepts that too.
-  // We re-pack the ciphertext to USAG-lib's expected layout: [EphPub][Enc].
-  const repacked = new Uint8Array(ephPub.length + enc.length);
-  repacked.set(ephPub, 0);
-  repacked.set(enc, ephPub.length);
-  return (async () => {
-    await am.Loadkey(null, myPri);
-    return am.Decrypt(repacked);
-  })();
 }
 
 async function decryptOpsecPwLegacy(
@@ -942,57 +844,6 @@ async function decryptOpsecPwLegacy(
   return result;
 }
 
-/** Legacy publickey decryption (ecc1 / pqc1 only). RSA is not supported. */
-export async function decryptOpsecPubLegacy(
-  dataU8: Uint8Array,
-  myPrivateKey: string
-): Promise<DecryptResult> {
-  // Walk to YAS2 header
-  let pos = 0;
-  let hdrStart = -1;
-  let hdrSize = 0;
-  while (pos < dataU8.length) {
-    if (pos + 4 > dataU8.length) break;
-    const magic = _dec.decode(dataU8.slice(pos, pos + 4));
-    if (magic === "YAS2") {
-      const sizeBuf = dataU8.slice(pos + 4, pos + 6);
-      hdrSize = decodeIntLE(sizeBuf);
-      hdrStart = pos + 6;
-      if (hdrSize === 65535) {
-        const ext = dataU8.slice(pos + 6, pos + 8);
-        hdrSize += decodeIntLE(ext);
-        hdrStart = pos + 8;
-      }
-      break;
-    }
-    pos += 128;
-  }
-  if (hdrStart < 0) throw new Error("Invalid Opsec format: no YAS2 header");
-
-  const outerCfg = decodeCfg(dataU8.slice(hdrStart, hdrStart + hdrSize));
-  const algo = outerCfg["hal"] ? _dec.decode(outerCfg["hal"]) : "";
-  if (algo !== "ecc1" && algo !== "pqc1") {
-    throw new Error(`레거시 '${algo}' 알고리즘은 새 버전에서 지원하지 않습니다.`);
-  }
-  const ehd = outerCfg["ehd"];
-  const msg = outerCfg["msg"] ? _dec.decode(outerCfg["msg"]) : "";
-  if (!ehd) throw new Error("Missing ehd in legacy header");
-
-  const myPri = base64ToU8(myPrivateKey);
-  const decHeader = await legacyEcc1Decrypt(myPri, ehd);
-  const inner = parseLegacyInner(decHeader);
-
-  const result: DecryptResult = { msg, smsg: inner.smsg, files: [] };
-  if (inner.size >= 0 && inner.bodyKey.length > 0) {
-    const bodyOffset = hdrStart + hdrSize;
-    const enc = dataU8.slice(bodyOffset, bodyOffset + inner.size);
-    const dec = await legacyBodyDecrypt(inner.bodyKey, enc);
-    const packAlgo: PackAlgo = inner.contAlgo === "tar1" || inner.name === "tar1" ? "tar1" : "zip1";
-    result.files = await unpackBody(dec, packAlgo);
-  }
-  return result;
-}
-
 // ==================== Account private key encryption (UNRELATED to USAG-lib) ====================
 //
 // This protects a user's private key with PBKDF2-SHA256 + AES-GCM before sending
@@ -1027,7 +878,7 @@ function randomBytes(n: number): Uint8Array {
   return b;
 }
 
-export async function encryptPrivateKey(
+async function encryptPrivateKey(
   privateKeyB64: string,
   passphrase: string
 ): Promise<{ encryptedPrivateKey: EncryptedPrivateKey; kdf: KdfParameters }> {
@@ -1056,22 +907,6 @@ export async function encryptPrivateKey(
   };
 }
 
-export async function decryptPrivateKey(
-  encrypted: EncryptedPrivateKey,
-  kdf: KdfParameters,
-  passphrase: string
-): Promise<string> {
-  if (kdf.algorithm !== "PBKDF2") throw new Error(`Unsupported KDF: ${kdf.algorithm}`);
-  const salt = base64ToU8(kdf.salt);
-  const iterations = kdf.iterations ?? 310_000;
-  const keyLength = kdf.keyLength ?? 32;
-  const aesKey = await deriveStorageKey(passphrase, salt, iterations, keyLength);
-  const iv = base64ToU8(encrypted.iv);
-  const cipher = base64ToU8(encrypted.cipherText);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: asBuf(iv) }, aesKey, asBuf(cipher));
-  return _dec.decode(plain);
-}
-
 export async function buildAccountPayload(
   username: string,
   publicKeyB64: string,
@@ -1084,14 +919,14 @@ export async function buildAccountPayload(
 
 // ==================== WebAuthn utilities (UNRELATED to USAG-lib) ====================
 
-export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
-export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -1211,32 +1046,3 @@ export async function authenticateWithWebAuthn(options: {
 export function isWebAuthnAvailable(): boolean {
   return !!(window.PublicKeyCredential && navigator.credentials);
 }
-
-export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
-  return !!(
-    window.PublicKeyCredential &&
-    (await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())
-  );
-}
-
-// ==================== Type stubs to avoid TS errors (USAG-lib has no types) ====================
-//
-// We only use loose `any` access above; declare placeholder types so that
-// accidental strict-mode access yields a helpful message.
-type OpsecType = {
-  Msg: string;
-  Smsg: string;
-  BodyInfo: Uint8Array;
-  BodySize: number;
-  BodyAlgo: string;
-  BodyKey: Uint8Array;
-  _headAlgo: string;
-  _sign: Uint8Array;
-  Encpw(method: string, pw: Uint8Array, kf: Uint8Array): Promise<Uint8Array>;
-  Encpub(method: string, peerPub: Uint8Array, myPri: Uint8Array | null): Promise<Uint8Array>;
-  Decpw(pw: Uint8Array, kf: Uint8Array): Promise<void>;
-  Decpub(myPri: Uint8Array, myPub: Uint8Array | null, peerPub: Uint8Array | null): Promise<void>;
-  View(d: Uint8Array): void;
-  Read(ins: any, cut?: number): Promise<Uint8Array>;
-  Write(outs: any, head: Uint8Array): Promise<void>;
-};

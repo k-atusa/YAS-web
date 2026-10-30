@@ -1,4 +1,4 @@
-export type KdfAlgorithm = "PBKDF2" | "scrypt" | "argon2";
+type KdfAlgorithm = "PBKDF2" | "scrypt" | "argon2";
 
 export interface KdfParameters {
   algorithm: KdfAlgorithm;

@@ -20,16 +20,11 @@ func GenerateChallenge() string {
 }
 
 func GenerateRegistrationOptions(username, userID, challenge string) map[string]any {
-	rpID := config.App.WebAuthnRPID
-	if rpID == "" {
-		rpID = "localhost"
-	}
-
 	return map[string]any{
 		"challenge": challenge,
 		"rp": map[string]any{
 			"name": "YAS Web",
-			"id":   rpID,
+			"id":   config.App.Domain,
 		},
 		"user": map[string]any{
 			"id":          base64.StdEncoding.EncodeToString([]byte(userID)),
@@ -87,11 +82,6 @@ func GenerateDecryptionToken(userID string, expirySeconds int) (string, time.Tim
 	now := time.Now().UTC()
 	expiresAt := now.Add(time.Duration(expirySeconds) * time.Second)
 
-	secret := config.App.JWTSecret
-	if secret == "" {
-		secret = "dev-secret"
-	}
-
 	claims := jwt.MapClaims{
 		"sub":  userID,
 		"type": "decrypt",
@@ -99,7 +89,7 @@ func GenerateDecryptionToken(userID string, expirySeconds int) (string, time.Tim
 		"exp":  expiresAt.Unix(),
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := tok.SignedString([]byte(secret))
+	signed, err := tok.SignedString([]byte(config.App.JWTSecret))
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -107,16 +97,12 @@ func GenerateDecryptionToken(userID string, expirySeconds int) (string, time.Tim
 }
 
 func VerifyDecryptionToken(tokenStr string) (string, error) {
-	secret := config.App.JWTSecret
-	if secret == "" {
-		secret = "dev-secret"
-	}
 
 	tok, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
-		return []byte(secret), nil
+		return []byte(config.App.JWTSecret), nil
 	})
 	if err != nil || !tok.Valid {
 		return "", errors.New("invalid or expired token")

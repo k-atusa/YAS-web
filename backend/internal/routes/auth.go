@@ -37,10 +37,6 @@ type authRequest struct {
 }
 
 func signToken(userID, username string) (string, error) {
-	secret := config.App.JWTSecret
-	if secret == "" {
-		secret = "dev-secret"
-	}
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
 		"sub":      userID,
@@ -49,7 +45,7 @@ func signToken(userID, username string) (string, error) {
 		"exp":      now.Add(24 * time.Hour).Unix(),
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return tok.SignedString([]byte(secret))
+	return tok.SignedString([]byte(config.App.JWTSecret))
 }
 
 func handleSignup(w http.ResponseWriter, r *http.Request) {

@@ -3,44 +3,28 @@ package config
 import (
 	"bufio"
 	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Port         int
-	DBPath       string
-	CorsOrigin   string
-	JWTSecret    string
-	WebAuthnRPID string
-	FrontendDist string
+	Port      int
+	DBPath    string
+	JWTSecret string
+	Domain    string // WebAuthn relying-party ID (bare host name)
 }
 
 var App Config
 
 func Load() Config {
 	loadDotEnv(".env")
-	loadDotEnv("backend/.env")
+	loadDotEnv("../.env") // when started from backend/ via `go run`
 
 	port := 4000
-	if p := os.Getenv("PORT"); p != "" {
-		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
-			port = parsed
-		}
-	}
-
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = os.Getenv("SQLITE_PATH")
-	}
-	if dbPath == "" {
-		dbPath = "./data/yas-web.db"
-	}
-
-	corsOrigin := os.Getenv("CORS_ORIGIN")
-	if corsOrigin == "" {
-		corsOrigin = "*"
+	if p, err := strconv.Atoi(os.Getenv("PORT")); err == nil && p > 0 {
+		port = p
 	}
 
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -49,25 +33,32 @@ func Load() Config {
 		jwtSecret = "dev-secret"
 	}
 
-	rpID := os.Getenv("WEBAUTHN_RP_ID")
-	if rpID == "" {
-		rpID = "localhost"
-	}
-
-	frontendDist := os.Getenv("FRONTEND_DIST")
-	if frontendDist == "" {
-		frontendDist = "./public"
+	domain := cleanDomain(os.Getenv("DOMAIN"))
+	if domain == "" {
+		domain = "localhost"
 	}
 
 	App = Config{
-		Port:         port,
-		DBPath:       dbPath,
-		CorsOrigin:   corsOrigin,
-		JWTSecret:    jwtSecret,
-		WebAuthnRPID: rpID,
-		FrontendDist: frontendDist,
+		Port:      port,
+		DBPath:    "./data/yas-web.db",
+		JWTSecret: jwtSecret,
+		Domain:    domain,
 	}
 	return App
+}
+
+// cleanDomain accepts sloppy input like "https://example.com:4000/" and returns "example.com".
+func cleanDomain(d string) string {
+	d = strings.TrimSpace(d)
+	d = strings.TrimPrefix(d, "https://")
+	d = strings.TrimPrefix(d, "http://")
+	if idx := strings.Index(d, "/"); idx != -1 {
+		d = d[:idx]
+	}
+	if host, _, err := net.SplitHostPort(d); err == nil {
+		d = host
+	}
+	return d
 }
 
 func loadDotEnv(path string) {
@@ -83,13 +74,12 @@ func loadDotEnv(path string) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
 			continue
 		}
-		key := strings.TrimSpace(parts[0])
-		val := strings.TrimSpace(parts[1])
-		val = strings.Trim(val, `"'`)
+		key = strings.TrimSpace(key)
+		val = strings.Trim(strings.TrimSpace(val), `"'`)
 		if key != "" && os.Getenv(key) == "" {
 			_ = os.Setenv(key, val)
 		}

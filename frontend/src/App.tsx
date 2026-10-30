@@ -1,5 +1,5 @@
 import { KeysTab } from "./components/tabs/KeysTab";
-import { formatBytes, truncateKey, detectPublicKeyAlgo, detectPrivateKeyAlgo } from "./helpers";
+import { formatBytes, detectPublicKeyAlgo, detectPrivateKeyAlgo } from "./helpers";
 import { IconContacts, IconKey, IconEncrypt, IconDecrypt } from "./icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import SparkMD5 from "spark-md5";
@@ -30,7 +30,6 @@ import {
 	registerWebAuthnCredential,
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
-	isPlatformAuthenticatorAvailable,
 } from "./crypto";
 import type { AsymAlgo, KdfMethod, EncAlgo, AuthMode, DecryptResult } from "./crypto";
 import type { AccountRecord, ContactRecord } from "./types";
@@ -552,29 +551,6 @@ const App = () => {
 
 	/* ─── WebAuthn ─── */
 
-	async function startWebAuthnRegistration() {
-		if (!authToken) { setError("로그인이 필요합니다"); return; }
-		try {
-			const optionsResp = await getWebAuthnRegisterOptions(authToken);
-			const options = optionsResp.options;
-			setStatus("보안 키를 사용하세요...");
-			const registration = await registerWebAuthnCredential({
-				challenge: options.challenge, rp: options.rp, user: options.user,
-				pubKeyCredParams: options.pubKeyCredParams, timeout: options.timeout,
-				attestation: options.attestation, authenticatorSelection: options.authenticatorSelection,
-			});
-			setStatus("보안 키 확인 중...");
-			await verifyWebAuthnRegistration(authToken, registration.credentialId, registration.publicKey, registration.counter, registration.transports);
-			setStatus("보안 키가 등록되었습니다!");
-			setError(null);
-			setTimeout(() => setStatus(null), 3000);
-		} catch (err) {
-			const msg = (err as Error).message || "보안 키 등록 실패";
-			if (msg !== "WebAuthn registration cancelled") setError(`보안 키 설정: ${msg}`);
-			setStatus(null);
-		}
-	}
-
 	async function handleWebAuthnAuthenticate() {
 		await requestPrivateKeyAccess("decrypt");
 	}
@@ -1007,17 +983,6 @@ const App = () => {
 				</div>
 			</div>
 		);
-	}
-
-	/* ─── Utils ─── */
-	function maskKey(keyPem: string): string {
-		if (!keyPem) return "";
-		if (keyPem.length <= 150) return keyPem;
-		
-		const firstPart = keyPem.substring(0, 60).trim();
-		const lastPart = keyPem.substring(keyPem.length - 60).trim();
-		
-		return `${firstPart}\n\n... [ ${(keyPem.length - 120).toLocaleString()}자 생략됨 ] ...\n\n${lastPart}`;
 	}
 
 	/* ─── Render: Main App ─── */

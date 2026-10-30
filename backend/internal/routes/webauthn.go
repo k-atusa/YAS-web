@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"net/url"
 
 	"yas-web-backend/internal/db"
 	"yas-web-backend/internal/middleware"
@@ -22,8 +21,6 @@ func WebAuthnRouter() http.Handler {
 	r.Post("/register-verify", handleRegisterVerify)
 	r.Post("/authenticate-options", handleAuthenticateOptions)
 	r.Post("/authenticate-verify", handleAuthenticateVerify)
-	r.Get("/credentials", handleListCredentials)
-	r.Delete("/credentials/{credentialId}", handleDeleteCredential)
 	return r
 }
 
@@ -229,85 +226,4 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 		"token":     token,
 		"expiresAt": expiresAt,
 	})
-}
-
-func handleListCredentials(w http.ResponseWriter, r *http.Request) {
-	reqUser := middleware.GetUser(r)
-	if reqUser == nil || reqUser.Sub == "" {
-		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
-		return
-	}
-
-	user, err := db.GetUserByID(reqUser.Sub)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "User not found"})
-			return
-		}
-		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to list credentials"})
-		return
-	}
-
-	type credItem struct {
-		ID         string   `json:"id"`
-		Transports []string `json:"transports"`
-	}
-	creds := make([]credItem, 0, len(user.WebAuthnCredentials))
-	for _, c := range user.WebAuthnCredentials {
-		t := c.Transports
-		if t == nil {
-			t = []string{}
-		}
-		creds = append(creds, credItem{
-			ID:         c.ID,
-			Transports: t,
-		})
-	}
-
-	middleware.WriteJSON(w, http.StatusOK, map[string]any{"credentials": creds})
-}
-
-func handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
-	reqUser := middleware.GetUser(r)
-	if reqUser == nil || reqUser.Sub == "" {
-		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
-		return
-	}
-
-	rawCredID := chi.URLParam(r, "credentialId")
-	credID, err := url.PathUnescape(rawCredID)
-	if err != nil {
-		credID = rawCredID
-	}
-
-	user, err := db.GetUserByID(reqUser.Sub)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "User not found"})
-			return
-		}
-		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to remove credential"})
-		return
-	}
-
-	initialLen := len(user.WebAuthnCredentials)
-	filtered := make([]models.WebAuthnCredential, 0, initialLen)
-	for _, c := range user.WebAuthnCredentials {
-		if c.ID != credID && c.ID != rawCredID {
-			filtered = append(filtered, c)
-		}
-	}
-
-	if len(filtered) == initialLen {
-		middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "Credential not found"})
-		return
-	}
-
-	user.WebAuthnCredentials = filtered
-	if err := db.SaveUser(user); err != nil {
-		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to remove credential"})
-		return
-	}
-
-	middleware.WriteJSON(w, http.StatusOK, map[string]string{"message": "Credential removed"})
 }
