@@ -1,4 +1,4 @@
-import { maskKey, truncateKey } from "../../helpers";
+import { truncateKey } from "../../helpers";
 import type { AccountRecord } from "../../types";
 
 type KeysTabProps = {
@@ -21,6 +21,7 @@ type KeysTabProps = {
 	onSetKeyGenStep: (step: number) => void;
 	onSetShowKeySection: (show: boolean) => void;
 	onRevealPrivateKey?: () => void;
+	onHidePrivateKey?: () => void;
 	webauthnAvailable?: boolean;
 };
 
@@ -44,6 +45,7 @@ export const KeysTab = ({
 	onSetKeyGenStep,
 	onSetShowKeySection,
 	onRevealPrivateKey,
+	onHidePrivateKey,
 	webauthnAvailable,
 }: KeysTabProps) => {
 	const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
@@ -53,43 +55,63 @@ export const KeysTab = ({
 			<>
 				<h2 className="section-title">내 키</h2>
 				<p className="section-desc">키가 서버에 안전하게 저장되어 있어요.</p>
-				<div className="card">
-					<div className="key-item">
-						<span className="key-label">공개키</span>
-						<div className="key-value-row">
-							<code className="key-truncated">{truncateKey(storedAccount!.publicKey)}</code>
+				<div className="key-card">
+					<div className="key-row">
+						<div className="key-info">
+							<span className="key-row-label">공개키</span>
+							<code className="key-code">{truncateKey(storedAccount!.publicKey)}</code>
+						</div>
+						<div className="key-actions">
 							<button
+								type="button"
 								className={`btn btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`}
 								onClick={() => onCopyPublicKey(storedAccount?.publicKey)}
 							>
-								{copyPublicStatus === "copied" ? "복사됨 ✓" : "복사"}
+								{copyPublicStatus === "copied" ? "✓ 복사됨" : "복사"}
 							</button>
 						</div>
 					</div>
-					<div className="key-item">
-						<span className="key-label">개인키</span>
-						{privateKeyPem ? (
-							<div className="key-full">
-								{maskKey(privateKeyPem)}
+
+					<div className="key-row">
+						<div className="key-info">
+							<span className="key-row-label">개인키</span>
+							{privateKeyPem ? (
+								<code className="key-code">{truncateKey(privateKeyPem)}</code>
+							) : (
+								<span className="key-masked">••••••••••••••••••••••••</span>
+							)}
+						</div>
+						<div className="key-actions">
+							{privateKeyPem ? (
+								<>
+									<button
+										type="button"
+										className={`btn btn-ghost btn-sm ${copyPrivateStatus === "copied" ? "copy-feedback" : ""}`}
+										onClick={() => onCopyPrivateKey(privateKeyPem)}
+									>
+										{copyPrivateStatus === "copied" ? "✓ 복사됨" : "복사"}
+									</button>
+									{onHidePrivateKey && (
+										<button
+											type="button"
+											className="btn btn-ghost btn-sm"
+											onClick={onHidePrivateKey}
+										>
+											숨기기
+										</button>
+									)}
+								</>
+							) : (
 								<button
-									className={`key-copy-btn ${copyPrivateStatus === "copied" ? "copied" : ""}`}
-									onClick={() => onCopyPrivateKey(privateKeyPem)}
-								>
-									{copyPrivateStatus === "copied" ? "복사됨" : "복사"}
-								</button>
-							</div>
-						) : (
-							<div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-								<span className="text-hint">서버에 암호화되어 저장됨</span>
-								<button
+									type="button"
 									className="btn btn-secondary btn-sm"
 									onClick={onRevealPrivateKey}
 									disabled={busy || !webauthnAvailable}
 								>
 									{busy ? "인증 중..." : "패스키로 인증하여 보기"}
 								</button>
-							</div>
-						)}
+							)}
+						</div>
 					</div>
 				</div>
 				{status && <div className="status-bar success">{status}</div>}
@@ -110,22 +132,16 @@ export const KeysTab = ({
 
 			{keyGenStep === 1 ? (
 				<div className="card">
-					<div className="form-group">
-						<label className="form-label">키 알고리즘</label>
-						<div className="option-cards">
-							<div className="option-card selected" style={{ cursor: "default" }}>
-								<span className="option-title">PQC</span>
-								<span className="option-desc">차세대 표준 양자내성 암호</span>
-							</div>
-						</div>
-					</div>
+					<p className="text-hint" style={{ marginBottom: 16 }}>
+						새로운 보안 키 쌍을 생성합니다.
+					</p>
 					<div className="btn-row">
 						{storedAccount && (
 							<button className="btn btn-secondary" onClick={() => onSetShowKeySection(false)}>
 								이전
 							</button>
 						)}
-						<button className="btn btn-secondary" onClick={onGenerateKeys} style={{ marginLeft: "auto" }}>
+						<button className="btn btn-primary" onClick={onGenerateKeys} style={{ marginLeft: storedAccount ? "auto" : 0 }}>
 							키 쌍 생성
 						</button>
 					</div>
@@ -133,38 +149,47 @@ export const KeysTab = ({
 					{error && <div className="status-bar error mt-3">{error}</div>}
 				</div>
 			) : (
-				<div className="card" key="step2">
-					<div className="step-header">
-						<h3 style={{ fontSize: 16, fontWeight: 600 }}>생성된 키</h3>
-					</div>
-					<div className="key-item">
-						<span className="key-label">공개키</span>
-						<div className="key-full">
-							{maskKey(publicKeyPem)}
+				<div className="key-card" key="step2">
+					<div className="key-row">
+						<div className="key-info">
+							<span className="key-row-label">공개키</span>
+							<code className="key-code">{truncateKey(publicKeyPem)}</code>
+						</div>
+						<div className="key-actions">
 							{publicKeyPem && (
 								<button
-									className={`key-copy-btn ${copyPublicStatus === "copied" ? "copied" : ""}`}
+									type="button"
+									className={`btn btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`}
 									onClick={() => onCopyPublicKey(publicKeyPem)}
 								>
-									{copyPublicStatus === "copied" ? "복사됨" : "복사"}
+									{copyPublicStatus === "copied" ? "✓ 복사됨" : "복사"}
 								</button>
 							)}
 						</div>
 					</div>
-					<div className="key-item">
-						<span className="key-label">개인키 (평문)</span>
-						<div className="key-full">
-							{maskKey(privateKeyPem)}
+
+					<div className="key-row">
+						<div className="key-info">
+							<span className="key-row-label">개인키</span>
+							<code className="key-code">{truncateKey(privateKeyPem)}</code>
+						</div>
+						<div className="key-actions">
 							{privateKeyPem && (
 								<button
-									className={`key-copy-btn ${copyPrivateStatus === "copied" ? "copied" : ""}`}
+									type="button"
+									className={`btn btn-ghost btn-sm ${copyPrivateStatus === "copied" ? "copy-feedback" : ""}`}
 									onClick={() => onCopyPrivateKey(privateKeyPem)}
 								>
-									{copyPrivateStatus === "copied" ? "복사됨" : "복사"}
+									{copyPrivateStatus === "copied" ? "✓ 복사됨" : "복사"}
 								</button>
 							)}
 						</div>
 					</div>
+				</div>
+			)}
+
+			{keyGenStep === 2 && (
+				<>
 					<p className="text-hint mt-2">개인키는 브라우저에서 암호화된 후 서버에 안전하게 저장됩니다.</p>
 					<div className="btn-row" style={{ marginTop: 20 }}>
 						<button className="btn btn-secondary" onClick={() => onSetKeyGenStep(1)}>
@@ -176,7 +201,7 @@ export const KeysTab = ({
 					</div>
 					{status && <div className="status-bar success mt-3">{status}</div>}
 					{error && <div className="status-bar error mt-3">{error}</div>}
-				</div>
+				</>
 			)}
 		</>
 	);

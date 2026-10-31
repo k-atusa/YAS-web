@@ -1,5 +1,5 @@
 import { KeysTab } from "./components/tabs/KeysTab";
-import { formatBytes } from "./helpers";
+import { formatBytes, truncateKey } from "./helpers";
 import { IconContacts, IconKey, IconEncrypt, IconDecrypt } from "./icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import SparkMD5 from "spark-md5";
@@ -1043,9 +1043,6 @@ const App = () => {
 								<div className="contact-info">
 									<div className="contact-name-row">
 										<span className="contact-name">{c.contactUsername}</span>
-										<span className="contact-algo-badge algo-pqc1">
-											PQC
-										</span>
 									</div>
 									{c.notes && (
 										<div className="contact-meta-row">
@@ -1055,7 +1052,7 @@ const App = () => {
 								</div>
 								<div className="contact-btns">
 									<span className="contact-pk-preview" style={{ marginRight: "12px", opacity: 0.6 }}>
-										{c.publicKey && c.publicKey.length > 20 ? `${c.publicKey.slice(0, 6)}…${c.publicKey.slice(-5)}` : c.publicKey}
+										{truncateKey(c.publicKey)}
 									</span>
 									<button className={`btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`} onClick={() => handleCopyPublicKey(c.publicKey)}>
 										{copyPublicStatus === "copied" ? "✓ 복사됨" : "복사"}
@@ -1122,6 +1119,10 @@ const App = () => {
 				onSetKeyGenStep={setKeyGenStep}
 				onSetShowKeySection={setShowKeySection}
 				onRevealPrivateKey={handleRevealPrivateKey}
+				onHidePrivateKey={() => {
+					setPrivateKeyPem("");
+					setCopyPrivateStatus("idle");
+				}}
 				webauthnAvailable={webauthnAvailable}
 			/>
 		);
@@ -1143,10 +1144,6 @@ const App = () => {
 							<div className="result-item">
 								<span className="result-label">크기</span>
 								<span className="result-value">{formatBytes(encryptedBlob.length)}</span>
-							</div>
-							<div className="result-item">
-								<span className="result-label">알고리즘</span>
-								<span className="result-value">{encryptEncAlgo === "gcmx1" ? "대용량" : "표준"}</span>
 							</div>
 						</div>
 						<div className="btn-row">
@@ -1170,7 +1167,7 @@ const App = () => {
 					<>
 						<div className="section-header">
 							<h2 className="section-title">암호화</h2>
-							{renderStepDots(4, encryptStep)}
+							{renderStepDots(3, encryptStep)}
 						</div>
 						<p className="section-desc">어떤 방식으로 데이터를 보호할까요?</p>
 						<div className="option-cards">
@@ -1190,21 +1187,12 @@ const App = () => {
 					<>
 						<div className="section-header">
 							<h2 className="section-title">비밀번호 설정</h2>
-							{renderStepDots(4, encryptStep)}
+							{renderStepDots(3, encryptStep)}
 						</div>
 						<p className="section-desc">암호화에 사용할 비밀번호를 입력하세요.</p>
 						<div className="form-group">
 							<label className="form-label">비밀번호</label>
 							<input type="password" value={encryptPassword} onChange={(e) => setEncryptPassword(e.target.value)} placeholder="비밀번호 입력" autoFocus />
-						</div>
-						<div className="form-group">
-							<label className="form-label">키 유도 방식</label>
-							<div className="option-cards row-layout">
-								<div className="option-card selected" style={{ cursor: "default" }}>
-									<span className="option-title">Argon2id (Standard)</span>
-									<span className="option-desc">높은 보안 강도의 표준 키 유도 함수</span>
-								</div>
-							</div>
 						</div>
 						<div className="btn-row">
 							<button className="btn btn-secondary" onClick={() => setEncryptStep(1)}>이전</button>
@@ -1217,7 +1205,7 @@ const App = () => {
 					<>
 						<div className="section-header">
 							<h2 className="section-title">수신자 설정</h2>
-							{renderStepDots(4, encryptStep)}
+							{renderStepDots(3, encryptStep)}
 						</div>
 						<p className="section-desc">암호화된 데이터를 받을 사람을 선택하세요.</p>
 						<div className="form-group">
@@ -1229,15 +1217,6 @@ const App = () => {
 								))}
 							</select>
 							{contacts.length === 0 && <span className="text-hint">주소록에 연락처를 먼저 추가하세요.</span>}
-						</div>
-						<div className="form-group">
-							<label className="form-label">비대칭 알고리즘</label>
-							<div className="option-cards">
-								<div className="option-card selected" style={{ cursor: "default" }}>
-									<span className="option-title">PQC</span>
-									<span className="option-desc">차세대 표준 양자내성 암호</span>
-								</div>
-							</div>
 						</div>
 						<label className="checkbox-row">
 							<input
@@ -1284,31 +1263,8 @@ const App = () => {
 				{encryptStep === 3 && (
 					<>
 						<div className="section-header">
-							<h2 className="section-title">암호화 방식</h2>
-							{renderStepDots(4, encryptStep)}
-						</div>
-						<p className="section-desc">데이터를 암호화할 방식을 선택하세요.</p>
-						<div className="option-cards">
-							<button className="option-card" onClick={() => { setEncryptEncAlgo("gcm1"); setEncryptStep(4); }}>
-								<span className="option-title">표준 (AES-GCM)</span>
-								<span className="option-desc">일반적인 텍스트와 파일에 적합합니다</span>
-							</button>
-							<button className="option-card" onClick={() => { setEncryptEncAlgo("gcmx1"); setEncryptStep(4); }}>
-								<span className="option-title">대용량 파일 전용 (AES-GCM 청크)</span>
-								<span className="option-desc">대용량 파일을 효율적으로 처리합니다</span>
-							</button>
-						</div>
-						<div className="btn-row">
-							<button className="btn btn-secondary" onClick={() => setEncryptStep(2)}>이전</button>
-						</div>
-					</>
-				)}
-
-				{encryptStep === 4 && (
-					<>
-						<div className="section-header">
 							<h2 className="section-title">데이터 입력</h2>
-							{renderStepDots(4, encryptStep)}
+							{renderStepDots(3, encryptStep)}
 						</div>
 						<p className="section-desc">암호화할 내용을 입력하세요.</p>
 
@@ -1360,7 +1316,7 @@ const App = () => {
 						{encryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
 
 						<div className="btn-row">
-							<button className="btn btn-secondary" onClick={() => setEncryptStep(3)}>이전</button>
+							<button className="btn btn-secondary" onClick={() => setEncryptStep(2)}>이전</button>
 							<button className="btn btn-primary" disabled={encryptBusy} onClick={handleEncryptSubmit}>
 								{encryptBusy ? "암호화 중..." : "암호화"}
 							</button>
@@ -1521,21 +1477,15 @@ const App = () => {
 							{decryptDetected?.mode === "publickey" ? renderStepDots(3, decryptStep) : renderStepDots(2, decryptStep)}
 						</div>
 						{decryptDetected && (
-							<div className="card mb-3">
-								<div className="result-grid">
-									<div className="result-item">
-										<span className="result-label">감지된 방식</span>
-										<span className="result-value">{decryptDetected.mode === "password" ? "🔑 비밀번호" : "👤 공개키"}</span>
-									</div>
-									<div className="result-item">
-										<span className="result-label">알고리즘</span>
-										<span className="result-value">{decryptDetected.algo}</span>
-									</div>
+							<div className="detect-banner mb-3">
+								<div className="detect-badge-row">
+									<span className="detect-label">감지된 방식</span>
+									<span className="detect-value">{decryptDetected.mode === "password" ? "🔑 비밀번호" : "👤 공개키"}</span>
 								</div>
 								{decryptDetected.msg && (
-									<div className="detected-msg">
-										<p className="detected-msg-label">공개 메시지</p>
-										<pre className="detected-msg-body">{decryptDetected.msg}</pre>
+									<div className="detect-msg-row">
+										<span className="detect-label">공개 메시지</span>
+										<p className="detect-msg-text">{decryptDetected.msg}</p>
 									</div>
 								)}
 							</div>
