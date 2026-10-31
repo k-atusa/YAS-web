@@ -39,6 +39,13 @@ import type { AccountRecord, ContactRecord } from "./types";
 
 type Tab = "contacts" | "keys" | "encrypt" | "decrypt";
 
+const TAB_INDEX: Record<Tab, number> = {
+	keys: 0,
+	contacts: 1,
+	encrypt: 2,
+	decrypt: 3,
+};
+
 const App = () => {
 	/* Auth */
 	const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem("authToken"));
@@ -57,6 +64,7 @@ const App = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [tab, setTab] = useState<Tab>("keys");
+	const [tabDirection, setTabDirection] = useState<"left" | "right" | "none">("none");
 	const [storedAccount, setStoredAccount] = useState<AccountRecord | null>(null);
 	const [showKeySection, setShowKeySection] = useState(true);
 	const [copyPublicStatus, setCopyPublicStatus] = useState<"idle" | "copied" | "error">("idle");
@@ -346,6 +354,7 @@ const App = () => {
 		setAuthToken(null);
 		setAuthUsername(null);
 		setWebauthnPending(null);
+		setTabDirection("none");
 		setLoginPass("");
 		setUsername("");
 		setStoredAccount(null);
@@ -380,6 +389,15 @@ const App = () => {
 		setDecryptedResult(null);
 		setDecryptStep(1);
 		setView("landing");
+	}
+
+	function handleTabChange(nextTab: Tab) {
+		if (nextTab === tab) return;
+		const prevIdx = TAB_INDEX[tab];
+		const nextIdx = TAB_INDEX[nextTab];
+		setTabDirection(nextIdx > prevIdx ? "right" : "left");
+		setPressedTab(null);
+		setTab(nextTab);
 	}
 
 	async function handleCopyPublicKey(value?: string) {
@@ -1147,7 +1165,7 @@ const App = () => {
 		}
 
 		return (
-			<div className="view-animate" key={`enc-step-${encryptStep}`}>
+			<div className="step-animate" key={`enc-step-${encryptStep}`}>
 				{encryptStep === 1 && (
 					<>
 						<div className="section-header">
@@ -1426,7 +1444,7 @@ const App = () => {
 		}
 
 		return (
-			<div className="view-animate" key={`dec-step-${decryptStep}`}>
+			<div className="step-animate" key={`dec-step-${decryptStep}`}>
 				{decryptStep === 1 && (
 					<>
 						<div className="section-header">
@@ -1820,7 +1838,7 @@ const App = () => {
 								key={t}
 								ref={ref}
 								className={`pill-nav-item ${tab === t ? "active" : ""}`}
-								onClick={() => { setPressedTab(null); setTab(t); }}
+								onClick={() => handleTabChange(t)}
 								onPointerDown={() => { if (t !== tab) setPressedTab(t); }}
 								onPointerUp={() => { setTimeout(() => setPressedTab(null), 30); }}
 								onPointerLeave={() => setPressedTab(null)}
@@ -1834,7 +1852,10 @@ const App = () => {
 				</div>
 			</nav>
 
-			<div className="view-animate" key={tab}>
+			<div
+				className={`view-animate ${tabDirection === "right" ? "slide-right" : tabDirection === "left" ? "slide-left" : ""}`}
+				key={tab}
+			>
 				{renderTabContent()}
 			</div>
 

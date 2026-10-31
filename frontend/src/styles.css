@@ -212,6 +212,7 @@ a:active {
 	margin: 0 auto;
 	padding: 0 20px 120px;
 	min-height: 100vh;
+	overflow-x: clip;
 }
 
 /* ─── Top bar ─── */
@@ -1225,7 +1226,20 @@ select {
 /* ─── Animations ─── */
 
 .view-animate {
-	animation: viewIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+	animation: viewIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+	will-change: transform, opacity;
+}
+
+.view-animate.slide-right {
+	animation: slideFromRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.view-animate.slide-left {
+	animation: slideFromLeft 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.step-animate {
+	animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes viewIn {
@@ -1237,6 +1251,30 @@ select {
 	to {
 		opacity: 1;
 		transform: translateY(0);
+	}
+}
+
+@keyframes slideFromRight {
+	from {
+		opacity: 0;
+		transform: translateX(28px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+@keyframes slideFromLeft {
+	from {
+		opacity: 0;
+		transform: translateX(-28px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateX(0);
 	}
 }
 
