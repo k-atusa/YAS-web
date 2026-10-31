@@ -116,9 +116,9 @@ export const KeysTab = ({
 				</div>
 				{status && <div className="status-bar success">{status}</div>}
 				{error && <div className="status-bar error">{error}</div>}
-				<div className="btn-row">
-					<button className="btn btn-secondary" onClick={onRegenerate}>
-						키 재생성
+				<div className="btn-row btn-row-right">
+					<button className="btn btn-secondary" onClick={onRegenerate} disabled={busy}>
+						{busy ? "생성 중..." : "키 재생성"}
 					</button>
 				</div>
 			</>
@@ -192,7 +192,16 @@ export const KeysTab = ({
 				<>
 					<p className="text-hint mt-2">개인키는 브라우저에서 암호화된 후 서버에 안전하게 저장됩니다.</p>
 					<div className="btn-row" style={{ marginTop: 20 }}>
-						<button className="btn btn-secondary" onClick={() => onSetKeyGenStep(1)}>
+						<button
+							className="btn btn-secondary"
+							onClick={() => {
+								if (storedAccount) {
+									onSetShowKeySection(false);
+								} else {
+									onSetKeyGenStep(1);
+								}
+							}}
+						>
 							이전
 						</button>
 						<button className="btn btn-primary" onClick={onUpload} disabled={!canUpload || busy}>

@@ -520,6 +520,7 @@ const App = () => {
 
 	async function handleGenerateKeys() {
 		setError(null);
+		setBusy(true);
 		setStatus("키 쌍 생성 중...");
 		try {
 			const { publicKey, privateKey } = await generateKeyPair();
@@ -532,6 +533,8 @@ const App = () => {
 			console.error(err);
 			setError("키 쌍 생성에 실패했습니다");
 			setStatus(null);
+		} finally {
+			setBusy(false);
 		}
 	}
 
@@ -558,14 +561,12 @@ const App = () => {
 		}
 	}
 
-	function handleRegenerate() {
+	async function handleRegenerate() {
 		setShowKeySection(true);
 		setPublicKeyPem("");
 		setPrivateKeyPem("");
 		setCopyPrivateStatus("idle");
-		setKeyGenStep(1);
-		setStatus(null);
-		setError(null);
+		await handleGenerateKeys();
 	}
 
 	/* ─── WebAuthn ─── */
@@ -1691,8 +1692,7 @@ const App = () => {
 				authentication.signature
 			);
 			
-			const decResp = await decryptStoredPrivateKey(authUsername!, verifyResp.token);
-			setPrivateKeyPem(decResp.privateKey);
+			setDecryptionToken(verifyResp.token);
 			
 			const account = await getAccountByUsername(authUsername!);
 			if (account) {
