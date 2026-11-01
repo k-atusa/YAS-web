@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { truncateKey } from "../../helpers";
+import { generateKeyPair } from "../../crypto";
 import type { AccountRecord } from "../../types";
 
 type KeysTabProps = {
@@ -12,8 +13,9 @@ type KeysTabProps = {
 	privateKeyPem: string;
 	canUpload?: boolean;
 	busy: boolean;
-	onGenerateKeys: () => void;
+	onGenerateKeys?: () => void;
 	onSaveManualKeys?: (pub: string, pri: string) => Promise<void>;
+	onSaveKeys?: (pub: string, pri: string) => Promise<void>;
 	onUpload?: () => void;
 	onRegenerate: () => void;
 	onCopyPublicKey: (value?: string) => void;
@@ -33,9 +35,8 @@ export const KeysTab = ({
 	publicKeyPem,
 	privateKeyPem,
 	busy,
-	onGenerateKeys,
 	onSaveManualKeys,
-	onRegenerate,
+	onSaveKeys,
 	onCopyPublicKey,
 	onCopyPrivateKey,
 	onSetShowKeySection,
@@ -45,9 +46,52 @@ export const KeysTab = ({
 }: KeysTabProps) => {
 	const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
 	const [keyMode, setKeyMode] = useState<"generate" | "manual">("generate");
+	const [previewPublic, setPreviewPublic] = useState("");
+	const [previewPrivate, setPreviewPrivate] = useState("");
+	const [generatingPreview, setGeneratingPreview] = useState(false);
 	const [manualPublicKey, setManualPublicKey] = useState("");
 	const [manualPrivateKey, setManualPrivateKey] = useState("");
+	const [localCopyPublic, setLocalCopyPublic] = useState<"idle" | "copied">("idle");
+	const [localCopyPrivate, setLocalCopyPrivate] = useState<"idle" | "copied">("idle");
+
 	const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
+	const saveHandler = onSaveKeys || onSaveManualKeys;
+
+	async function handleCreatePreview() {
+		setGeneratingPreview(true);
+		try {
+			const pair = await generateKeyPair();
+			setPreviewPublic(pair.publicKey);
+			setPreviewPrivate(pair.privateKey);
+		} catch (err) {
+			console.error("Failed to generate preview key pair:", err);
+		} finally {
+			setGeneratingPreview(false);
+		}
+	}
+
+	// 자동 생성 탭 선택 시 미리보기 키 쌍이 없으면 즉시 생성
+	useEffect(() => {
+		if (showKeySection && keyMode === "generate" && !previewPublic && !generatingPreview) {
+			handleCreatePreview();
+		}
+	}, [showKeySection, keyMode]);
+
+	async function handleCopyPreviewKey(text: string, type: "public" | "private") {
+		if (!text) return;
+		try {
+			await navigator.clipboard.writeText(text);
+			if (type === "public") {
+				setLocalCopyPublic("copied");
+				setTimeout(() => setLocalCopyPublic("idle"), 2000);
+			} else {
+				setLocalCopyPrivate("copied");
+				setTimeout(() => setLocalCopyPrivate("idle"), 2000);
+			}
+		} catch (err) {
+			console.error("Copy failed:", err);
+		}
+	}
 
 	if (hasStoredKey && confirmingRegenerate) {
 		return (
@@ -68,13 +112,16 @@ export const KeysTab = ({
 					</button>
 					<button
 						className="btn btn-primary"
-						onClick={async () => {
-							await onRegenerate();
+						onClick={() => {
 							setConfirmingRegenerate(false);
+							setKeyMode("generate");
+							setPreviewPublic("");
+							setPreviewPrivate("");
+							onSetShowKeySection(true);
 						}}
 						disabled={busy}
 					>
-						{busy ? "처리 중..." : "확인"}
+						확인
 					</button>
 				</div>
 			</>
@@ -145,17 +192,7 @@ export const KeysTab = ({
 						</div>
 					</div>
 				</div>
-				<div className="btn-row btn-row-right" style={{ gap: 8 }}>
-					<button
-						className="btn btn-secondary"
-						onClick={() => {
-							setKeyMode("manual");
-							onSetShowKeySection(true);
-						}}
-						disabled={busy}
-					>
-						키 직접 입력
-					</button>
+				<div className="btn-row btn-row-right">
 					<button className="btn btn-secondary" onClick={() => setConfirmingRegenerate(true)} disabled={busy}>
 						{busy ? "생성 중..." : "키 재생성"}
 					</button>
@@ -166,15 +203,19 @@ export const KeysTab = ({
 
 	return (
 		<>
-			<h2 className="section-title">키 생성</h2>
-			<p className="section-desc">암호화에 사용할 키 쌍을 생성하거나 직접 입력하여 서버에 안전하게 저장합니다.</p>
+			<h2 className="section-title">{storedAccount ? "키 재생성" : "키 생성"}</h2>
+			<p className="section-desc">
+				{storedAccount
+					? "새로운 키 쌍을 생성하거나 직접 입력하여 교체합니다."
+					: "암호화에 사용할 키 쌍을 생성하거나 직접 입력하여 서버에 안전하게 저장합니다."}
+			</p>
 
 			<div className="tab-toggle mb-3">
 				<button
 					type="button"
 					className={keyMode === "generate" ? "active" : ""}
 					onClick={() => setKeyMode("generate")}
-					disabled={busy}
+					disabled={busy || generatingPreview}
 				>
 					자동 생성
 				</button>
@@ -182,28 +223,108 @@ export const KeysTab = ({
 					type="button"
 					className={keyMode === "manual" ? "active" : ""}
 					onClick={() => setKeyMode("manual")}
-					disabled={busy}
+					disabled={busy || generatingPreview}
 				>
 					직접 입력
 				</button>
 			</div>
 
 			{keyMode === "generate" ? (
-				<div className="btn-row">
-					{storedAccount && (
-						<button className="btn btn-secondary" onClick={() => onSetShowKeySection(false)} disabled={busy}>
-							이전
-						</button>
+				<>
+					{generatingPreview ? (
+						<div className="key-card" style={{ padding: "32px 20px", textAlign: "center" }}>
+							<p className="text-hint">새로운 키 쌍을 생성하고 있습니다...</p>
+						</div>
+					) : previewPublic && previewPrivate ? (
+						<>
+							<div className="key-card">
+								<div className="key-row">
+									<div className="key-info">
+										<span className="key-row-label">공개키</span>
+										<code className="key-code">{truncateKey(previewPublic)}</code>
+									</div>
+									<div className="key-actions">
+										<button
+											type="button"
+											className={`btn btn-ghost btn-sm ${localCopyPublic === "copied" ? "copy-feedback" : ""}`}
+											onClick={() => handleCopyPreviewKey(previewPublic, "public")}
+										>
+											{localCopyPublic === "copied" ? "✓ 복사됨" : "복사"}
+										</button>
+									</div>
+								</div>
+
+								<div className="key-row">
+									<div className="key-info">
+										<span className="key-row-label">개인키</span>
+										<code className="key-code">{truncateKey(previewPrivate)}</code>
+									</div>
+									<div className="key-actions">
+										<button
+											type="button"
+											className={`btn btn-ghost btn-sm ${localCopyPrivate === "copied" ? "copy-feedback" : ""}`}
+											onClick={() => handleCopyPreviewKey(previewPrivate, "private")}
+										>
+											{localCopyPrivate === "copied" ? "✓ 복사됨" : "복사"}
+										</button>
+									</div>
+								</div>
+							</div>
+							<p className="text-hint mt-2">개인키는 브라우저에서 안전하게 암호화된 후 서버에 저장됩니다.</p>
+						</>
+					) : (
+						<div className="key-card" style={{ padding: "28px 20px", textAlign: "center" }}>
+							<button
+								type="button"
+								className="btn btn-secondary"
+								onClick={handleCreatePreview}
+								disabled={busy || generatingPreview}
+							>
+								키 쌍 생성
+							</button>
+						</div>
 					)}
-					<button
-						className="btn btn-primary"
-						onClick={onGenerateKeys}
-						disabled={busy}
-						style={{ marginLeft: storedAccount ? "auto" : 0 }}
-					>
-						{busy ? "생성 및 저장 중..." : "키 쌍 생성"}
-					</button>
-				</div>
+
+					<div className="btn-row" style={{ marginTop: 20 }}>
+						{storedAccount && (
+							<button
+								className="btn btn-secondary"
+								onClick={() => {
+									setPreviewPublic("");
+									setPreviewPrivate("");
+									onSetShowKeySection(false);
+								}}
+								disabled={busy || generatingPreview}
+							>
+								이전
+							</button>
+						)}
+						{previewPublic && previewPrivate && (
+							<button
+								type="button"
+								className="btn btn-secondary"
+								onClick={handleCreatePreview}
+								disabled={busy || generatingPreview}
+							>
+								다시 생성
+							</button>
+						)}
+						<button
+							className="btn btn-primary"
+							onClick={async () => {
+								if (previewPublic && previewPrivate && saveHandler) {
+									await saveHandler(previewPublic, previewPrivate);
+									setPreviewPublic("");
+									setPreviewPrivate("");
+								}
+							}}
+							disabled={busy || generatingPreview || !previewPublic || !previewPrivate}
+							style={{ marginLeft: storedAccount ? undefined : "auto" }}
+						>
+							{busy ? "암호화 및 저장 중..." : "키 저장"}
+						</button>
+					</div>
+				</>
 			) : (
 				<>
 					<div className="form-group">
@@ -230,19 +351,29 @@ export const KeysTab = ({
 					</div>
 					<div className="btn-row">
 						{storedAccount && (
-							<button className="btn btn-secondary" onClick={() => onSetShowKeySection(false)} disabled={busy}>
+							<button
+								className="btn btn-secondary"
+								onClick={() => {
+									setManualPublicKey("");
+									setManualPrivateKey("");
+									onSetShowKeySection(false);
+								}}
+								disabled={busy}
+							>
 								이전
 							</button>
 						)}
 						<button
 							className="btn btn-primary"
 							onClick={async () => {
-								if (onSaveManualKeys) {
-									await onSaveManualKeys(manualPublicKey, manualPrivateKey);
+								if (saveHandler) {
+									await saveHandler(manualPublicKey, manualPrivateKey);
+									setManualPublicKey("");
+									setManualPrivateKey("");
 								}
 							}}
 							disabled={busy || !manualPublicKey.trim() || !manualPrivateKey.trim()}
-							style={{ marginLeft: storedAccount ? "auto" : 0 }}
+							style={{ marginLeft: storedAccount ? undefined : "auto" }}
 						>
 							{busy ? "검증 및 저장 중..." : "키 등록 및 저장"}
 						</button>
