@@ -405,17 +405,28 @@ a:active {
 .form-group {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
-	margin-bottom: 18px;
+	gap: 8px;
+	margin-bottom: 22px;
 }
 
 .form-label {
-	font-size: 13px;
-	font-weight: 600;
-	color: var(--text-sub);
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text);
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
+	margin-bottom: 2px;
+	letter-spacing: -0.015em;
+}
+
+.public-msg-text {
+	margin: 2px 0 4px 0;
+	font-size: 15px;
+	color: var(--text-sub);
+	line-height: 1.6;
+	word-break: break-word;
+	white-space: pre-wrap;
 }
 
 .help-icon-wrapper {
@@ -842,10 +853,10 @@ select {
 }
 
 .key-row-label {
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--text-hint);
-	letter-spacing: 0.02em;
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--text-sub);
+	letter-spacing: 0.01em;
 }
 
 .key-code {

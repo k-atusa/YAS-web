@@ -1548,7 +1548,7 @@ const App = () => {
 						{decryptDetected?.msg && (
 							<div className="form-group">
 								<label className="form-label">공개 메시지</label>
-								<p style={{ margin: "4px 0 16px 0", fontSize: 14, color: "var(--text)", lineHeight: 1.5, wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+								<p className="public-msg-text">
 									{decryptDetected.msg}
 								</p>
 							</div>
