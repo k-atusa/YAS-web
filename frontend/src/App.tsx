@@ -22,6 +22,7 @@ import {
 import {
 	buildAccountPayload,
 	generateKeyPair,
+	validateKeyPair,
 	encryptOpsec,
 	decryptOpsecPw,
 	decryptOpsecPub,
@@ -547,6 +548,40 @@ const App = () => {
 		} catch (err) {
 			console.error(err);
 			toast.error((err as Error).message || "키 쌍 생성에 실패했습니다");
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	async function handleSaveManualKeys(pubInput: string, priInput: string) {
+		setError(null);
+		setBusy(true);
+		try {
+			const targetUsername = username || authUsername || "";
+			if (!targetUsername) throw new Error("사용자 정보를 찾을 수 없습니다.");
+
+			const val = await validateKeyPair(pubInput, priInput);
+			if (!val.valid || !val.cleanPublicKey || !val.cleanPrivateKey) {
+				throw new Error(val.error || "유효하지 않은 키 쌍입니다.");
+			}
+
+			const payload = await buildAccountPayload(
+				targetUsername,
+				val.cleanPublicKey,
+				val.cleanPrivateKey,
+				undefined
+			);
+			const result = await saveAccount(payload, authToken ?? undefined);
+			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			setStoredAccount(record);
+			setPublicKeyPem(val.cleanPublicKey);
+			setPrivateKeyPem("");
+			setCopyPrivateStatus("idle");
+			setShowKeySection(false);
+			toast.success("키 쌍이 등록되어 안전하게 저장되었습니다");
+		} catch (err) {
+			console.error(err);
+			toast.error((err as Error).message || "키 등록에 실패했습니다");
 		} finally {
 			setBusy(false);
 		}
@@ -1155,6 +1190,7 @@ const App = () => {
 				canUpload={canUpload}
 				busy={busy}
 				onGenerateKeys={handleGenerateKeys}
+				onSaveManualKeys={handleSaveManualKeys}
 				onUpload={handleUpload}
 				onRegenerate={handleRegenerate}
 				onCopyPublicKey={handleCopyPublicKey}

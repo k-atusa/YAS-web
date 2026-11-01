@@ -279,6 +279,135 @@ export async function generateKeyPair(
   return { publicKey: u8ToBase64(pub), privateKey: u8ToBase64(pri) };
 }
 
+// ==================== Key cleaning & validation ====================
+
+export function cleanBase64Key(raw: string): string {
+  if (!raw) return "";
+  let cleaned = raw.trim();
+  cleaned = cleaned.replace(/-----BEGIN [^-]+-----/g, "");
+  cleaned = cleaned.replace(/-----END [^-]+-----/g, "");
+  cleaned = cleaned.replace(/\s+/g, "");
+  return cleaned;
+}
+
+export async function validateKeyPair(
+  publicKeyInput: string,
+  privateKeyInput: string
+): Promise<{ valid: boolean; error?: string; cleanPublicKey?: string; cleanPrivateKey?: string }> {
+  const pubClean = cleanBase64Key(publicKeyInput);
+  const priClean = cleanBase64Key(privateKeyInput);
+
+  if (!pubClean) {
+    return { valid: false, error: "공개키를 입력해주세요." };
+  }
+  if (!priClean) {
+    return { valid: false, error: "개인키를 입력해주세요." };
+  }
+
+  let pubU8: Uint8Array;
+  try {
+    pubU8 = base64ToU8(pubClean);
+  } catch {
+    return { valid: false, error: "공개키가 올바른 Base64 형식이 아닙니다." };
+  }
+
+  let priU8: Uint8Array;
+  try {
+    priU8 = base64ToU8(priClean);
+  } catch {
+    return { valid: false, error: "개인키가 올바른 Base64 형식이 아닙니다." };
+  }
+
+  if (pubU8.length !== 4273) {
+    return {
+      valid: false,
+      error: `공개키 형식이 올바르지 않습니다. (디코딩 크기: ${pubU8.length}B, 필요: 4273B)`,
+    };
+  }
+
+  if (priU8.length !== 8177) {
+    return {
+      valid: false,
+      error: `개인키 형식이 올바르지 않습니다. (디코딩 크기: ${priU8.length}B, 필요: 8177B)`,
+    };
+  }
+
+  try {
+    const U = await waitForUsag();
+    const AsymMaster = U.bencrypt.AsymMaster as new (a: string) => {
+      Loadkey(publicBuf: Uint8Array | null, privateBuf: Uint8Array | null): Promise<void>;
+      Sign(data: Uint8Array): Promise<Uint8Array>;
+      Verify(data: Uint8Array, signature: Uint8Array): Promise<boolean>;
+      Encrypt(data: Uint8Array): Promise<Uint8Array>;
+      Decrypt(data: Uint8Array): Promise<Uint8Array>;
+    };
+
+    const am = new AsymMaster("pqc1");
+    try {
+      await am.Loadkey(pubU8, priU8);
+    } catch (e) {
+      return { valid: false, error: `키 로드 실패: ${(e as Error).message}` };
+    }
+
+    // Verify key pair match using digital signature
+    const testPayload = new Uint8Array([89, 65, 83, 45, 87, 69, 66]); // "YAS-WEB"
+    try {
+      const signature = await am.Sign(testPayload);
+      const isVerified = await am.Verify(testPayload, signature);
+      if (!isVerified) {
+        return { valid: false, error: "공개키와 개인키가 일치하지 않는 쌍입니다." };
+      }
+    } catch (e) {
+      return { valid: false, error: `서명 검증 실패: ${(e as Error).message}` };
+    }
+
+    // Verify key pair match using encryption/decryption
+    try {
+      const enc = await am.Encrypt(testPayload);
+      const dec = await am.Decrypt(enc);
+      if (dec.length !== testPayload.length || !dec.every((b, i) => b === testPayload[i])) {
+        return { valid: false, error: "공개키와 개인키가 일치하지 않는 쌍입니다." };
+      }
+    } catch (e) {
+      return { valid: false, error: `암/복호화 검증 실패: ${(e as Error).message}` };
+    }
+
+    return { valid: true, cleanPublicKey: pubClean, cleanPrivateKey: priClean };
+  } catch (err) {
+    return { valid: false, error: (err as Error).message || "키 검증에 실패했습니다." };
+  }
+}
+
+export async function validatePublicKey(
+  publicKeyInput: string
+): Promise<{ valid: boolean; error?: string; cleanKey?: string }> {
+  const pubClean = cleanBase64Key(publicKeyInput);
+  if (!pubClean) return { valid: false, error: "공개키를 입력해주세요." };
+  let pubU8: Uint8Array;
+  try {
+    pubU8 = base64ToU8(pubClean);
+  } catch {
+    return { valid: false, error: "공개키가 올바른 Base64 형식이 아닙니다." };
+  }
+  if (pubU8.length !== 4273) {
+    return {
+      valid: false,
+      error: `공개키 형식이 올바르지 않습니다. (디코딩 크기: ${pubU8.length}B, 필요: 4273B)`,
+    };
+  }
+  try {
+    const U = await waitForUsag();
+    const AsymMaster = U.bencrypt.AsymMaster as new (a: string) => {
+      Loadkey(publicBuf: Uint8Array | null, privateBuf: Uint8Array | null): Promise<void>;
+    };
+    const am = new AsymMaster("pqc1");
+    await am.Loadkey(pubU8, null);
+    return { valid: true, cleanKey: pubClean };
+  } catch (e) {
+    return { valid: false, error: `공개키 검증 실패: ${(e as Error).message}` };
+  }
+}
+
 // ==================== High-level encryption ====================
 
 /**

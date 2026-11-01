@@ -13,6 +13,7 @@ type KeysTabProps = {
 	canUpload?: boolean;
 	busy: boolean;
 	onGenerateKeys: () => void;
+	onSaveManualKeys?: (pub: string, pri: string) => Promise<void>;
 	onUpload?: () => void;
 	onRegenerate: () => void;
 	onCopyPublicKey: (value?: string) => void;
@@ -33,6 +34,7 @@ export const KeysTab = ({
 	privateKeyPem,
 	busy,
 	onGenerateKeys,
+	onSaveManualKeys,
 	onRegenerate,
 	onCopyPublicKey,
 	onCopyPrivateKey,
@@ -42,6 +44,9 @@ export const KeysTab = ({
 	webauthnAvailable,
 }: KeysTabProps) => {
 	const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
+	const [keyMode, setKeyMode] = useState<"generate" | "manual">("generate");
+	const [manualPublicKey, setManualPublicKey] = useState("");
+	const [manualPrivateKey, setManualPrivateKey] = useState("");
 	const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
 
 	if (hasStoredKey && confirmingRegenerate) {
@@ -140,7 +145,17 @@ export const KeysTab = ({
 						</div>
 					</div>
 				</div>
-				<div className="btn-row btn-row-right">
+				<div className="btn-row btn-row-right" style={{ gap: 8 }}>
+					<button
+						className="btn btn-secondary"
+						onClick={() => {
+							setKeyMode("manual");
+							onSetShowKeySection(true);
+						}}
+						disabled={busy}
+					>
+						키 직접 입력
+					</button>
 					<button className="btn btn-secondary" onClick={() => setConfirmingRegenerate(true)} disabled={busy}>
 						{busy ? "생성 중..." : "키 재생성"}
 					</button>
@@ -152,23 +167,88 @@ export const KeysTab = ({
 	return (
 		<>
 			<h2 className="section-title">키 생성</h2>
-			<p className="section-desc">암호화에 사용할 키 쌍을 생성하고 서버에 안전하게 저장합니다.</p>
+			<p className="section-desc">암호화에 사용할 키 쌍을 생성하거나 직접 입력하여 서버에 안전하게 저장합니다.</p>
 
-			<div className="btn-row">
-				{storedAccount && (
-					<button className="btn btn-secondary" onClick={() => onSetShowKeySection(false)} disabled={busy}>
-						이전
-					</button>
-				)}
+			<div className="tab-toggle mb-3">
 				<button
-					className="btn btn-primary"
-					onClick={onGenerateKeys}
+					type="button"
+					className={keyMode === "generate" ? "active" : ""}
+					onClick={() => setKeyMode("generate")}
 					disabled={busy}
-					style={{ marginLeft: storedAccount ? "auto" : 0 }}
 				>
-					{busy ? "생성 및 저장 중..." : "키 쌍 생성"}
+					자동 생성
+				</button>
+				<button
+					type="button"
+					className={keyMode === "manual" ? "active" : ""}
+					onClick={() => setKeyMode("manual")}
+					disabled={busy}
+				>
+					직접 입력
 				</button>
 			</div>
+
+			{keyMode === "generate" ? (
+				<div className="btn-row">
+					{storedAccount && (
+						<button className="btn btn-secondary" onClick={() => onSetShowKeySection(false)} disabled={busy}>
+							이전
+						</button>
+					)}
+					<button
+						className="btn btn-primary"
+						onClick={onGenerateKeys}
+						disabled={busy}
+						style={{ marginLeft: storedAccount ? "auto" : 0 }}
+					>
+						{busy ? "생성 및 저장 중..." : "키 쌍 생성"}
+					</button>
+				</div>
+			) : (
+				<>
+					<div className="form-group">
+						<label className="form-label">공개키 (Base64)</label>
+						<textarea
+							value={manualPublicKey}
+							onChange={(e) => setManualPublicKey(e.target.value)}
+							placeholder="Base64로 인코딩된 공개키를 입력하세요..."
+							rows={4}
+							disabled={busy}
+							style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13, wordBreak: "break-all" }}
+						/>
+					</div>
+					<div className="form-group">
+						<label className="form-label">개인키 (Base64)</label>
+						<textarea
+							value={manualPrivateKey}
+							onChange={(e) => setManualPrivateKey(e.target.value)}
+							placeholder="Base64로 인코딩된 개인키를 입력하세요..."
+							rows={5}
+							disabled={busy}
+							style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13, wordBreak: "break-all" }}
+						/>
+					</div>
+					<div className="btn-row">
+						{storedAccount && (
+							<button className="btn btn-secondary" onClick={() => onSetShowKeySection(false)} disabled={busy}>
+								이전
+							</button>
+						)}
+						<button
+							className="btn btn-primary"
+							onClick={async () => {
+								if (onSaveManualKeys) {
+									await onSaveManualKeys(manualPublicKey, manualPrivateKey);
+								}
+							}}
+							disabled={busy || !manualPublicKey.trim() || !manualPrivateKey.trim()}
+							style={{ marginLeft: storedAccount ? "auto" : 0 }}
+						>
+							{busy ? "검증 및 저장 중..." : "키 등록 및 저장"}
+						</button>
+					</div>
+				</>
+			)}
 		</>
 	);
 };
