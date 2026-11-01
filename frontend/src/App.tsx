@@ -93,7 +93,7 @@ const App = () => {
 	const [encryptRecipientId, setEncryptRecipientId] = useState<string>("");
 	const [encryptMsg, setEncryptMsg] = useState("");
 	const [encryptSmsg, setEncryptSmsg] = useState("");
-	const [encryptMode, setEncryptMode] = useState<"text" | "file">("text");
+	const [encryptMode, setEncryptMode] = useState<"text" | "file">("file");
 	const [encryptFile, setEncryptFile] = useState<File | null>(null);
 	const [isFileDragActive, setIsFileDragActive] = useState(false);
 	const [encryptSignWithKey, setEncryptSignWithKey] = useState(false);
@@ -104,6 +104,7 @@ const App = () => {
 	const [encryptStep, setEncryptStep] = useState(1);
 
 	/* Decrypt */
+	const [decryptMode, setDecryptMode] = useState<"file" | "text">("file");
 	const [decryptPayloadInput, setDecryptPayloadInput] = useState("");
 	const [decryptPayloadFile, setDecryptPayloadFile] = useState<File | null>(null);
 	const [isDecryptFileDragActive, setIsDecryptFileDragActive] = useState(false);
@@ -371,7 +372,7 @@ const App = () => {
 		setContactError(null);
 		forceCloseContactModal();
 		setEncryptRecipientId("");
-		setEncryptMode("text");
+		setEncryptMode("file");
 		setEncryptSmsg("");
 		setEncryptMsg("");
 		setEncryptPassword("");
@@ -381,6 +382,7 @@ const App = () => {
 		setEncryptError(null);
 		setEncryptedBlob(null);
 		setEncryptStep(1);
+		setDecryptMode("file");
 		setDecryptPayloadInput("");
 		setDecryptPayloadFile(null);
 		setIsDecryptFileDragActive(false);
@@ -641,6 +643,7 @@ const App = () => {
 	/* ─── Encrypt helpers ─── */
 
 	function resetEncryptionForm() {
+		setEncryptMode("file");
 		setEncryptSmsg("");
 		setEncryptMsg("");
 		setEncryptPassword("");
@@ -717,6 +720,7 @@ const App = () => {
 		if (decryptBusy) return;
 		const f = e.dataTransfer.files?.[0];
 		if (f) {
+			setDecryptMode("file");
 			setDecryptPayloadFile(f);
 			setDecryptPayloadInput("");
 			setDecryptStatus(null); setDecryptError(null); setDecryptedResult(null);
@@ -726,6 +730,7 @@ const App = () => {
 
 	function handleDecryptFileChange(e: React.ChangeEvent<HTMLInputElement>) {
 		const f = e.target.files?.[0] ?? null;
+		setDecryptMode("file");
 		setDecryptPayloadFile(f);
 		setDecryptPayloadInput("");
 		setDecryptStatus(null); setDecryptError(null); setDecryptedResult(null);
@@ -735,7 +740,21 @@ const App = () => {
 		else setDecryptDetected(null);
 	}
 
+	function handleDecryptModeChange(mode: "file" | "text") {
+		if (mode === decryptMode) return;
+		setDecryptMode(mode);
+		if (mode === "file") {
+			setDecryptPayloadInput("");
+			setDecryptError(null);
+		} else {
+			setDecryptPayloadFile(null);
+			setDecryptDetected(null);
+			setDecryptError(null);
+		}
+	}
+
 	function resetDecryptForm() {
+		setDecryptMode("file");
 		setDecryptPayloadInput("");
 		setDecryptPayloadFile(null);
 		setIsDecryptFileDragActive(false);
@@ -777,9 +796,12 @@ const App = () => {
 	}
 
 	async function loadOpsecData(): Promise<Uint8Array> {
-		if (decryptPayloadFile) return new Uint8Array(await decryptPayloadFile.arrayBuffer());
+		if (decryptMode === "file") {
+			if (!decryptPayloadFile) throw new Error("암호화된 파일을 업로드하세요");
+			return new Uint8Array(await decryptPayloadFile.arrayBuffer());
+		}
 		const raw = decryptPayloadInput.trim();
-		if (!raw) throw new Error("Base64 텍스트를 붙여넣거나 파일을 업로드하세요");
+		if (!raw) throw new Error("Base64 텍스트를 붙여넣으세요");
 		try {
 			if (raw.includes("#START#") || raw.includes("#END#")) {
 				return decode64WithSplit(raw, "#");
@@ -1289,16 +1311,11 @@ const App = () => {
 						</div>
 
 						<div className="tab-toggle">
-							<button className={encryptMode === "text" ? "active" : ""} onClick={() => handleEncryptionModeChange("text")}>텍스트</button>
 							<button className={encryptMode === "file" ? "active" : ""} onClick={() => handleEncryptionModeChange("file")}>파일</button>
+							<button className={encryptMode === "text" ? "active" : ""} onClick={() => handleEncryptionModeChange("text")}>텍스트</button>
 						</div>
 
-						{encryptMode === "text" ? (
-							<div className="form-group">
-								<label className="form-label">비밀 메시지</label>
-								<textarea value={encryptSmsg} onChange={(e) => { setEncryptSmsg(e.target.value); setEncryptError(null); }} placeholder="암호화할 메시지 입력" />
-							</div>
-						) : (
+						{encryptMode === "file" ? (
 							<div className="form-group">
 								<div
 									className={`file-drop ${isFileDragActive ? "active" : ""}`}
@@ -1323,6 +1340,11 @@ const App = () => {
 										<button className="btn-ghost btn-sm" onClick={() => applySelectedEncryptFile(null)}>제거</button>
 									</div>
 								)}
+							</div>
+						) : (
+							<div className="form-group">
+								<label className="form-label">비밀 메시지</label>
+								<textarea value={encryptSmsg} onChange={(e) => { setEncryptSmsg(e.target.value); setEncryptError(null); }} placeholder="암호화할 메시지 입력" />
 							</div>
 						)}
 
@@ -1404,59 +1426,67 @@ const App = () => {
 						</div>
 						<p className="section-desc">암호화된 데이터를 불러오세요.</p>
 
-						<div className="form-group">
-							<div
-								className={`file-drop ${isDecryptFileDragActive ? "active" : ""}`}
-								onDragEnter={handleDecryptDragEnter}
-								onDragOver={handleDecryptDragOver}
-								onDragLeave={handleDecryptDragLeave}
-								onDrop={handleDecryptFileDrop}
-							>
-								<input id="decrypt-file" type="file" onChange={handleDecryptFileChange} disabled={decryptBusy} className="sr-only" />
-								<label htmlFor="decrypt-file" style={{ cursor: "pointer" }}>
-									<div className="file-drop-icon">📂</div>
-									<p className="file-drop-text">암호화된 파일을 끌어놓거나 클릭하세요</p>
-									<p className="file-drop-hint">.yas 파일을 여기에 놓으세요</p>
-								</label>
-							</div>
-							{decryptPayloadFile && (
-								<div className="file-info-bar">
-									<div>
-										<span className="file-info-name">{decryptPayloadFile.name}</span>
-										<span className="file-info-size"> · {formatBytes(decryptPayloadFile.size)}</span>
-									</div>
-									<button className="btn-ghost btn-sm" onClick={() => { setDecryptPayloadFile(null); setDecryptDetected(null); }}>제거</button>
-								</div>
-							)}
+						<div className="tab-toggle">
+							<button className={decryptMode === "file" ? "active" : ""} onClick={() => handleDecryptModeChange("file")}>파일</button>
+							<button className={decryptMode === "text" ? "active" : ""} onClick={() => handleDecryptModeChange("text")}>텍스트</button>
 						</div>
 
-						<div className="form-group">
-							<label className="form-label">또는 Base64 텍스트 붙여넣기</label>
-							<textarea
-								value={decryptPayloadInput}
-								onChange={(e) => {
-									const val = e.target.value;
-									setDecryptPayloadInput(val);
-									setDecryptPayloadFile(null);
-									setDecryptError(null);
-									if (val.trim()) {
-										try {
-											const decoded = val.includes("#START#") || val.includes("#END#")
-												? decode64WithSplit(val.trim(), "#")
-												: base64ToU8(val.trim());
-											tryAutoDetect(decoded);
-										} catch {
-											setDecryptDetected(null);
-										}
-									} else { setDecryptDetected(null); }
-								}}
-								placeholder="Base64로 인코딩된 암호문..."
-								disabled={decryptBusy}
-							/>
-						</div>
+						{decryptMode === "file" ? (
+							<div className="form-group">
+								<div
+									className={`file-drop ${isDecryptFileDragActive ? "active" : ""}`}
+									onDragEnter={handleDecryptDragEnter}
+									onDragOver={handleDecryptDragOver}
+									onDragLeave={handleDecryptDragLeave}
+									onDrop={handleDecryptFileDrop}
+								>
+									<input id="decrypt-file" type="file" onChange={handleDecryptFileChange} disabled={decryptBusy} className="sr-only" />
+									<label htmlFor="decrypt-file" style={{ cursor: "pointer" }}>
+										<div className="file-drop-icon">📂</div>
+										<p className="file-drop-text">암호화된 파일을 끌어놓거나 클릭하세요</p>
+										<p className="file-drop-hint">.yas 파일을 여기에 놓으세요</p>
+									</label>
+								</div>
+								{decryptPayloadFile && (
+									<div className="file-info-bar">
+										<div>
+											<span className="file-info-name">{decryptPayloadFile.name}</span>
+											<span className="file-info-size"> · {formatBytes(decryptPayloadFile.size)}</span>
+										</div>
+										<button className="btn-ghost btn-sm" onClick={() => { setDecryptPayloadFile(null); setDecryptDetected(null); }}>제거</button>
+									</div>
+								)}
+							</div>
+						) : (
+							<div className="form-group">
+								<label className="form-label">Base64 텍스트 붙여넣기</label>
+								<textarea
+									value={decryptPayloadInput}
+									onChange={(e) => {
+										const val = e.target.value;
+										setDecryptPayloadInput(val);
+										setDecryptPayloadFile(null);
+										setDecryptError(null);
+										if (val.trim()) {
+											try {
+												const decoded = val.includes("#START#") || val.includes("#END#")
+													? decode64WithSplit(val.trim(), "#")
+													: base64ToU8(val.trim());
+												tryAutoDetect(decoded);
+											} catch {
+												setDecryptDetected(null);
+											}
+										} else { setDecryptDetected(null); }
+									}}
+									placeholder="Base64로 인코딩된 암호문..."
+									disabled={decryptBusy}
+									rows={4}
+								/>
+							</div>
+						)}
 
 						<div className="btn-row btn-row-right">
-							<button className="btn btn-primary" disabled={!decryptPayloadFile && !decryptPayloadInput.trim()} onClick={handleDecryptAdvanceToStep2}>
+							<button className="btn btn-primary" disabled={decryptMode === "file" ? !decryptPayloadFile : !decryptPayloadInput.trim()} onClick={handleDecryptAdvanceToStep2}>
 								다음
 							</button>
 						</div>
