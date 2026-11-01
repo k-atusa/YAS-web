@@ -700,33 +700,12 @@ export async function decryptOpsecPub(
   return result;
 }
 
-// ==================== Account private key encryption (UNRELATED to USAG-lib) ====================
+// ==================== Account private key encryption (arg2st + WebAuthn PRF) ====================
 //
-// This protects a user's private key with PBKDF2-SHA256 + AES-GCM before sending
-// it to the server. It is independent of the Opsec layer and must remain stable
-// because the server stores the result.
-
-async function deriveStorageKey(
-  passphrase: string,
-  salt: Uint8Array,
-  iterations = 310_000,
-  keyLength = 32
-): Promise<CryptoKey> {
-  const base = await crypto.subtle.importKey(
-    "raw",
-    asBuf(_enc.encode(passphrase)),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: asBuf(salt), iterations, hash: "SHA-256" },
-    base,
-    { name: "AES-GCM", length: keyLength * 8 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
+// Protects a user's private key in the browser using Argon2id standard (arg2st:
+// time=3, mem=262144 KiB, parallelism=6, HMAC-SHA3-512 key derivation) + AES-256-GCM.
+// Supports WebAuthn PRF hardware-bound secrets ("arg2st-prf") with zero password
+// prompt, as well as password-based "arg2st" fallback.
 
 function randomBytes(n: number): Uint8Array {
   const b = new Uint8Array(n);
@@ -734,31 +713,86 @@ function randomBytes(n: number): Uint8Array {
   return b;
 }
 
+async function deriveArg2stAesKey(
+  secretBytes: Uint8Array,
+  salt: Uint8Array,
+  usage: KeyUsage[] = ["encrypt", "decrypt"]
+): Promise<CryptoKey> {
+  const U = await waitForUsag();
+  const HashMaster = U.bencrypt.HashMaster as new (
+    algo: string,
+    s1: number,
+    s2: number
+  ) => {
+    KDF(pw: Uint8Array, salt: Uint8Array): Promise<[Uint8Array, Uint8Array]>;
+  };
+  const hm = new HashMaster("arg2st", 32, 32);
+  const [, userKey] = await hm.KDF(secretBytes, salt);
+  return crypto.subtle.importKey(
+    "raw",
+    asBuf(userKey),
+    { name: "AES-GCM", length: 256 },
+    false,
+    usage
+  );
+}
+
+async function normalizePassphraseBytes(passphrase: string): Promise<Uint8Array> {
+  const U = await waitForUsag();
+  const NormPW = U.bencode.NormPW as (s: string) => Uint8Array;
+  return NormPW(passphrase);
+}
+
+export async function computeWebAuthnPrfSalt(username: string): Promise<ArrayBuffer> {
+  const label = `YAS-WEB-PRF-KEY-V1:${username.trim()}`;
+  return crypto.subtle.digest("SHA-256", asBuf(_enc.encode(label)));
+}
+
+export interface KeyProtectionSecret {
+  prfOutput?: Uint8Array;
+  passphrase?: string;
+}
+
 async function encryptPrivateKey(
   privateKeyB64: string,
-  passphrase: string
+  secret: KeyProtectionSecret
 ): Promise<{ encryptedPrivateKey: EncryptedPrivateKey; kdf: KdfParameters }> {
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const iterations = 310_000;
-  const keyLength = 32;
-  const aesKey = await deriveStorageKey(passphrase, salt, iterations, keyLength);
+
+  let secretBytes: Uint8Array;
+  let algorithm: "arg2st" | "arg2st-prf";
+
+  if (secret.prfOutput && secret.prfOutput.length > 0) {
+    secretBytes = secret.prfOutput;
+    algorithm = "arg2st-prf";
+  } else if (secret.passphrase && secret.passphrase.trim()) {
+    secretBytes = await normalizePassphraseBytes(secret.passphrase);
+    algorithm = "arg2st";
+  } else {
+    throw new Error("개인키를 암호화할 패스키(PRF) 시크릿 또는 비밀번호가 필요합니다.");
+  }
+
+  const aesKey = await deriveArg2stAesKey(secretBytes, salt, ["encrypt"]);
   const cipher = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: asBuf(iv) },
     aesKey,
     asBuf(_enc.encode(privateKeyB64))
   );
+
   return {
     encryptedPrivateKey: {
       cipherText: u8ToBase64(new Uint8Array(cipher)),
       iv: u8ToBase64(iv),
     },
     kdf: {
-      algorithm: "PBKDF2",
+      algorithm,
       salt: u8ToBase64(salt),
-      iterations,
-      keyLength,
-      hash: "SHA-256",
+      iterations: 3,
+      memoryCost: 262144,
+      parallelism: 6,
+      keyLength: 32,
+      hash: "SHA3-512",
     },
   };
 }
@@ -767,24 +801,23 @@ export async function buildAccountPayload(
   username: string,
   publicKeyB64: string,
   privateKeyB64: string,
-  passphrase: string,
+  secret: KeyProtectionSecret | string,
   notes?: string
 ): Promise<AccountPayload> {
-  if (!passphrase || !passphrase.trim()) {
-    throw new Error("개인키 암호화를 위한 비밀번호(Passphrase)가 필요합니다.");
-  }
-  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, passphrase);
+  const normalizedSecret: KeyProtectionSecret =
+    typeof secret === "string" ? { passphrase: secret } : secret;
+  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, normalizedSecret);
   return { username, publicKey: publicKeyB64, encryptedPrivateKey, kdf, notes };
 }
 
 export async function decryptStoredPrivateKeyClient(
   encrypted: EncryptedPrivateKey,
   kdf: KdfParameters,
-  passphrase: string
+  secret: KeyProtectionSecret | string
 ): Promise<string> {
-  if (!passphrase || !passphrase.trim()) {
-    throw new Error("개인키 복호화를 위한 비밀번호(Passphrase)가 필요합니다.");
-  }
+  const normalizedSecret: KeyProtectionSecret =
+    typeof secret === "string" ? { passphrase: secret } : secret;
+
   const salt = base64ToU8(kdf.salt);
   const iv = base64ToU8(encrypted.iv);
   let cipherBytes = base64ToU8(encrypted.cipherText);
@@ -796,25 +829,22 @@ export async function decryptStoredPrivateKeyClient(
     cipherBytes = combined;
   }
 
-  const iterations = kdf.iterations ?? 310_000;
-  const keyLength = kdf.keyLength ?? 32;
-  const hash = kdf.hash ?? "SHA-256";
+  let secretBytes: Uint8Array;
+  if (kdf.algorithm === "arg2st-prf") {
+    if (!normalizedSecret.prfOutput || normalizedSecret.prfOutput.length === 0) {
+      throw new Error("패스키 PRF 키를 확인할 수 없습니다. 패스키 인증을 다시 시도하세요.");
+    }
+    secretBytes = normalizedSecret.prfOutput;
+  } else if (kdf.algorithm === "arg2st") {
+    if (!normalizedSecret.passphrase || !normalizedSecret.passphrase.trim()) {
+      throw new Error("개인키 복호화를 위한 비밀번호가 필요합니다.");
+    }
+    secretBytes = await normalizePassphraseBytes(normalizedSecret.passphrase);
+  } else {
+    throw new Error(`지원하지 않거나 취약한 KDF 알고리즘입니다 (${kdf.algorithm}). 키를 재생성해주세요.`);
+  }
 
-  const base = await crypto.subtle.importKey(
-    "raw",
-    asBuf(_enc.encode(passphrase)),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
-  const aesKey = await crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: asBuf(salt), iterations, hash },
-    base,
-    { name: "AES-GCM", length: keyLength * 8 },
-    false,
-    ["decrypt"]
-  );
-
+  const aesKey = await deriveArg2stAesKey(secretBytes, salt, ["decrypt"]);
   const decrypted = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: asBuf(iv) },
     aesKey,
@@ -824,7 +854,7 @@ export async function decryptStoredPrivateKeyClient(
   return _dec.decode(decrypted);
 }
 
-// ==================== WebAuthn utilities (UNRELATED to USAG-lib) ====================
+// ==================== WebAuthn utilities (with PRF extension) ====================
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return u8ToBase64(new Uint8Array(buffer));
@@ -847,15 +877,19 @@ export async function registerWebAuthnCredential(options: {
   timeout?: number;
   attestation?: "none" | "direct" | "indirect";
   authenticatorSelection?: any;
+  username?: string;
 }): Promise<{
   credentialId: string;
   publicKey: string;
   counter: number;
   transports?: string[];
   clientDataJSON: string;
+  prfEnabled: boolean;
+  prfOutput?: Uint8Array;
 }> {
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const userIdBuffer = base64ToArrayBuffer(options.user.id);
+  const prfSalt = await computeWebAuthnPrfSalt(options.username || options.user.name || "default");
 
   const credential = (await navigator.credentials.create({
     publicKey: {
@@ -874,6 +908,13 @@ export async function registerWebAuthnCredential(options: {
         residentKey: "preferred",
         userVerification: "preferred",
       },
+      extensions: {
+        prf: {
+          eval: {
+            first: prfSalt,
+          },
+        },
+      } as any,
     },
   })) as PublicKeyCredential | null;
 
@@ -898,7 +939,12 @@ export async function registerWebAuthnCredential(options: {
   const transports = response.getTransports?.() || [];
   const clientDataJSON = arrayBufferToBase64(response.clientDataJSON as unknown as ArrayBuffer);
 
-  return { credentialId, publicKey, counter, transports, clientDataJSON };
+  const extResults = (credential.getClientExtensionResults?.() as any) || {};
+  const prfFirst: ArrayBuffer | undefined = extResults?.prf?.results?.first;
+  const prfOutput = prfFirst && prfFirst.byteLength > 0 ? new Uint8Array(prfFirst) : undefined;
+  const prfEnabled = Boolean(extResults?.prf?.enabled || prfOutput);
+
+  return { credentialId, publicKey, counter, transports, clientDataJSON, prfEnabled, prfOutput };
 }
 
 export async function authenticateWithWebAuthn(options: {
@@ -906,12 +952,14 @@ export async function authenticateWithWebAuthn(options: {
   allowCredentials?: Array<{ type: "public-key"; id: string; transports?: string[] }>;
   timeout?: number;
   userVerification?: "required" | "preferred" | "discouraged";
+  username?: string;
 }): Promise<{
   credentialId: string;
   clientDataJSON: string;
   authenticatorData: string;
   signature: string;
   counter: number;
+  prfOutput?: Uint8Array;
 }> {
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const allowCredentials = (options.allowCredentials || []).map((cred) => ({
@@ -919,12 +967,21 @@ export async function authenticateWithWebAuthn(options: {
     id: base64ToArrayBuffer(cred.id),
     transports: cred.transports as AuthenticatorTransport[] | undefined,
   }));
+  const prfSalt = await computeWebAuthnPrfSalt(options.username || "default");
+
   const assertion = (await navigator.credentials.get({
     publicKey: {
       challenge: challengeBuffer,
       timeout: options.timeout || 60000,
       userVerification: options.userVerification || "preferred",
       allowCredentials: allowCredentials.length > 0 ? allowCredentials : undefined,
+      extensions: {
+        prf: {
+          eval: {
+            first: prfSalt,
+          },
+        },
+      } as any,
     },
   })) as PublicKeyCredential | null;
   if (!assertion) throw new Error("WebAuthn authentication cancelled");
@@ -943,12 +1000,17 @@ export async function authenticateWithWebAuthn(options: {
   }
   if (!credentialId) throw new Error("Failed to extract credential ID");
 
+  const extResults = (assertion.getClientExtensionResults?.() as any) || {};
+  const prfFirst: ArrayBuffer | undefined = extResults?.prf?.results?.first;
+  const prfOutput = prfFirst && prfFirst.byteLength > 0 ? new Uint8Array(prfFirst) : undefined;
+
   return {
     credentialId,
     clientDataJSON: arrayBufferToBase64(response.clientDataJSON as unknown as ArrayBuffer),
     authenticatorData: arrayBufferToBase64(response.authenticatorData as unknown as ArrayBuffer),
     signature: arrayBufferToBase64(response.signature as unknown as ArrayBuffer),
     counter,
+    prfOutput,
   };
 }
 

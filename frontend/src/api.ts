@@ -1,5 +1,5 @@
 import { API_BASE } from "./config";
-import type { AccountPayload, AccountRecord, ContactPayload, ContactRecord } from "./types";
+import type { AccountPayload, AccountRecord, AccountVault, ContactPayload, ContactRecord } from "./types";
 
 export async function signup(username: string, password: string): Promise<{ id: string; username: string }> {
   const response = await fetch(`${API_BASE}/auth/signup`, {
@@ -57,6 +57,49 @@ export async function getAccountByUsername(username: string): Promise<AccountRec
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to fetch account");
+  }
+
+  return response.json();
+}
+
+export async function verifyPassword(
+  token: string,
+  password: string
+): Promise<{ token: string; expiresAt: string; verified: boolean }> {
+  const response = await fetch(`${API_BASE}/auth/verify-password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ password }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "비밀번호 인증에 실패했습니다");
+  }
+
+  return response.json();
+}
+
+export async function getMyPrivateKeyVault(
+  token: string,
+  verificationToken: string
+): Promise<AccountVault> {
+  const response = await fetch(`${API_BASE}/accounts/me/vault`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "X-Verification-Token": verificationToken,
+    },
+    body: JSON.stringify({ verificationToken }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "개인키 접근 인증에 실패했습니다");
   }
 
   return response.json();

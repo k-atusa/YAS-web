@@ -14,12 +14,18 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"yas-web-backend/internal/config"
 	"yas-web-backend/internal/models"
 
 	"github.com/golang-jwt/jwt/v5"
+)
+
+var (
+	consumedTokensMu sync.Mutex
+	consumedTokens   = make(map[string]time.Time)
 )
 
 func GenerateChallenge() string {
@@ -199,7 +205,7 @@ func VerifySignature(storedPubKeyBase64 string, authData, clientDataJSONBytes, s
 	}
 }
 
-// GenerateVerificationToken issues a signed token certifying successful WebAuthn authentication.
+// GenerateVerificationToken issues a signed token certifying successful WebAuthn or password verification.
 func GenerateVerificationToken(userID string, expirySeconds int) (string, time.Time, error) {
 	if expirySeconds <= 0 {
 		expirySeconds = 60
@@ -220,4 +226,59 @@ func GenerateVerificationToken(userID string, expirySeconds int) (string, time.T
 		return "", time.Time{}, err
 	}
 	return signed, expiresAt, nil
+}
+
+// VerifyAndConsumeVerificationToken verifies a single-use verification token and consumes its jti so it cannot be replayed.
+func VerifyAndConsumeVerificationToken(tokenStr, expectedUserID string) error {
+	tokenStr = strings.TrimSpace(tokenStr)
+	if tokenStr == "" {
+		return errors.New("missing verification token")
+	}
+
+	tok, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return []byte(config.App.JWTSecret), nil
+	})
+	if err != nil || !tok.Valid {
+		return errors.New("invalid or expired verification token")
+	}
+
+	claims, ok := tok.Claims.(jwt.MapClaims)
+	if !ok {
+		return errors.New("invalid verification token claims")
+	}
+
+	tokType, _ := claims["type"].(string)
+	if tokType != "webauthn_verified" {
+		return errors.New("invalid token type")
+	}
+
+	sub, _ := claims["sub"].(string)
+	if sub == "" || (expectedUserID != "" && sub != expectedUserID) {
+		return errors.New("verification token user mismatch")
+	}
+
+	jti, _ := claims["jti"].(string)
+	if jti == "" {
+		return errors.New("missing token jti")
+	}
+
+	now := time.Now().UTC()
+	consumedTokensMu.Lock()
+	defer consumedTokensMu.Unlock()
+
+	for k, exp := range consumedTokens {
+		if now.After(exp) {
+			delete(consumedTokens, k)
+		}
+	}
+
+	if _, used := consumedTokens[jti]; used {
+		return errors.New("verification token already used")
+	}
+
+	consumedTokens[jti] = now.Add(5 * time.Minute)
+	return nil
 }

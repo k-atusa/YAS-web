@@ -64,6 +64,23 @@ type Account struct {
 	UpdatedAt           time.Time           `json:"updatedAt"`
 }
 
+type PublicAccount struct {
+	ID            string    `json:"id"`
+	Username      string    `json:"username"`
+	PublicKey     string    `json:"publicKey"`
+	HasPrivateKey bool      `json:"hasPrivateKey"`
+	Notes         string    `json:"notes,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type AccountVaultResponse struct {
+	Username            string              `json:"username"`
+	PublicKey           string              `json:"publicKey"`
+	EncryptedPrivateKey EncryptedPrivateKey `json:"encryptedPrivateKey"`
+	Kdf                 KdfParameters       `json:"kdf"`
+}
+
 type Contact struct {
 	ID              string    `json:"id"`
 	OwnerID         string    `json:"-"`

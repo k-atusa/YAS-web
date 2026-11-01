@@ -54,7 +54,9 @@ export const KeysTab = ({
 	const [localCopyPublic, setLocalCopyPublic] = useState<"idle" | "copied">("idle");
 	const [localCopyPrivate, setLocalCopyPrivate] = useState<"idle" | "copied">("idle");
 
-	const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
+	const hasStoredKey = Boolean(
+		storedAccount?.publicKey && (storedAccount?.hasPrivateKey || storedAccount?.encryptedPrivateKey?.cipherText)
+	);
 	const saveHandler = onSaveKeys || onSaveManualKeys;
 
 	async function handleCreatePreview() {
@@ -184,9 +186,9 @@ export const KeysTab = ({
 									type="button"
 									className="btn btn-secondary btn-sm"
 									onClick={onRevealPrivateKey}
-									disabled={busy || !webauthnAvailable}
+									disabled={busy}
 								>
-									{busy ? "인증 중..." : "패스키로 인증하여 보기"}
+									{busy ? "인증 중..." : webauthnAvailable ? "패스키로 인증하여 보기" : "인증하여 보기"}
 								</button>
 							)}
 						</div>

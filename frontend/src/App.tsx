@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { Toaster } from "./components/ui/sonner";
 import {
 	getAccountByUsername,
+	getMyPrivateKeyVault,
+	verifyPassword,
 	login as loginApi,
 	saveAccount,
 	signup,
@@ -34,7 +36,7 @@ import {
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
 } from "./crypto";
-import type { EncAlgo, AuthMode, DecryptResult } from "./crypto";
+import type { EncAlgo, AuthMode, DecryptResult, KeyProtectionSecret } from "./crypto";
 import type { AccountRecord, ContactRecord } from "./types";
 
 
@@ -127,7 +129,6 @@ const App = () => {
 	const [webauthnAvailable, setWebauthnAvailable] = useState(false);
 	const [webauthnAuthBusy, setWebauthnAuthBusy] = useState(false);
 	const [webauthnPending, setWebauthnPending] = useState<"register" | "authenticate" | null>(null);
-	const [sessionPassphrase, setSessionPassphrase] = useState<string>("");
 	const [passphrasePrompt, setPassphrasePrompt] = useState<{
 		isOpen: boolean;
 		title: string;
@@ -353,7 +354,6 @@ const App = () => {
 			const result = await loginApi(loginUsername, loginPass);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
-			setSessionPassphrase(loginPass);
 			if (result.hasPasskey === false) {
 				setWebauthnPending("register");
 			} else {
@@ -379,7 +379,6 @@ const App = () => {
 			const result = await loginApi(loginUsername, loginPass);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
-			setSessionPassphrase(loginPass);
 			setWebauthnPending("register");
 		} catch (err) {
 			const msg = (err as Error).message || "회원가입에 실패했습니다";
@@ -394,7 +393,6 @@ const App = () => {
 		setAuthToken(null);
 		setAuthUsername(null);
 		setPrivateKeyPem("");
-		setSessionPassphrase("");
 		setWebauthnPending(null);
 		setTabDirection("none");
 		setLoginPass("");
@@ -577,13 +575,16 @@ const App = () => {
 		}
 	}
 
-	/* ─── Zero-Knowledge Passphrase & Key helpers ─── */
+	/* ─── Zero-Knowledge WebAuthn PRF & arg2st Key helpers ─── */
+
+	const hasStoredPrivateKey = Boolean(
+		storedAccount?.publicKey && (storedAccount?.hasPrivateKey || storedAccount?.encryptedPrivateKey?.cipherText)
+	);
 
 	function requestPassphrase(
 		title = "비밀번호 확인",
 		description = "개인키를 암호화하거나 잠금 해제하려면 계정 비밀번호를 입력하세요."
 	): Promise<string | null> {
-		if (sessionPassphrase) return Promise.resolve(sessionPassphrase);
 		return new Promise((resolve) => {
 			setPassphraseInput("");
 			setPassphrasePrompt({
@@ -591,20 +592,17 @@ const App = () => {
 				title,
 				description,
 				resolve: (pass) => {
-					if (pass) setSessionPassphrase(pass);
 					resolve(pass);
 				},
 			});
 		});
 	}
 
-	async function unlockStoredPrivateKey(requireWebAuthn = true): Promise<string> {
-		if (!authToken || !isAuthed) throw new Error("로그인이 필요합니다");
-		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) {
-			throw new Error("저장된 개인키가 없습니다.");
-		}
-
-		if (requireWebAuthn && webauthnAvailable) {
+	async function obtainProtectionSecretForSave(
+		title: string,
+		description: string
+	): Promise<KeyProtectionSecret | null> {
+		if (webauthnAvailable && authToken) {
 			setWebauthnAuthBusy(true);
 			try {
 				const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
@@ -614,6 +612,7 @@ const App = () => {
 					allowCredentials: options.allowCredentials || [],
 					timeout: options.timeout,
 					userVerification: options.userVerification,
+					username: authUsername || username,
 				});
 				await verifyWebAuthnAuthentication(
 					authToken,
@@ -622,28 +621,95 @@ const App = () => {
 					assertion.authenticatorData,
 					assertion.signature
 				);
+				if (assertion.prfOutput && assertion.prfOutput.length > 0) {
+					return { prfOutput: assertion.prfOutput };
+				}
 			} finally {
 				setWebauthnAuthBusy(false);
 			}
 		}
 
-		const pass = await requestPassphrase(
-			"개인키 잠금 해제",
-			"저장된 개인키를 복호화할 계정 비밀번호(Passphrase)를 입력하세요."
-		);
-		if (!pass) throw new Error("비밀번호가 입력되지 않았습니다.");
+		const pass = await requestPassphrase(title, description);
+		if (!pass) return null;
+		return { passphrase: pass };
+	}
+
+	async function unlockStoredPrivateKey(): Promise<string> {
+		if (!authToken || !isAuthed) throw new Error("로그인이 필요합니다");
+		if (!hasStoredPrivateKey) {
+			throw new Error("저장된 개인키가 없습니다.");
+		}
+
+		let verificationToken = "";
+		let prfOutput: Uint8Array | undefined;
+		let verifiedPassphrase: string | undefined;
+
+		if (webauthnAvailable) {
+			setWebauthnAuthBusy(true);
+			try {
+				const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
+				const options = optionsResp.options;
+				const assertion = await authenticateWithWebAuthn({
+					challenge: options.challenge,
+					allowCredentials: options.allowCredentials || [],
+					timeout: options.timeout,
+					userVerification: options.userVerification,
+					username: authUsername || username,
+				});
+				const verifyRes = await verifyWebAuthnAuthentication(
+					authToken,
+					assertion.credentialId,
+					assertion.clientDataJSON,
+					assertion.authenticatorData,
+					assertion.signature
+				);
+				verificationToken = verifyRes.token;
+				prfOutput = assertion.prfOutput;
+			} finally {
+				setWebauthnAuthBusy(false);
+			}
+		} else {
+			const pass = await requestPassphrase(
+				"개인키 접근 인증",
+				"저장된 개인키에 접근하려면 계정 비밀번호를 입력하세요."
+			);
+			if (!pass) throw new Error("비밀번호가 입력되지 않았습니다.");
+			const verifyRes = await verifyPassword(authToken, pass);
+			verificationToken = verifyRes.token;
+			verifiedPassphrase = pass;
+		}
+
+		const vault = await getMyPrivateKeyVault(authToken, verificationToken);
+
+		let secret: KeyProtectionSecret;
+		if (vault.kdf.algorithm === "arg2st-prf") {
+			if (!prfOutput || prfOutput.length === 0) {
+				throw new Error("패스키 PRF 시크릿을 확인할 수 없습니다. PRF를 지원하는 패스키로 인증해주세요.");
+			}
+			secret = { prfOutput };
+		} else {
+			const pass =
+				verifiedPassphrase ??
+				(await requestPassphrase(
+					"개인키 잠금 해제",
+					"저장된 개인키를 복호화할 계정 비밀번호를 입력하세요."
+				)) ??
+				undefined;
+			if (!pass) throw new Error("비밀번호가 입력되지 않았습니다.");
+			secret = { passphrase: pass };
+		}
 
 		try {
 			const decryptedPem = await decryptStoredPrivateKeyClient(
-				storedAccount.encryptedPrivateKey,
-				storedAccount.kdf,
-				pass
+				vault.encryptedPrivateKey,
+				vault.kdf,
+				secret
 			);
 			setPrivateKeyPem(decryptedPem);
 			return decryptedPem;
 		} catch (err) {
 			console.error("Local decryption failed:", err);
-			throw new Error("비밀번호가 올바르지 않거나 저장된 키 데이터가 손상되었습니다.");
+			throw new Error("인증된 패스키 또는 비밀번호가 일치하지 않거나 저장된 키 데이터가 손상되었습니다.");
 		}
 	}
 
@@ -655,16 +721,22 @@ const App = () => {
 		try {
 			const targetUsername = username || authUsername || "";
 			if (!targetUsername) throw new Error("사용자 정보를 찾을 수 없습니다.");
-			const pass = await requestPassphrase(
+			const secret = await obtainProtectionSecretForSave(
 				"키 생성 및 암호화",
 				"생성된 개인키를 클라이언트에서 안전하게 암호화할 계정 비밀번호를 확인해주세요."
 			);
-			if (!pass) return;
+			if (!secret) return;
 
 			const { publicKey, privateKey } = await generateKeyPair();
-			const payload = await buildAccountPayload(targetUsername, publicKey, privateKey, pass, undefined);
+			const payload = await buildAccountPayload(targetUsername, publicKey, privateKey, secret, undefined);
 			const result = await saveAccount(payload, authToken ?? undefined);
-			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			const record: AccountRecord = {
+				id: result.id,
+				username: targetUsername,
+				publicKey,
+				hasPrivateKey: true,
+				createdAt: result.createdAt,
+			};
 			setStoredAccount(record);
 			setPublicKeyPem(publicKey);
 			setPrivateKeyPem("");
@@ -691,21 +763,27 @@ const App = () => {
 				throw new Error(val.error || "유효하지 않은 키 쌍입니다.");
 			}
 
-			const pass = await requestPassphrase(
+			const secret = await obtainProtectionSecretForSave(
 				"키 등록 및 암호화",
-				"입력된 개인키를 클라이언트에서 안전하게 암호화할 계정 비밀번호를 확인해주세요."
+				"개인키를 클라이언트에서 안전하게 암호화할 계정 비밀번호를 확인해주세요."
 			);
-			if (!pass) return;
+			if (!secret) return;
 
 			const payload = await buildAccountPayload(
 				targetUsername,
 				val.cleanPublicKey,
 				val.cleanPrivateKey,
-				pass,
+				secret,
 				undefined
 			);
 			const result = await saveAccount(payload, authToken ?? undefined);
-			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			const record: AccountRecord = {
+				id: result.id,
+				username: targetUsername,
+				publicKey: val.cleanPublicKey,
+				hasPrivateKey: true,
+				createdAt: result.createdAt,
+			};
 			setStoredAccount(record);
 			setPublicKeyPem(val.cleanPublicKey);
 			setPrivateKeyPem("");
@@ -725,15 +803,21 @@ const App = () => {
 		setBusy(true);
 		setError(null);
 		try {
-			const pass = await requestPassphrase(
+			const secret = await obtainProtectionSecretForSave(
 				"키 업로드 및 암호화",
 				"개인키를 클라이언트에서 암호화하여 저장할 계정 비밀번호를 확인해주세요."
 			);
-			if (!pass) return;
+			if (!secret) return;
 
-			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, pass, undefined);
+			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, secret, undefined);
 			const result = await saveAccount(payload, authToken ?? undefined);
-			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			const record: AccountRecord = {
+				id: result.id,
+				username,
+				publicKey: publicKeyPem,
+				hasPrivateKey: true,
+				createdAt: result.createdAt,
+			};
 			setStoredAccount(record);
 			toast.success("키가 안전하게 저장되었습니다");
 			setShowKeySection(false);
@@ -752,16 +836,22 @@ const App = () => {
 		setError(null);
 		try {
 			const targetUsername = username || authUsername || "";
-			const pass = await requestPassphrase(
+			const secret = await obtainProtectionSecretForSave(
 				"키 재생성 및 암호화",
 				"새로 생성할 개인키를 암호화할 계정 비밀번호를 확인해주세요."
 			);
-			if (!pass) return;
+			if (!secret) return;
 
 			const { publicKey, privateKey } = await generateKeyPair();
-			const payload = await buildAccountPayload(targetUsername, publicKey, privateKey, pass, undefined);
+			const payload = await buildAccountPayload(targetUsername, publicKey, privateKey, secret, undefined);
 			const result = await saveAccount(payload, authToken ?? undefined);
-			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			const record: AccountRecord = {
+				id: result.id,
+				username: targetUsername,
+				publicKey,
+				hasPrivateKey: true,
+				createdAt: result.createdAt,
+			};
 			setStoredAccount(record);
 			setPublicKeyPem(publicKey);
 			setPrivateKeyPem("");
@@ -781,7 +871,7 @@ const App = () => {
 	async function handleWebAuthnAuthenticate() {
 		setBusy(true);
 		try {
-			await unlockStoredPrivateKey(true);
+			await unlockStoredPrivateKey();
 			toast.success("보안 키 인증 및 개인키 잠금 해제 완료");
 		} catch (err) {
 			toast.error((err as Error).message || "보안 키 인증 실패");
@@ -793,6 +883,7 @@ const App = () => {
 	async function handleEncryptSignWithKeyToggle(checked: boolean) {
 		if (!checked) {
 			setEncryptSignWithKey(false);
+			setPrivateKeyPem("");
 			return;
 		}
 
@@ -802,8 +893,9 @@ const App = () => {
 		}
 
 		try {
-			await unlockStoredPrivateKey(false);
+			await unlockStoredPrivateKey();
 			setEncryptSignWithKey(true);
+			toast.success("개인키 서명 인증이 완료되었습니다");
 		} catch (err) {
 			toast.error((err as Error).message || "개인키 잠금 해제 실패");
 			setEncryptSignWithKey(false);
@@ -826,6 +918,7 @@ const App = () => {
 		setEncryptEncAlgo("gcm1");
 		setEncryptRecipientId("");
 		setEncryptSignWithKey(false);
+		setPrivateKeyPem("");
 	}
 
 	function handleEncryptionModeChange(mode: "text" | "file") {
@@ -940,22 +1033,23 @@ const App = () => {
 		setDecryptedResult(null);
 		setCopySecretStatus("idle");
 		setDecryptStep(1);
+		setPrivateKeyPem("");
 	}
 
 	async function resolvePrivateKeyB64(): Promise<string> {
 		const manual = decryptPrivateKeyInput.trim();
 		if (manual) return manual;
 		if (privateKeyPem) return privateKeyPem;
-		if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf) {
-			return await unlockStoredPrivateKey(false);
+		if (hasStoredPrivateKey) {
+			return await unlockStoredPrivateKey();
 		}
 		throw new Error("사용 가능한 개인키가 없습니다.");
 	}
 
 	async function resolveSigningPrivateKeyB64(): Promise<string> {
 		if (privateKeyPem) return privateKeyPem;
-		if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf) {
-			return await unlockStoredPrivateKey(false);
+		if (hasStoredPrivateKey) {
+			return await unlockStoredPrivateKey();
 		}
 		throw new Error("서명에 사용할 개인키를 찾을 수 없습니다.");
 	}
@@ -1016,6 +1110,7 @@ const App = () => {
 				});
 			}
 			setEncryptedBlob(result);
+			setPrivateKeyPem("");
 			toast.success(encryptMode === "text"
 				? `암호화 완료 (${result.length} bytes)`
 				: `파일 암호화 완료 (${formatBytes(result.length)})`
@@ -1084,6 +1179,7 @@ const App = () => {
 				result = await decryptOpsecPub(dataU8, priB64, peerPub, myPub.trim() || undefined);
 			}
 			setDecryptedResult(result);
+			setPrivateKeyPem("");
 			if (result.verified === true) {
 				toast.success("복호화 완료 (서명 검증 성공)");
 			} else if (result.verified === false) {
@@ -1277,7 +1373,7 @@ const App = () => {
 		try {
 			setBusy(true);
 			setError(null);
-			await unlockStoredPrivateKey(true);
+			await unlockStoredPrivateKey();
 			toast.success("개인키가 잠금 해제되었습니다");
 		} catch (err) {
 			toast.error((err as Error).message || "개인키 인증에 실패했습니다");
@@ -1716,7 +1812,7 @@ const App = () => {
 										<button
 											className={decryptPrivateKeySource === "security" ? "active" : ""}
 											onClick={() => {
-												if (storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable) {
+												if (hasStoredPrivateKey && isAuthed) {
 													setDecryptPrivateKeySource("security");
 												} else {
 													setDecryptPrivateKeySource("manual");
@@ -1730,7 +1826,7 @@ const App = () => {
 
 									{decryptPrivateKeySource === "security" ? (
 										<>
-											{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable ? (
+											{hasStoredPrivateKey && isAuthed ? (
 												<>
 													<button className="btn btn-secondary btn-full" onClick={handleWebAuthnAuthenticate} disabled={decryptBusy || webauthnAuthBusy}>
 														{webauthnAuthBusy ? "인증 중..." : "🔐 보안 키로 인증"}
@@ -1738,7 +1834,7 @@ const App = () => {
 													{privateKeyPem && <p className="text-hint mt-3" style={{ color: "var(--success)" }}>✓ 개인키 잠금 해제 완료</p>}
 												</>
 											) : (
-												<p className="text-hint">저장된 키가 없거나 WebAuthn이 불가능합니다. 직접 입력을 사용하세요.</p>
+												<p className="text-hint">저장된 키가 없습니다. 직접 입력을 사용하세요.</p>
 											)}
 										</>
 									) : (
@@ -1847,6 +1943,7 @@ const App = () => {
 				challenge: optionsResp.options.challenge, rp: optionsResp.options.rp, user: optionsResp.options.user,
 				pubKeyCredParams: optionsResp.options.pubKeyCredParams, timeout: optionsResp.options.timeout,
 				attestation: optionsResp.options.attestation, authenticatorSelection: optionsResp.options.authenticatorSelection,
+				username: authUsername || loginUsername,
 			});
 			await verifyWebAuthnRegistration(
 				authToken!,
@@ -1880,6 +1977,7 @@ const App = () => {
 			const authentication = await authenticateWithWebAuthn({
 				challenge: optionsResp.options.challenge, allowCredentials: optionsResp.options.allowCredentials || [],
 				timeout: optionsResp.options.timeout, userVerification: optionsResp.options.userVerification,
+				username: authUsername || loginUsername,
 			});
 			await verifyWebAuthnAuthentication(
 				authToken!,
@@ -1893,10 +1991,12 @@ const App = () => {
 			if (account) {
 				setPublicKeyPem(account.publicKey);
 				setStoredAccount(account);
+				setShowKeySection(false);
+			} else {
+				setShowKeySection(true);
 			}
 
 			setWebauthnPending(null);
-			setShowKeySection(false);
 			toast.success("패스키 인증이 완료되었습니다");
 		} catch (err) {
 			const msg = (err as Error).message || "";

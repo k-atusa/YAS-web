@@ -1,4 +1,4 @@
-type KdfAlgorithm = "PBKDF2" | "scrypt" | "argon2";
+export type KdfAlgorithm = "arg2st" | "arg2st-prf";
 
 export interface KdfParameters {
   algorithm: KdfAlgorithm;
@@ -24,10 +24,23 @@ export interface AccountPayload {
   notes?: string;
 }
 
-export interface AccountRecord extends AccountPayload {
+export interface AccountRecord {
   id: string;
+  username: string;
+  publicKey: string;
+  hasPrivateKey?: boolean;
+  encryptedPrivateKey?: EncryptedPrivateKey;
+  kdf?: KdfParameters;
+  notes?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface AccountVault {
+  username: string;
+  publicKey: string;
+  encryptedPrivateKey: EncryptedPrivateKey;
+  kdf: KdfParameters;
 }
 
 export interface ContactPayload {

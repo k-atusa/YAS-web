@@ -22,7 +22,7 @@ import (
 	"yas-web-backend/internal/config"
 	"yas-web-backend/internal/db"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
 )
 
 func setupTestServer(t *testing.T) *httptest.Server {
@@ -107,11 +107,36 @@ func TestEndToEndFlow(t *testing.T) {
 		t.Fatal("expected JWT token")
 	}
 
-	// 4. Upload Alice's Account (Encrypted Private Key) - Zero-Knowledge Client-side encryption
-	clientPassphrase := "Alice-Secure-Master-Password-123!"
+	// 4. Verify weak PBKDF2 KDF is rejected (400 Bad Request)
 	salt := []byte("0123456789abcdef")
 	iv := []byte("0123456789ab") // 12 bytes
-	aesKey := pbkdf2.Key([]byte(clientPassphrase), salt, 1000, 32, sha256.New)
+	weakPayload, _ := json.Marshal(map[string]any{
+		"username":  "alice",
+		"publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----",
+		"encryptedPrivateKey": map[string]string{
+			"cipherText": base64.StdEncoding.EncodeToString([]byte("ciphertext")),
+			"iv":         base64.StdEncoding.EncodeToString(iv),
+		},
+		"kdf": map[string]any{
+			"algorithm":  "PBKDF2",
+			"salt":       base64.StdEncoding.EncodeToString(salt),
+			"iterations": 1000,
+			"keyLength":  32,
+			"hash":       "SHA-256",
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/accounts", bytes.NewReader(weakPayload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("weak PBKDF2 should be rejected with 400, got status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 4.1 Upload Alice's Account (Encrypted Private Key with arg2st-prf / arg2st)
+	prfSecret := []byte("0123456789abcdef0123456789abcdef")
+	aesKey := argon2.IDKey(prfSecret, salt, 3, 65536, 4, 32)
 	block, _ := aes.NewCipher(aesKey)
 	gcm, _ := cipher.NewGCM(block)
 	plainPrivKey := "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC\n-----END PRIVATE KEY-----"
@@ -125,14 +150,16 @@ func TestEndToEndFlow(t *testing.T) {
 			"iv":         base64.StdEncoding.EncodeToString(iv),
 		},
 		"kdf": map[string]any{
-			"algorithm":  "PBKDF2",
-			"salt":       base64.StdEncoding.EncodeToString(salt),
-			"iterations": 1000,
-			"keyLength":  32,
-			"hash":       "SHA-256",
+			"algorithm":   "arg2st-prf",
+			"salt":        base64.StdEncoding.EncodeToString(salt),
+			"iterations":  3,
+			"memoryCost":  262144,
+			"parallelism": 6,
+			"keyLength":   32,
+			"hash":        "SHA3-512",
 		},
 	})
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/accounts", bytes.NewReader(accPayload))
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts", bytes.NewReader(accPayload))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
 	resp, err = client.Do(req)
@@ -141,7 +168,7 @@ func TestEndToEndFlow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 5. Zero-Knowledge: Verify that server has NO decrypt endpoint (must return 404/405)
+	// 5. Zero-Knowledge: Verify that server has NO decrypt endpoint (must return 404)
 	decBody, _ := json.Marshal(map[string]string{"username": "alice"})
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -152,48 +179,34 @@ func TestEndToEndFlow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 5.1 Verify client can fetch the stored encrypted vault and decrypt locally
+	// 5.1 Verify public lookup GET /api/accounts/username/alice does NOT leak encryptedPrivateKey or kdf
 	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/accounts/username/alice", nil)
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("get account failed: %v, status=%d", err, resp.StatusCode)
 	}
-	var fetchedAcc struct {
-		Username            string `json:"username"`
-		PublicKey           string `json:"publicKey"`
-		EncryptedPrivateKey struct {
-			CipherText string `json:"cipherText"`
-			IV         string `json:"iv"`
-		} `json:"encryptedPrivateKey"`
-		KDF struct {
-			Salt       string `json:"salt"`
-			Iterations int    `json:"iterations"`
-			KeyLength  int    `json:"keyLength"`
-		} `json:"kdf"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&fetchedAcc)
+	var rawPublicAcc map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&rawPublicAcc)
 	resp.Body.Close()
+	if _, leaked := rawPublicAcc["encryptedPrivateKey"]; leaked {
+		t.Fatalf("public endpoint must NOT expose encryptedPrivateKey")
+	}
+	if _, leaked := rawPublicAcc["kdf"]; leaked {
+		t.Fatalf("public endpoint must NOT expose kdf")
+	}
+	if rawPublicAcc["hasPrivateKey"] != true {
+		t.Fatalf("expected hasPrivateKey=true on public account metadata")
+	}
 
-	// Local client decryption
-	fetchedSalt, _ := base64.StdEncoding.DecodeString(fetchedAcc.KDF.Salt)
-	fetchedIV, _ := base64.StdEncoding.DecodeString(fetchedAcc.EncryptedPrivateKey.IV)
-	fetchedCipher, _ := base64.StdEncoding.DecodeString(fetchedAcc.EncryptedPrivateKey.CipherText)
-	clientDerivedKey := pbkdf2.Key([]byte(clientPassphrase), fetchedSalt, fetchedAcc.KDF.Iterations, fetchedAcc.KDF.KeyLength, sha256.New)
-	cBlock, err := aes.NewCipher(clientDerivedKey)
-	if err != nil {
-		t.Fatalf("failed to create cipher: %v", err)
+	// 5.2 Verify POST /api/accounts/me/vault without verificationToken is rejected with 401
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/me/vault", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("vault access without verificationToken must return 401, got status=%d", resp.StatusCode)
 	}
-	cGcm, err := cipher.NewGCM(cBlock)
-	if err != nil {
-		t.Fatalf("failed to create gcm: %v", err)
-	}
-	clientDecrypted, err := cGcm.Open(nil, fetchedIV, fetchedCipher, nil)
-	if err != nil {
-		t.Fatalf("client-side decryption failed: %v", err)
-	}
-	if string(clientDecrypted) != plainPrivKey {
-		t.Fatalf("client-side decrypted key mismatch: got %q, want %q", string(clientDecrypted), plainPrivKey)
-	}
+	resp.Body.Close()
 
 	// 6. WebAuthn Register + Authenticate (Real cryptographic signature verification)
 	// 6.1 Generate mock WebAuthn P-256 Authenticator Key
@@ -327,4 +340,61 @@ func TestEndToEndFlow(t *testing.T) {
 	if !authVerifyRes.Verified || authVerifyRes.Token == "" {
 		t.Fatalf("expected successful verification from webauthn authenticate-verify")
 	}
+
+	// 6.8 Use the one-time verificationToken to fetch the encrypted private key vault and decrypt locally
+	vaultReqBody, _ := json.Marshal(map[string]string{
+		"verificationToken": authVerifyRes.Token,
+	})
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/me/vault", bytes.NewReader(vaultReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/accounts/me/vault with valid verificationToken, got status=%d", resp.StatusCode)
+	}
+	var fetchedVault struct {
+		Username            string `json:"username"`
+		PublicKey           string `json:"publicKey"`
+		EncryptedPrivateKey struct {
+			CipherText string `json:"cipherText"`
+			IV         string `json:"iv"`
+		} `json:"encryptedPrivateKey"`
+		KDF struct {
+			Algorithm string `json:"algorithm"`
+			Salt      string `json:"salt"`
+			KeyLength int    `json:"keyLength"`
+		} `json:"kdf"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&fetchedVault)
+	resp.Body.Close()
+
+	fetchedSalt, _ := base64.StdEncoding.DecodeString(fetchedVault.KDF.Salt)
+	fetchedIV, _ := base64.StdEncoding.DecodeString(fetchedVault.EncryptedPrivateKey.IV)
+	fetchedCipher, _ := base64.StdEncoding.DecodeString(fetchedVault.EncryptedPrivateKey.CipherText)
+	clientDerivedKey := argon2.IDKey(prfSecret, fetchedSalt, 3, 65536, 4, uint32(fetchedVault.KDF.KeyLength))
+	cBlock, err := aes.NewCipher(clientDerivedKey)
+	if err != nil {
+		t.Fatalf("failed to create cipher: %v", err)
+	}
+	cGcm, err := cipher.NewGCM(cBlock)
+	if err != nil {
+		t.Fatalf("failed to create gcm: %v", err)
+	}
+	clientDecrypted, err := cGcm.Open(nil, fetchedIV, fetchedCipher, nil)
+	if err != nil {
+		t.Fatalf("client-side decryption failed: %v", err)
+	}
+	if string(clientDecrypted) != plainPrivKey {
+		t.Fatalf("client-side decrypted key mismatch: got %q, want %q", string(clientDecrypted), plainPrivKey)
+	}
+
+	// 6.9 Verify that replaying the consumed verificationToken is rejected with 401
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/me/vault", bytes.NewReader(vaultReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("replayed verificationToken must be rejected with 401, got status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
