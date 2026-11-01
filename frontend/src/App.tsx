@@ -582,8 +582,8 @@ const App = () => {
 	);
 
 	function requestPassphrase(
-		title = "비밀번호 확인",
-		description = "개인키를 암호화하거나 잠금 해제하려면 계정 비밀번호를 입력하세요."
+		title = "마스터키 확인",
+		description = "개인키를 암호화하거나 잠금 해제하려면 마스터키를 입력하세요."
 	): Promise<string | null> {
 		return new Promise((resolve) => {
 			setPassphraseInput("");
@@ -671,9 +671,9 @@ const App = () => {
 		} else {
 			const pass = await requestPassphrase(
 				"개인키 접근 인증",
-				"저장된 개인키에 접근하려면 계정 비밀번호를 입력하세요."
+				"저장된 개인키에 접근하려면 마스터키를 입력하세요."
 			);
-			if (!pass) throw new Error("비밀번호가 입력되지 않았습니다.");
+			if (!pass) throw new Error("마스터키가 입력되지 않았습니다.");
 			const verifyRes = await verifyPassword(authToken, pass);
 			verificationToken = verifyRes.token;
 			verifiedPassphrase = pass;
@@ -692,10 +692,10 @@ const App = () => {
 				verifiedPassphrase ??
 				(await requestPassphrase(
 					"개인키 잠금 해제",
-					"저장된 개인키를 복호화할 계정 비밀번호를 입력하세요."
+					"저장된 개인키를 복호화할 마스터키를 입력하세요."
 				)) ??
 				undefined;
-			if (!pass) throw new Error("비밀번호가 입력되지 않았습니다.");
+			if (!pass) throw new Error("마스터키가 입력되지 않았습니다.");
 			secret = { passphrase: pass };
 		}
 
@@ -709,7 +709,7 @@ const App = () => {
 			return decryptedPem;
 		} catch (err) {
 			console.error("Local decryption failed:", err);
-			throw new Error("인증된 패스키 또는 비밀번호가 일치하지 않거나 저장된 키 데이터가 손상되었습니다.");
+			throw new Error("인증된 패스키 또는 마스터키가 일치하지 않거나 저장된 키 데이터가 손상되었습니다.");
 		}
 	}
 
@@ -723,7 +723,7 @@ const App = () => {
 			if (!targetUsername) throw new Error("사용자 정보를 찾을 수 없습니다.");
 			const secret = await obtainProtectionSecretForSave(
 				"키 생성 및 암호화",
-				"생성된 개인키를 클라이언트에서 안전하게 암호화할 계정 비밀번호를 확인해주세요."
+				"생성된 개인키를 클라이언트에서 안전하게 암호화할 마스터키를 확인해주세요."
 			);
 			if (!secret) return;
 
@@ -765,7 +765,7 @@ const App = () => {
 
 			const secret = await obtainProtectionSecretForSave(
 				"키 등록 및 암호화",
-				"개인키를 클라이언트에서 안전하게 암호화할 계정 비밀번호를 확인해주세요."
+				"개인키를 클라이언트에서 안전하게 암호화할 마스터키를 확인해주세요."
 			);
 			if (!secret) return;
 
@@ -805,7 +805,7 @@ const App = () => {
 		try {
 			const secret = await obtainProtectionSecretForSave(
 				"키 업로드 및 암호화",
-				"개인키를 클라이언트에서 암호화하여 저장할 계정 비밀번호를 확인해주세요."
+				"개인키를 클라이언트에서 암호화하여 저장할 마스터키를 확인해주세요."
 			);
 			if (!secret) return;
 
@@ -838,7 +838,7 @@ const App = () => {
 			const targetUsername = username || authUsername || "";
 			const secret = await obtainProtectionSecretForSave(
 				"키 재생성 및 암호화",
-				"새로 생성할 개인키를 암호화할 계정 비밀번호를 확인해주세요."
+				"새로 생성할 개인키를 암호화할 마스터키를 확인해주세요."
 			);
 			if (!secret) return;
 
@@ -2195,12 +2195,12 @@ const App = () => {
 							}}
 						>
 							<div className="form-group mb-3">
-								<label className="form-label">계정 비밀번호</label>
+								<label className="form-label">마스터키</label>
 								<input
 									type="password"
 									value={passphraseInput}
 									onChange={(e) => setPassphraseInput(e.target.value)}
-									placeholder="비밀번호 입력..."
+									placeholder="마스터키 입력..."
 									autoFocus
 									required
 								/>

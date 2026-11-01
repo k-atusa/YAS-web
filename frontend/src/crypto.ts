@@ -770,7 +770,7 @@ async function encryptPrivateKey(
     secretBytes = await normalizePassphraseBytes(secret.passphrase);
     algorithm = "arg2st";
   } else {
-    throw new Error("개인키를 암호화할 패스키(PRF) 시크릿 또는 비밀번호가 필요합니다.");
+    throw new Error("개인키를 암호화할 패스키(PRF) 시크릿 또는 마스터키가 필요합니다.");
   }
 
   const aesKey = await deriveArg2stAesKey(secretBytes, salt, ["encrypt"]);
@@ -837,7 +837,7 @@ export async function decryptStoredPrivateKeyClient(
     secretBytes = normalizedSecret.prfOutput;
   } else if (kdf.algorithm === "arg2st") {
     if (!normalizedSecret.passphrase || !normalizedSecret.passphrase.trim()) {
-      throw new Error("개인키 복호화를 위한 비밀번호가 필요합니다.");
+      throw new Error("개인키 복호화를 위한 마스터키가 필요합니다.");
     }
     secretBytes = await normalizePassphraseBytes(normalizedSecret.passphrase);
   } else {
