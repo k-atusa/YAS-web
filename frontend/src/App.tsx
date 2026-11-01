@@ -121,6 +121,7 @@ const App = () => {
 	const [decryptError, setDecryptError] = useState<string | null>(null);
 	const [decryptedResult, setDecryptedResult] = useState<DecryptResult | null>(null);
 	const [decryptStep, setDecryptStep] = useState(1);
+	const [copySecretStatus, setCopySecretStatus] = useState<"idle" | "copied" | "error">("idle");
 
 	/* WebAuthn */
 	const [webauthnAvailable, setWebauthnAvailable] = useState(false);
@@ -227,10 +228,10 @@ const App = () => {
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement("a");
 		link.href = url;
-		
+
 		const md5Hash = SparkMD5.ArrayBuffer.hash(encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer);
 		link.download = `secure_file_${md5Hash.substring(0, 6)}.yas`;
-		
+
 		link.click();
 		URL.revokeObjectURL(url);
 	}, [encryptedBlob]);
@@ -420,6 +421,7 @@ const App = () => {
 		setDecryptStatus(null);
 		setDecryptError(null);
 		setDecryptedResult(null);
+		setCopySecretStatus("idle");
 		setDecryptStep(1);
 		setView("landing");
 	}
@@ -432,6 +434,7 @@ const App = () => {
 		setPressedTab(null);
 		setPrivateKeyPem("");
 		setCopyPrivateStatus("idle");
+		setCopySecretStatus("idle");
 		setDecryptionToken(null);
 		setTab(nextTab);
 	}
@@ -457,6 +460,18 @@ const App = () => {
 		} catch {
 			setCopyPrivateStatus("error");
 			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
+		}
+	}
+
+	async function handleCopySecretMessage(value?: string) {
+		if (!value) return;
+		try {
+			await navigator.clipboard.writeText(value);
+			setCopySecretStatus("copied");
+			setTimeout(() => setCopySecretStatus("idle"), 2000);
+		} catch {
+			setCopySecretStatus("error");
+			setTimeout(() => setCopySecretStatus("idle"), 2000);
 		}
 	}
 
@@ -509,12 +524,12 @@ const App = () => {
 		setContactBusy(true);
 		setContactModalError(null);
 		try {
-			const payload: { contactUsername: string; notes?: string } = { 
-                contactUsername: trimmedUsername, 
-                notes: contactForm.notes.trim() || undefined 
-            };
-			
-            const saved = await createContact(payload as any, authToken);
+			const payload: { contactUsername: string; notes?: string } = {
+				contactUsername: trimmedUsername,
+				notes: contactForm.notes.trim() || undefined
+			};
+
+			const saved = await createContact(payload as any, authToken);
 			setContacts((prev) => {
 				const withoutSaved = prev.filter((c) => c.id !== saved.id);
 				const withoutOld = contactModalMode === "edit" && editingContactMeta && trimmedUsername !== editingContactMeta.username
@@ -836,6 +851,7 @@ const App = () => {
 		setDecryptStatus(null);
 		setDecryptError(null);
 		setDecryptedResult(null);
+		setCopySecretStatus("idle");
 		setDecryptStep(1);
 	}
 
@@ -940,10 +956,10 @@ const App = () => {
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement("a");
 		link.href = url;
-		
+
 		const md5Hash = SparkMD5.ArrayBuffer.hash(encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer);
 		link.download = `secure_file_${md5Hash.substring(0, 6)}.yas`;
-		
+
 		link.click();
 		URL.revokeObjectURL(url);
 	}
@@ -975,7 +991,7 @@ const App = () => {
 				result = await decryptOpsecPw(dataU8, decryptPassword);
 			} else {
 				const priB64 = await resolvePrivateKeyB64();
-				
+
 				let finalPeerPub = decryptPeerPublicKey.trim();
 				if (decryptPeerKeySource === "contact" && decryptSelectedContactId) {
 					const contact = contacts.find((c) => c.id === decryptSelectedContactId);
@@ -984,7 +1000,7 @@ const App = () => {
 					}
 				}
 				const peerPub = finalPeerPub || undefined;
-				
+
 				const myPub = storedAccount?.publicKey || publicKeyPem || "";
 				result = await decryptOpsecPub(dataU8, priB64, peerPub, myPub.trim() || undefined);
 			}
@@ -1437,46 +1453,75 @@ const App = () => {
 
 	function renderDecryptTab() {
 		if (decryptedResult) {
-			const rows: { label: string; value: string }[] = [];
-			if (decryptedResult.msg) rows.push({ label: "공개 메시지", value: decryptedResult.msg });
-			if (decryptedResult.smsg) rows.push({ label: "비밀 메시지", value: decryptedResult.smsg });
-			if (decryptedResult.files.length > 0) rows.push({ label: "파일", value: `${decryptedResult.files.length}개` });
-
 			return (
 				<>
 					<h2 className="section-title">복호화 결과</h2>
+					<p className="section-desc">복호화가 성공적으로 완료되었습니다.</p>
 
-					<div className="card">
-						{rows.map((r) => (
-							<div key={r.label} style={{ marginBottom: 14 }}>
-								<span className="result-label">{r.label}</span>
-								<p style={{ whiteSpace: "pre-wrap", marginTop: 4, fontSize: 15, fontWeight: 500 }}>{r.value}</p>
-							</div>
-						))}
-						
-						{/* Show signature status in result */}
-						<div style={{ marginBottom: 0, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-							<span className="result-label">서명 상태</span>
-							<p style={{ whiteSpace: "pre-wrap", marginTop: 4, fontSize: 15, fontWeight: 500 }}>
-								{decryptedResult.verified === true && "✓ 유효 (발신자 확인됨)"}
-								{decryptedResult.verified === false && "✗ 유효하지 않음 (경고)"}
-								{decryptedResult.verified === undefined && (decryptedResult.verifyError ? `- ${decryptedResult.verifyError}` : "- 서명 검증 생략됨 (공개키 미제공)")}
-							</p>
+					{decryptedResult.msg && (
+						<div className="form-group">
+							<label className="form-label">공개 메시지</label>
+							<p className="result-value-text">{decryptedResult.msg}</p>
 						</div>
+					)}
+
+					{decryptedResult.smsg && (
+						<div className="form-group">
+							<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+								<label className="form-label">비밀 메시지</label>
+								<button
+									type="button"
+									className={`btn btn-ghost btn-sm ${copySecretStatus === "copied" ? "copy-feedback" : ""}`}
+									onClick={() => handleCopySecretMessage(decryptedResult.smsg)}
+								>
+									{copySecretStatus === "copied" ? "✓ 복사됨" : "복사"}
+								</button>
+							</div>
+							<p className="result-value-text">{decryptedResult.smsg}</p>
+						</div>
+					)}
+
+					<div className="form-group">
+						<label className="form-label">서명 상태</label>
+						<p className="result-value-text">
+							{decryptedResult.verified === true && (
+								<span style={{ color: "var(--success, #22c55e)", fontWeight: 600 }}>
+									✓ 유효 (발신자 확인됨)
+								</span>
+							)}
+							{decryptedResult.verified === false && (
+								<span style={{ color: "var(--danger, #ef4444)", fontWeight: 600 }}>
+									✗ 유효하지 않음 (경고)
+								</span>
+							)}
+							{decryptedResult.verified === undefined && (
+								<span style={{ color: "var(--text-hint)" }}>
+									{decryptedResult.verifyError ? `- ${decryptedResult.verifyError}` : "- 서명 검증 생략됨 (공개키 미제공)"}
+								</span>
+							)}
+						</p>
 					</div>
 
 					{decryptedResult.files.length > 0 && (
-						<div className="card">
-							<h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>추출된 파일</h3>
-							{decryptedResult.files.map((f, i) => (
-								<div key={i} className="file-info-bar" style={{ marginTop: i > 0 ? 8 : 0 }}>
-									<div>
-										<span className="file-info-name">{f.name}</span>
-										<span className="file-info-size"> · {formatBytes(f.data.length)}</span>
+						<div className="form-group">
+							<label className="form-label">추출된 파일 ({decryptedResult.files.length}개)</label>
+							<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+								{decryptedResult.files.map((f, i) => (
+									<div key={i} className="file-info-bar" style={{ marginTop: 0 }}>
+										<div>
+											<span className="file-info-name">{f.name}</span>
+											<span className="file-info-size"> · {formatBytes(f.data.length)}</span>
+										</div>
+										<button
+											type="button"
+											className="btn btn-secondary btn-sm"
+											onClick={() => handleDownloadDecryptedFile(f.name, f.data)}
+										>
+											다운로드
+										</button>
 									</div>
-									<button className="btn btn-secondary btn-sm" onClick={() => handleDownloadDecryptedFile(f.name, f.data)}>다운로드</button>
-								</div>
-							))}
+								))}
+							</div>
 						</div>
 					)}
 
@@ -1604,8 +1649,8 @@ const App = () => {
 								<div className="form-group">
 									<label className="form-label">개인키</label>
 									<div className="tab-toggle mb-2">
-										<button 
-											className={decryptPrivateKeySource === "security" ? "active" : ""} 
+										<button
+											className={decryptPrivateKeySource === "security" ? "active" : ""}
 											onClick={() => {
 												if (storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable) {
 													setDecryptPrivateKeySource("security");
@@ -1618,7 +1663,7 @@ const App = () => {
 										</button>
 										<button className={decryptPrivateKeySource === "manual" ? "active" : ""} onClick={() => setDecryptPrivateKeySource("manual")}>직접 입력</button>
 									</div>
-									
+
 									{decryptPrivateKeySource === "security" ? (
 										<>
 											{storedAccount?.encryptedPrivateKey && isAuthed && webauthnAvailable ? (
@@ -1728,7 +1773,7 @@ const App = () => {
 		}
 	}
 
-	
+
 	async function doWebauthnSignupFlow() {
 		try {
 			setWebauthnAuthBusy(true);
@@ -1747,7 +1792,7 @@ const App = () => {
 				registration.clientDataJSON,
 				registration.transports
 			);
-			
+
 			const account = await getAccountByUsername(authUsername!);
 			if (account) {
 				setPublicKeyPem(account.publicKey);
@@ -1770,7 +1815,7 @@ const App = () => {
 			const optionsResp = await getWebAuthnAuthenticateOptions(authToken!);
 			const authentication = await authenticateWithWebAuthn({
 				challenge: optionsResp.options.challenge, allowCredentials: optionsResp.options.allowCredentials || [],
-                timeout: optionsResp.options.timeout, userVerification: optionsResp.options.userVerification,
+				timeout: optionsResp.options.timeout, userVerification: optionsResp.options.userVerification,
 			});
 			const verifyResp = await verifyWebAuthnAuthentication(
 				authToken!,
@@ -1779,15 +1824,15 @@ const App = () => {
 				authentication.authenticatorData,
 				authentication.signature
 			);
-			
+
 			setDecryptionToken(verifyResp.token);
-			
+
 			const account = await getAccountByUsername(authUsername!);
 			if (account) {
 				setPublicKeyPem(account.publicKey);
 				setStoredAccount(account);
 			}
-			
+
 			setWebauthnPending(null);
 			setShowKeySection(false);
 			toast.success("패스키 인증이 완료되었습니다");
@@ -1812,16 +1857,16 @@ const App = () => {
 					<div className="auth-card view-animate">
 						<h1 className="auth-title">{webauthnPending === "register" ? "패스키 등록" : "패스키 인증"}</h1>
 						<p className="section-desc">
-							{webauthnPending === "register" 
-								? "계정 보호 및 본인 확인을 위해 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 등록된 패스키로 개인키가 안전하게 보호됩니다." 
+							{webauthnPending === "register"
+								? "계정 보호 및 본인 확인을 위해 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 등록된 패스키로 개인키가 안전하게 보호됩니다."
 								: "본인 확인 및 개인키 복호화를 위해 패스키 인증이 필요합니다."}
 						</p>
-						
-						<button className="btn btn-primary btn-full mt-4" 
+
+						<button className="btn btn-primary btn-full mt-4"
 							disabled={webauthnAuthBusy}
 							onClick={webauthnPending === "register" ? doWebauthnSignupFlow : doWebauthnLoginFlow}>
-							{webauthnPending === "register" 
-								? (webauthnAuthBusy ? "등록 중..." : "패스키 등록 완료하기") 
+							{webauthnPending === "register"
+								? (webauthnAuthBusy ? "등록 중..." : "패스키 등록 완료하기")
 								: (webauthnAuthBusy ? "인증 중..." : "패스키로 인증하기")}
 						</button>
 						<div className="auth-hint">
@@ -1841,7 +1886,7 @@ const App = () => {
 		);
 	}
 
-/* ─── Main layout ─── */
+	/* ─── Main layout ─── */
 
 	return (
 		<div className="page">
@@ -1944,8 +1989,8 @@ const App = () => {
 								/>
 							</div>
 							<div className="form-group">
-									<label className="form-label">메모 (선택)</label>
-									<input type="text"
+								<label className="form-label">메모 (선택)</label>
+								<input type="text"
 									value={contactForm.notes}
 									onChange={(e) => setContactForm((prev) => ({ ...prev, notes: e.target.value }))}
 									placeholder="간단한 메모"

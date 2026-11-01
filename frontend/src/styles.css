@@ -1134,16 +1134,25 @@ select {
 }
 
 .result-label {
-	font-size: 11px;
-	color: var(--text-hint);
-	text-transform: uppercase;
-	letter-spacing: 0.06em;
-	font-weight: 500;
+	font-size: 14px;
+	color: var(--text-sub);
+	font-weight: 600;
+	letter-spacing: -0.01em;
 }
 
 .result-value {
 	font-weight: 600;
 	font-size: 15px;
+}
+
+.result-value-text {
+	margin: 2px 0 0 0;
+	font-size: 15px;
+	color: var(--text);
+	line-height: 1.6;
+	word-break: break-word;
+	white-space: pre-wrap;
+	font-weight: 500;
 }
 
 /* ─── Detected message ─── */
