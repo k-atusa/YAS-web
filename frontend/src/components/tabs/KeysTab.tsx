@@ -286,7 +286,7 @@ export const KeysTab = ({
 					)}
 
 					<div className="btn-row" style={{ marginTop: 20 }}>
-						{storedAccount && (
+						{storedAccount ? (
 							<button
 								className="btn btn-secondary"
 								onClick={() => {
@@ -298,52 +298,53 @@ export const KeysTab = ({
 							>
 								이전
 							</button>
-						)}
-						{previewPublic && previewPrivate && (
+						) : <div />}
+						<div style={{ display: "flex", gap: 10 }}>
+							{previewPublic && previewPrivate && (
+								<button
+									type="button"
+									className="btn btn-secondary"
+									onClick={handleCreatePreview}
+									disabled={busy || generatingPreview}
+								>
+									다시 생성
+								</button>
+							)}
 							<button
-								type="button"
-								className="btn btn-secondary"
-								onClick={handleCreatePreview}
-								disabled={busy || generatingPreview}
+								className="btn btn-primary"
+								onClick={async () => {
+									if (previewPublic && previewPrivate && saveHandler) {
+										await saveHandler(previewPublic, previewPrivate);
+										setPreviewPublic("");
+										setPreviewPrivate("");
+									}
+								}}
+								disabled={busy || generatingPreview || !previewPublic || !previewPrivate}
 							>
-								다시 생성
+								{busy ? "암호화 및 저장 중..." : "키 저장"}
 							</button>
-						)}
-						<button
-							className="btn btn-primary"
-							onClick={async () => {
-								if (previewPublic && previewPrivate && saveHandler) {
-									await saveHandler(previewPublic, previewPrivate);
-									setPreviewPublic("");
-									setPreviewPrivate("");
-								}
-							}}
-							disabled={busy || generatingPreview || !previewPublic || !previewPrivate}
-							style={{ marginLeft: storedAccount ? undefined : "auto" }}
-						>
-							{busy ? "암호화 및 저장 중..." : "키 저장"}
-						</button>
+						</div>
 					</div>
 				</>
 			) : (
 				<>
 					<div className="form-group">
-						<label className="form-label">공개키 (Base64)</label>
+						<label className="form-label">공개키</label>
 						<textarea
 							value={manualPublicKey}
 							onChange={(e) => setManualPublicKey(e.target.value)}
-							placeholder="Base64로 인코딩된 공개키를 입력하세요..."
+							placeholder="공개키를 입력하세요..."
 							rows={4}
 							disabled={busy}
 							style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13, wordBreak: "break-all" }}
 						/>
 					</div>
 					<div className="form-group">
-						<label className="form-label">개인키 (Base64)</label>
+						<label className="form-label">개인키</label>
 						<textarea
 							value={manualPrivateKey}
 							onChange={(e) => setManualPrivateKey(e.target.value)}
-							placeholder="Base64로 인코딩된 개인키를 입력하세요..."
+							placeholder="개인키를 입력하세요..."
 							rows={5}
 							disabled={busy}
 							style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13, wordBreak: "break-all" }}
