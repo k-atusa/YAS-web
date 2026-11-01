@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { truncateKey } from "../../helpers";
 import type { AccountRecord } from "../../types";
 
@@ -44,7 +45,42 @@ export const KeysTab = ({
 	onHidePrivateKey,
 	webauthnAvailable,
 }: KeysTabProps) => {
+	const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
 	const hasStoredKey = Boolean(storedAccount?.publicKey && storedAccount?.encryptedPrivateKey?.cipherText);
+
+	if (hasStoredKey && confirmingRegenerate) {
+		return (
+			<>
+				<h2 className="section-title">키 재생성 확인</h2>
+				<p className="section-desc">키를 새로 생성하기 전에 주의사항을 확인하세요.</p>
+				<div className="card">
+					<p style={{ fontSize: 14, lineHeight: 1.6, color: "var(--text)", marginBottom: 16 }}>
+						키를 재생성하면 <strong>모든 기존 키가 초기화</strong>됩니다.<br />
+						이전에 저장된 키로 암호화된 메시지나 파일은 더 이상 복호화할 수 없게 됩니다. 계속 진행하시겠습니까?
+					</p>
+					<div className="btn-row">
+						<button
+							className="btn btn-secondary"
+							onClick={() => setConfirmingRegenerate(false)}
+							disabled={busy}
+						>
+							이전
+						</button>
+						<button
+							className="btn btn-primary"
+							onClick={async () => {
+								await onRegenerate();
+								setConfirmingRegenerate(false);
+							}}
+							disabled={busy}
+						>
+							{busy ? "처리 중..." : "확인"}
+						</button>
+					</div>
+				</div>
+			</>
+		);
+	}
 
 	if (hasStoredKey && !showKeySection) {
 		return (
@@ -111,7 +147,7 @@ export const KeysTab = ({
 					</div>
 				</div>
 				<div className="btn-row btn-row-right">
-					<button className="btn btn-secondary" onClick={onRegenerate} disabled={busy}>
+					<button className="btn btn-secondary" onClick={() => setConfirmingRegenerate(true)} disabled={busy}>
 						{busy ? "생성 중..." : "키 재생성"}
 					</button>
 				</div>

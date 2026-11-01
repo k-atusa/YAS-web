@@ -722,7 +722,7 @@ export async function registerWebAuthnCredential(options: {
 }
 
 export async function authenticateWithWebAuthn(options: {
-  challenge: string;
+  challenge: string; ㅗ
   allowCredentials?: Array<{ type: "public-key"; id: string; transports?: string[] }>;
   timeout?: number;
   userVerification?: "required" | "preferred" | "discouraged";

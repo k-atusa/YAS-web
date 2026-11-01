@@ -566,11 +566,26 @@ const App = () => {
 	}
 
 	async function handleRegenerate() {
-		setShowKeySection(true);
-		setPublicKeyPem("");
-		setPrivateKeyPem("");
-		setCopyPrivateStatus("idle");
-		await handleGenerateKeys();
+		setBusy(true);
+		setError(null);
+		try {
+			const targetUsername = username || authUsername || "";
+			const { publicKey, privateKey } = await generateKeyPair();
+			const payload = await buildAccountPayload(targetUsername, publicKey, privateKey, undefined);
+			const result = await saveAccount(payload, authToken ?? undefined);
+			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			setStoredAccount(record);
+			setPublicKeyPem(publicKey);
+			setPrivateKeyPem("");
+			setCopyPrivateStatus("idle");
+			setShowKeySection(false);
+			toast.success("키가 새로 생성되어 안전하게 저장되었습니다");
+		} catch (err) {
+			console.error(err);
+			toast.error((err as Error).message || "키 재생성에 실패했습니다");
+		} finally {
+			setBusy(false);
+		}
 	}
 
 	/* ─── WebAuthn ─── */
