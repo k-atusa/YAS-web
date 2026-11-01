@@ -311,6 +311,28 @@ const App = () => {
 		return () => { cancelled = true; };
 	}, [authUsername]);
 
+	/* Auto-mask revealed private key on window blur, or after 60s timeout */
+	useEffect(() => {
+		if (!privateKeyPem) return;
+		const timer = window.setTimeout(() => {
+			setPrivateKeyPem("");
+			setCopyPrivateStatus("idle");
+		}, 60000);
+
+		const handleVisibility = () => {
+			if (document.hidden) {
+				setPrivateKeyPem("");
+				setCopyPrivateStatus("idle");
+			}
+		};
+		document.addEventListener("visibilitychange", handleVisibility);
+
+		return () => {
+			window.clearTimeout(timer);
+			document.removeEventListener("visibilitychange", handleVisibility);
+		};
+	}, [privateKeyPem]);
+
 	/* ─── Handlers ─── */
 
 	async function handleLogin(e: React.FormEvent) {
@@ -361,6 +383,8 @@ const App = () => {
 	function handleSignOut() {
 		setAuthToken(null);
 		setAuthUsername(null);
+		setPrivateKeyPem("");
+		setDecryptionToken(null);
 		setWebauthnPending(null);
 		setTabDirection("none");
 		setLoginPass("");
@@ -406,6 +430,9 @@ const App = () => {
 		const nextIdx = TAB_INDEX[nextTab];
 		setTabDirection(nextIdx > prevIdx ? "right" : "left");
 		setPressedTab(null);
+		setPrivateKeyPem("");
+		setCopyPrivateStatus("idle");
+		setDecryptionToken(null);
 		setTab(nextTab);
 	}
 
@@ -819,6 +846,7 @@ const App = () => {
 		if (storedAccount?.encryptedPrivateKey && storedAccount?.kdf) {
 			if (!decryptionToken) throw new Error("저장된 개인키를 잠금 해제하려면 보안 키를 사용하세요");
 			const result = await decryptStoredPrivateKey(storedAccount.username, decryptionToken);
+			setDecryptionToken(null);
 			return result.privateKey;
 		}
 		throw new Error("사용 가능한 개인키가 없습니다.");
@@ -831,6 +859,7 @@ const App = () => {
 				throw new Error("서명하려면 먼저 복호화 탭에서 보안 키 인증을 완료하세요.");
 			}
 			const result = await decryptStoredPrivateKey(storedAccount.username, decryptionToken);
+			setDecryptionToken(null);
 			return result.privateKey;
 		}
 		throw new Error("서명에 사용할 개인키를 찾을 수 없습니다.");

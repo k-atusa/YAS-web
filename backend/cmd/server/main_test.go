@@ -300,11 +300,64 @@ func TestEndToEndFlow(t *testing.T) {
 		t.Fatalf("decrypted private key mismatch: got %q", decRes.PrivateKey)
 	}
 
-	// 8. Verify that decrypting another user's account with Alice's token fails with 403
+	// 7.1 Verify that reusing the consumed decryption token fails with 401
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+authVerifyRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("reusing consumed decryption token should fail with 401, got status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 8. Authenticate again with WebAuthn to get a fresh one-time token, and verify that decrypting another user's account fails with 403
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-options", nil)
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("re-fetch authenticate options failed: %v, status=%d", err, resp.StatusCode)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&authOptions)
+	resp.Body.Close()
+
+	freshAuthData := make([]byte, len(authData))
+	copy(freshAuthData, authData)
+	binary.BigEndian.PutUint32(freshAuthData[33:37], 10)
+
+	authClientDataJSON = fmt.Sprintf(`{"type":"webauthn.get","challenge":"%s","origin":"http://localhost:4000"}`, authOptions.Options.Challenge)
+	authClientDataBytes = []byte(authClientDataJSON)
+	cdataHash = sha256.Sum256(authClientDataBytes)
+	signedData = append(freshAuthData, cdataHash[:]...)
+	digest = sha256.Sum256(signedData)
+	signature, err = ecdsa.SignASN1(rand.Reader, authenticatorKey, digest[:])
+	if err != nil {
+		t.Fatalf("failed to sign: %v", err)
+	}
+
+	freshVerifyBody, _ := json.Marshal(map[string]any{
+		"credentialId":      credID,
+		"clientDataJSON":    base64.StdEncoding.EncodeToString(authClientDataBytes),
+		"authenticatorData": base64.StdEncoding.EncodeToString(freshAuthData),
+		"signature":         base64.StdEncoding.EncodeToString(signature),
+	})
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-verify", bytes.NewReader(freshVerifyBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("fresh webauthn authenticate-verify failed: %v, status=%d", err, resp.StatusCode)
+	}
+	var freshAuthVerifyRes struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expiresAt"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&freshAuthVerifyRes)
+	resp.Body.Close()
+
 	decBodyBob, _ := json.Marshal(map[string]string{"username": "bob"})
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBodyBob))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+authVerifyRes.Token)
+	req.Header.Set("Authorization", "Bearer "+freshAuthVerifyRes.Token)
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("decrypting another username should return 403, got %d", resp.StatusCode)

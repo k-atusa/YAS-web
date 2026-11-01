@@ -156,6 +156,8 @@ func handleDecryptAccount(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Invalid or expired decryption token"})
 		return
 	}
+	// Consume single-use token immediately upon verification
+	webauthn.ConsumeDecryptionToken(tokenStr)
 
 	var body struct {
 		Username string `json:"username"`

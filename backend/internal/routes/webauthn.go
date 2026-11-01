@@ -269,8 +269,8 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 6. Issue 5-minute decryption token
-	token, expiresAt, err := webauthn.GenerateDecryptionToken(user.ID, 300)
+	// 6. Issue one-time decryption token (valid for 60 seconds)
+	token, expiresAt, err := webauthn.GenerateDecryptionToken(user.ID, 60)
 	if err != nil {
 		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to verify authentication"})
 		return
