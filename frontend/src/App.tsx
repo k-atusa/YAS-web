@@ -966,14 +966,14 @@ const App = () => {
 			return new Uint8Array(await decryptPayloadFile.arrayBuffer());
 		}
 		const raw = decryptPayloadInput.trim();
-		if (!raw) throw new Error("Base64 텍스트를 붙여넣으세요");
+		if (!raw) throw new Error("암호문 텍스트를 붙여넣으세요");
 		try {
 			if (raw.includes("#START#") || raw.includes("#END#")) {
 				return decode64WithSplit(raw, "#");
 			}
 			return base64ToU8(raw);
 		} catch {
-			throw new Error("올바르지 않은 Base64 형식입니다");
+			throw new Error("올바르지 않은 암호문 형식입니다");
 		}
 	}
 
@@ -1336,7 +1336,7 @@ const App = () => {
 						</div>
 						<div className="btn-row">
 							{encryptedBlob.length < 10240 && (
-								<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>Base64 복사</button>
+								<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>텍스트 복사</button>
 							)}
 							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>다운로드</button>
 						</div>
@@ -1639,7 +1639,7 @@ const App = () => {
 							</div>
 						) : (
 							<div className="form-group">
-								<label className="form-label">Base64 텍스트 붙여넣기</label>
+								<label className="form-label">암호문 텍스트 붙여넣기</label>
 								<textarea
 									value={decryptPayloadInput}
 									onChange={(e) => {
@@ -1658,7 +1658,7 @@ const App = () => {
 											}
 										} else { setDecryptDetected(null); }
 									}}
-									placeholder="Base64로 인코딩된 암호문..."
+									placeholder="암호문 텍스트를 입력하세요..."
 									disabled={decryptBusy}
 									rows={4}
 								/>
@@ -1745,7 +1745,7 @@ const App = () => {
 										<textarea
 											value={decryptPrivateKeyInput}
 											onChange={(e) => { setDecryptPrivateKeyInput(e.target.value); setDecryptError(null); }}
-											placeholder="Base64로 인코딩된 개인키"
+											placeholder="개인키 텍스트를 입력하세요"
 											disabled={decryptBusy}
 											autoFocus
 										/>
@@ -1805,7 +1805,7 @@ const App = () => {
 								<textarea
 									value={decryptPeerPublicKey}
 									onChange={(e) => { setDecryptPeerPublicKey(e.target.value); setDecryptSelectedContactId(""); }}
-									placeholder="Base64로 인코딩된 공개키 (선택)"
+									placeholder="공개키 텍스트 (선택)"
 									disabled={decryptBusy}
 								/>
 							)}

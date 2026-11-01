@@ -308,14 +308,14 @@ export async function validateKeyPair(
   try {
     pubU8 = base64ToU8(pubClean);
   } catch {
-    return { valid: false, error: "공개키가 올바른 Base64 형식이 아닙니다." };
+    return { valid: false, error: "공개키가 올바른 암호문 형식이 아닙니다." };
   }
 
   let priU8: Uint8Array;
   try {
     priU8 = base64ToU8(priClean);
   } catch {
-    return { valid: false, error: "개인키가 올바른 Base64 형식이 아닙니다." };
+    return { valid: false, error: "개인키가 올바른 암호문 형식이 아닙니다." };
   }
 
   if (pubU8.length !== 4273) {
@@ -387,7 +387,7 @@ export async function validatePublicKey(
   try {
     pubU8 = base64ToU8(pubClean);
   } catch {
-    return { valid: false, error: "공개키가 올바른 Base64 형식이 아닙니다." };
+    return { valid: false, error: "공개키가 올바른 암호문 형식이 아닙니다." };
   }
   if (pubU8.length !== 4273) {
     return {
