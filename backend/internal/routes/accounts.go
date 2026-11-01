@@ -1,15 +1,9 @@
 package routes
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/sha1"
-	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"hash"
 	"log"
 	"net/http"
 	"strings"
@@ -17,16 +11,13 @@ import (
 	"yas-web-backend/internal/db"
 	"yas-web-backend/internal/middleware"
 	"yas-web-backend/internal/models"
-	"yas-web-backend/internal/webauthn"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/crypto/pbkdf2"
 )
 
 func AccountsRouter() http.Handler {
 	r := chi.NewRouter()
 	r.With(middleware.RequireAuth).Post("/", handleUpsertAccount)
-	r.Post("/decrypt", handleDecryptAccount)
 	r.Get("/username/{username}", handleGetAccountByUsername)
 	return r
 }
@@ -141,127 +132,4 @@ func handleGetAccountByUsername(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	middleware.WriteJSON(w, http.StatusOK, acc)
-}
-
-func handleDecryptAccount(w http.ResponseWriter, r *http.Request) {
-	header := r.Header.Get("Authorization")
-	if header == "" || !strings.HasPrefix(strings.ToLower(header), "bearer ") {
-		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
-		return
-	}
-	tokenStr := strings.TrimSpace(header[len("bearer "):])
-
-	userID, err := webauthn.VerifyDecryptionToken(tokenStr)
-	if err != nil {
-		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Invalid or expired decryption token"})
-		return
-	}
-	// Consume single-use token immediately upon verification
-	webauthn.ConsumeDecryptionToken(tokenStr)
-
-	var body struct {
-		Username string `json:"username"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Username) == "" {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid payload"})
-		return
-	}
-
-	user, err := db.GetUserByID(userID)
-	if err != nil || user.Username != body.Username {
-		middleware.WriteJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
-		return
-	}
-
-	account, err := db.GetAccountByUsername(body.Username)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "Account not found"})
-			return
-		}
-		log.Printf("Decrypt route failed: %v", err)
-		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to decrypt private key"})
-		return
-	}
-
-	if account.Kdf.Algorithm != "PBKDF2" {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Only PBKDF2 encryption is supported"})
-		return
-	}
-
-	salt, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(account.Kdf.Salt), ""))
-	if err != nil {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Decryption failed - invalid credentials or corrupted data"})
-		return
-	}
-
-	iterations := 310000
-	if account.Kdf.Iterations != nil && *account.Kdf.Iterations > 0 {
-		iterations = *account.Kdf.Iterations
-	}
-	keyLength := 32
-	if account.Kdf.KeyLength != nil && *account.Kdf.KeyLength > 0 {
-		keyLength = *account.Kdf.KeyLength
-	}
-
-	hashName := strings.ToLower(strings.ReplaceAll(account.Kdf.Hash, "-", ""))
-	var hashFunc func() hash.Hash
-	switch hashName {
-	case "sha512":
-		hashFunc = sha512.New
-	case "sha1":
-		hashFunc = sha1.New
-	default:
-		hashFunc = sha256.New
-	}
-
-	aesKey := pbkdf2.Key([]byte(body.Username), salt, iterations, keyLength, hashFunc)
-
-	iv, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(account.EncryptedPrivateKey.IV), ""))
-	if err != nil {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Decryption failed - invalid credentials or corrupted data"})
-		return
-	}
-
-	rawCipherText, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(account.EncryptedPrivateKey.CipherText), ""))
-	if err != nil {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Decryption failed - invalid credentials or corrupted data"})
-		return
-	}
-
-	// Go's cipher.AEAD.Open expects ciphertext concatenated with the 16-byte GCM auth tag.
-	// If AuthTag was stored separately, append it; otherwise Web Crypto already appended it.
-	var sealed []byte
-	if account.EncryptedPrivateKey.AuthTag != "" {
-		authTag, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(account.EncryptedPrivateKey.AuthTag), ""))
-		if err != nil {
-			middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Decryption failed - invalid credentials or corrupted data"})
-			return
-		}
-		sealed = append(rawCipherText, authTag...)
-	} else {
-		sealed = rawCipherText
-	}
-
-	block, err := aes.NewCipher(aesKey)
-	if err != nil {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Decryption failed - invalid credentials or corrupted data"})
-		return
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Decryption failed - invalid credentials or corrupted data"})
-		return
-	}
-
-	decrypted, err := gcm.Open(nil, iv, sealed, nil)
-	if err != nil {
-		log.Printf("Decryption failed: %v", err)
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Decryption failed - invalid credentials or corrupted data"})
-		return
-	}
-
-	middleware.WriteJSON(w, http.StatusOK, map[string]string{
-		"privateKey": string(decrypted),
-	})
 }

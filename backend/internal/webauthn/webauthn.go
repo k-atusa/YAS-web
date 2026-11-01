@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"yas-web-backend/internal/config"
@@ -200,34 +199,8 @@ func VerifySignature(storedPubKeyBase64 string, authData, clientDataJSONBytes, s
 	}
 }
 
-var (
-	consumedTokensMu sync.Mutex
-	consumedTokens   = make(map[string]time.Time)
-)
-
-// ConsumeDecryptionToken marks a decryption token as used so it cannot be used again.
-func ConsumeDecryptionToken(tokenStr string) {
-	consumedTokensMu.Lock()
-	defer consumedTokensMu.Unlock()
-	now := time.Now()
-	consumedTokens[tokenStr] = now.Add(5 * time.Minute)
-	// Clean up expired entries
-	for t, exp := range consumedTokens {
-		if now.After(exp) {
-			delete(consumedTokens, t)
-		}
-	}
-}
-
-// IsDecryptionTokenConsumed checks if a token has already been consumed.
-func IsDecryptionTokenConsumed(tokenStr string) bool {
-	consumedTokensMu.Lock()
-	defer consumedTokensMu.Unlock()
-	_, exists := consumedTokens[tokenStr]
-	return exists
-}
-
-func GenerateDecryptionToken(userID string, expirySeconds int) (string, time.Time, error) {
+// GenerateVerificationToken issues a signed token certifying successful WebAuthn authentication.
+func GenerateVerificationToken(userID string, expirySeconds int) (string, time.Time, error) {
 	if expirySeconds <= 0 {
 		expirySeconds = 60
 	}
@@ -236,7 +209,7 @@ func GenerateDecryptionToken(userID string, expirySeconds int) (string, time.Tim
 
 	claims := jwt.MapClaims{
 		"sub":  userID,
-		"type": "decrypt",
+		"type": "webauthn_verified",
 		"iat":  now.Unix(),
 		"exp":  expiresAt.Unix(),
 		"jti":  GenerateChallenge(),
@@ -247,34 +220,4 @@ func GenerateDecryptionToken(userID string, expirySeconds int) (string, time.Tim
 		return "", time.Time{}, err
 	}
 	return signed, expiresAt, nil
-}
-
-func VerifyDecryptionToken(tokenStr string) (string, error) {
-	if IsDecryptionTokenConsumed(tokenStr) {
-		return "", errors.New("decryption token has already been used")
-	}
-
-	tok, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(config.App.JWTSecret), nil
-	})
-	if err != nil || !tok.Valid {
-		return "", errors.New("invalid or expired token")
-	}
-
-	claims, ok := tok.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", errors.New("invalid token claims")
-	}
-	typ, _ := claims["type"].(string)
-	if typ != "decrypt" {
-		return "", errors.New("invalid token type")
-	}
-	sub, _ := claims["sub"].(string)
-	if sub == "" {
-		return "", errors.New("missing sub")
-	}
-	return sub, nil
 }

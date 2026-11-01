@@ -107,10 +107,11 @@ func TestEndToEndFlow(t *testing.T) {
 		t.Fatal("expected JWT token")
 	}
 
-	// 4. Upload Alice's Account (Key) and test PBKDF2 + AES-GCM decrypt
+	// 4. Upload Alice's Account (Encrypted Private Key) - Zero-Knowledge Client-side encryption
+	clientPassphrase := "Alice-Secure-Master-Password-123!"
 	salt := []byte("0123456789abcdef")
 	iv := []byte("0123456789ab") // 12 bytes
-	aesKey := pbkdf2.Key([]byte("alice"), salt, 1000, 32, sha256.New)
+	aesKey := pbkdf2.Key([]byte(clientPassphrase), salt, 1000, 32, sha256.New)
 	block, _ := aes.NewCipher(aesKey)
 	gcm, _ := cipher.NewGCM(block)
 	plainPrivKey := "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC\n-----END PRIVATE KEY-----"
@@ -140,16 +141,59 @@ func TestEndToEndFlow(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 5. Verify that decrypt fails with standard login token
+	// 5. Zero-Knowledge: Verify that server has NO decrypt endpoint (must return 404/405)
 	decBody, _ := json.Marshal(map[string]string{"username": "alice"})
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
 	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("decrypt with login token should fail with 401, got status=%d", resp.StatusCode)
+	if err != nil || resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("server must not expose a decrypt endpoint (Zero-Knowledge), got status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
+
+	// 5.1 Verify client can fetch the stored encrypted vault and decrypt locally
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/accounts/username/alice", nil)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("get account failed: %v, status=%d", err, resp.StatusCode)
+	}
+	var fetchedAcc struct {
+		Username            string `json:"username"`
+		PublicKey           string `json:"publicKey"`
+		EncryptedPrivateKey struct {
+			CipherText string `json:"cipherText"`
+			IV         string `json:"iv"`
+		} `json:"encryptedPrivateKey"`
+		KDF struct {
+			Salt       string `json:"salt"`
+			Iterations int    `json:"iterations"`
+			KeyLength  int    `json:"keyLength"`
+		} `json:"kdf"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&fetchedAcc)
+	resp.Body.Close()
+
+	// Local client decryption
+	fetchedSalt, _ := base64.StdEncoding.DecodeString(fetchedAcc.KDF.Salt)
+	fetchedIV, _ := base64.StdEncoding.DecodeString(fetchedAcc.EncryptedPrivateKey.IV)
+	fetchedCipher, _ := base64.StdEncoding.DecodeString(fetchedAcc.EncryptedPrivateKey.CipherText)
+	clientDerivedKey := pbkdf2.Key([]byte(clientPassphrase), fetchedSalt, fetchedAcc.KDF.Iterations, fetchedAcc.KDF.KeyLength, sha256.New)
+	cBlock, err := aes.NewCipher(clientDerivedKey)
+	if err != nil {
+		t.Fatalf("failed to create cipher: %v", err)
+	}
+	cGcm, err := cipher.NewGCM(cBlock)
+	if err != nil {
+		t.Fatalf("failed to create gcm: %v", err)
+	}
+	clientDecrypted, err := cGcm.Open(nil, fetchedIV, fetchedCipher, nil)
+	if err != nil {
+		t.Fatalf("client-side decryption failed: %v", err)
+	}
+	if string(clientDecrypted) != plainPrivKey {
+		t.Fatalf("client-side decrypted key mismatch: got %q, want %q", string(clientDecrypted), plainPrivKey)
+	}
 
 	// 6. WebAuthn Register + Authenticate (Real cryptographic signature verification)
 	// 6.1 Generate mock WebAuthn P-256 Authenticator Key
@@ -276,91 +320,11 @@ func TestEndToEndFlow(t *testing.T) {
 	var authVerifyRes struct {
 		Token     string `json:"token"`
 		ExpiresAt string `json:"expiresAt"`
+		Verified  bool   `json:"verified"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&authVerifyRes)
 	resp.Body.Close()
-	if authVerifyRes.Token == "" {
-		t.Fatalf("expected decryption token from webauthn authenticate-verify")
+	if !authVerifyRes.Verified || authVerifyRes.Token == "" {
+		t.Fatalf("expected successful verification from webauthn authenticate-verify")
 	}
-
-	// 7. Decrypt Alice's Private Key using the WebAuthn Decryption Token
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+authVerifyRes.Token)
-	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("decrypt account with passkey token failed: %v, status=%d", err, resp.StatusCode)
-	}
-	var decRes struct {
-		PrivateKey string `json:"privateKey"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&decRes)
-	resp.Body.Close()
-	if decRes.PrivateKey != plainPrivKey {
-		t.Fatalf("decrypted private key mismatch: got %q", decRes.PrivateKey)
-	}
-
-	// 7.1 Verify that reusing the consumed decryption token fails with 401
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+authVerifyRes.Token)
-	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("reusing consumed decryption token should fail with 401, got status=%d", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	// 8. Authenticate again with WebAuthn to get a fresh one-time token, and verify that decrypting another user's account fails with 403
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-options", nil)
-	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
-	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("re-fetch authenticate options failed: %v, status=%d", err, resp.StatusCode)
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&authOptions)
-	resp.Body.Close()
-
-	freshAuthData := make([]byte, len(authData))
-	copy(freshAuthData, authData)
-	binary.BigEndian.PutUint32(freshAuthData[33:37], 10)
-
-	authClientDataJSON = fmt.Sprintf(`{"type":"webauthn.get","challenge":"%s","origin":"http://localhost:4000"}`, authOptions.Options.Challenge)
-	authClientDataBytes = []byte(authClientDataJSON)
-	cdataHash = sha256.Sum256(authClientDataBytes)
-	signedData = append(freshAuthData, cdataHash[:]...)
-	digest = sha256.Sum256(signedData)
-	signature, err = ecdsa.SignASN1(rand.Reader, authenticatorKey, digest[:])
-	if err != nil {
-		t.Fatalf("failed to sign: %v", err)
-	}
-
-	freshVerifyBody, _ := json.Marshal(map[string]any{
-		"credentialId":      credID,
-		"clientDataJSON":    base64.StdEncoding.EncodeToString(authClientDataBytes),
-		"authenticatorData": base64.StdEncoding.EncodeToString(freshAuthData),
-		"signature":         base64.StdEncoding.EncodeToString(signature),
-	})
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/webauthn/authenticate-verify", bytes.NewReader(freshVerifyBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+loginRes.Token)
-	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("fresh webauthn authenticate-verify failed: %v, status=%d", err, resp.StatusCode)
-	}
-	var freshAuthVerifyRes struct {
-		Token     string `json:"token"`
-		ExpiresAt string `json:"expiresAt"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&freshAuthVerifyRes)
-	resp.Body.Close()
-
-	decBodyBob, _ := json.Marshal(map[string]string{"username": "bob"})
-	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/accounts/decrypt", bytes.NewReader(decBodyBob))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+freshAuthVerifyRes.Token)
-	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("decrypting another username should return 403, got %d", resp.StatusCode)
-	}
-	resp.Body.Close()
 }

@@ -767,10 +767,61 @@ export async function buildAccountPayload(
   username: string,
   publicKeyB64: string,
   privateKeyB64: string,
+  passphrase: string,
   notes?: string
 ): Promise<AccountPayload> {
-  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, username);
+  if (!passphrase || !passphrase.trim()) {
+    throw new Error("개인키 암호화를 위한 비밀번호(Passphrase)가 필요합니다.");
+  }
+  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, passphrase);
   return { username, publicKey: publicKeyB64, encryptedPrivateKey, kdf, notes };
+}
+
+export async function decryptStoredPrivateKeyClient(
+  encrypted: EncryptedPrivateKey,
+  kdf: KdfParameters,
+  passphrase: string
+): Promise<string> {
+  if (!passphrase || !passphrase.trim()) {
+    throw new Error("개인키 복호화를 위한 비밀번호(Passphrase)가 필요합니다.");
+  }
+  const salt = base64ToU8(kdf.salt);
+  const iv = base64ToU8(encrypted.iv);
+  let cipherBytes = base64ToU8(encrypted.cipherText);
+  if (encrypted.authTag) {
+    const tag = base64ToU8(encrypted.authTag);
+    const combined = new Uint8Array(cipherBytes.length + tag.length);
+    combined.set(cipherBytes, 0);
+    combined.set(tag, cipherBytes.length);
+    cipherBytes = combined;
+  }
+
+  const iterations = kdf.iterations ?? 310_000;
+  const keyLength = kdf.keyLength ?? 32;
+  const hash = kdf.hash ?? "SHA-256";
+
+  const base = await crypto.subtle.importKey(
+    "raw",
+    asBuf(_enc.encode(passphrase)),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  const aesKey = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: asBuf(salt), iterations, hash },
+    base,
+    { name: "AES-GCM", length: keyLength * 8 },
+    false,
+    ["decrypt"]
+  );
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: asBuf(iv) },
+    aesKey,
+    asBuf(cipherBytes)
+  );
+
+  return _dec.decode(decrypted);
 }
 
 // ==================== WebAuthn utilities (UNRELATED to USAG-lib) ====================
