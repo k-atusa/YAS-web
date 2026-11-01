@@ -3,6 +3,8 @@ import { formatBytes, truncateKey } from "./helpers";
 import { IconContacts, IconKey, IconEncrypt, IconDecrypt } from "./icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import SparkMD5 from "spark-md5";
+import { toast } from "sonner";
+import { Toaster } from "./components/ui/sonner";
 import {
 	getAccountByUsername,
 	login as loginApi,
@@ -325,7 +327,9 @@ const App = () => {
 				setWebauthnPending("authenticate");
 			}
 		} catch (err) {
-			setError((err as Error).message || "로그인에 실패했습니다");
+			const msg = (err as Error).message || "로그인에 실패했습니다";
+			setError(msg);
+			toast.error(msg);
 		} finally {
 			setLoginBusy(false);
 		}
@@ -344,7 +348,9 @@ const App = () => {
 			setAuthUsername(result.user.username);
 			setWebauthnPending("register");
 		} catch (err) {
-			setError((err as Error).message || "회원가입에 실패했습니다");
+			const msg = (err as Error).message || "회원가입에 실패했습니다";
+			setError(msg);
+			toast.error(msg);
 		} finally {
 			setLoginBusy(false);
 		}
@@ -469,7 +475,7 @@ const App = () => {
 		e.preventDefault();
 		if (!authToken) return;
 		const trimmedUsername = contactForm.contactUsername.trim();
-		if (!trimmedUsername) { setContactModalError("사용자 아이디는 필수입니다"); return; }
+		if (!trimmedUsername) { toast.error("사용자 아이디는 필수입니다"); return; }
 		setContactBusy(true);
 		setContactModalError(null);
 		try {
@@ -492,13 +498,14 @@ const App = () => {
 				} catch (deleteErr) {
 					if ((deleteErr as Error).message === "TOKEN_EXPIRED") { handleSignOut(); return; }
 					console.error(deleteErr);
-					setContactError((deleteErr as Error).message || "이전 연락처 삭제 실패");
+					toast.error((deleteErr as Error).message || "이전 연락처 삭제 실패");
 				}
 			}
+			toast.success(contactModalMode === "edit" ? "연락처가 수정되었습니다" : "연락처가 추가되었습니다");
 			closeContactModal();
 		} catch (err) {
 			if ((err as Error).message === "TOKEN_EXPIRED") { handleSignOut(); return; }
-			setContactModalError((err as Error).message || "연락처 저장에 실패했습니다");
+			toast.error((err as Error).message || "연락처 저장에 실패했습니다");
 		} finally {
 			setContactBusy(false);
 		}
@@ -510,9 +517,10 @@ const App = () => {
 		try {
 			await deleteContact(id, authToken);
 			setContacts((prev) => prev.filter((c) => c.id !== id));
+			toast.success("연락처가 삭제되었습니다");
 		} catch (err) {
 			if ((err as Error).message === "TOKEN_EXPIRED") { handleSignOut(); return; }
-			setContactError((err as Error).message || "연락처 삭제에 실패했습니다");
+			toast.error((err as Error).message || "연락처 삭제에 실패했습니다");
 		}
 	}
 
@@ -521,18 +529,16 @@ const App = () => {
 	async function handleGenerateKeys() {
 		setError(null);
 		setBusy(true);
-		setStatus("키 쌍 생성 중...");
 		try {
 			const { publicKey, privateKey } = await generateKeyPair();
 			setPublicKeyPem(publicKey);
 			setPrivateKeyPem(privateKey);
 			setCopyPrivateStatus("idle");
-			setStatus("키 쌍이 생성되었습니다. 개인키는 안전하게 보관하세요.");
+			toast.success("키 쌍이 생성되었습니다. 개인키는 안전하게 보관하세요.");
 			setKeyGenStep(2);
 		} catch (err) {
 			console.error(err);
-			setError("키 쌍 생성에 실패했습니다");
-			setStatus(null);
+			toast.error("키 쌍 생성에 실패했습니다");
 		} finally {
 			setBusy(false);
 		}
@@ -542,20 +548,18 @@ const App = () => {
 		if (!canUpload) return;
 		setBusy(true);
 		setError(null);
-		setStatus("암호화하여 업로드 중...");
 		try {
 			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, undefined);
 			const result = await saveAccount(payload, authToken ?? undefined);
 			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
 			setStoredAccount(record);
-			setStatus("키가 안전하게 저장되었습니다");
+			toast.success("키가 안전하게 저장되었습니다");
 			setShowKeySection(false);
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
 		} catch (err) {
 			console.error(err);
-			setError((err as Error).message || "업로드에 실패했습니다");
-			setStatus(null);
+			toast.error((err as Error).message || "업로드에 실패했습니다");
 		} finally {
 			setBusy(false);
 		}
@@ -575,24 +579,17 @@ const App = () => {
 		await requestPrivateKeyAccess("decrypt");
 	}
 
-	async function requestPrivateKeyAccess(target: "decrypt" | "encrypt"): Promise<boolean> {
-		const setTargetError = target === "decrypt" ? setDecryptError : setEncryptError;
-		const setTargetStatus = target === "decrypt" ? setDecryptStatus : setEncryptStatus;
-
-		if (!authToken || !isAuthed) { setTargetError("로그인이 필요합니다"); return false; }
-		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) { setTargetError("저장된 개인키가 없습니다."); return false; }
+	async function requestPrivateKeyAccess(_target: "decrypt" | "encrypt"): Promise<boolean> {
+		if (!authToken || !isAuthed) { toast.error("로그인이 필요합니다"); return false; }
+		if (!storedAccount?.encryptedPrivateKey || !storedAccount?.kdf) { toast.error("저장된 개인키가 없습니다."); return false; }
 		setWebauthnAuthBusy(true);
-		setTargetError(null);
-		setTargetStatus("보안 키 요청 중...");
 		try {
 			const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
 			const options = optionsResp.options;
-			setTargetStatus("보안 키로 인증하세요...");
 			const assertion = await authenticateWithWebAuthn({
 				challenge: options.challenge, allowCredentials: options.allowCredentials || [],
 				timeout: options.timeout, userVerification: options.userVerification,
 			});
-			setTargetStatus("확인 중...");
 			const verifyResp = await verifyWebAuthnAuthentication(
 				authToken,
 				assertion.credentialId,
@@ -601,12 +598,10 @@ const App = () => {
 				assertion.signature
 			);
 			setDecryptionToken(verifyResp.token);
-			setTargetStatus(null);
-			setTargetError(null);
+			toast.success("보안 키 인증 성공");
 			return true;
 		} catch (err) {
-			setTargetError((err as Error).message || "보안 키 인증 실패");
-			setTargetStatus(null);
+			toast.error((err as Error).message || "보안 키 인증 실패");
 			return false;
 		} finally {
 			setWebauthnAuthBusy(false);
@@ -788,19 +783,18 @@ const App = () => {
 		setEncryptedBlob(null);
 
 		if (encryptAuthMode === "password") {
-			if (!encryptPassword) { setEncryptError("비밀번호를 입력하세요"); return; }
+			if (!encryptPassword) { toast.error("비밀번호를 입력하세요"); return; }
 		} else {
-			if (!contacts.find((c) => c.id === encryptRecipientId)) { setEncryptError("수신자를 선택하세요"); return; }
+			if (!contacts.find((c) => c.id === encryptRecipientId)) { toast.error("수신자를 선택하세요"); return; }
 		}
 		if (encryptMode === "text") {
-			if (!encryptSmsg) { setEncryptError("암호화할 메시지를 입력하세요"); return; }
+			if (!encryptSmsg) { toast.error("암호화할 메시지를 입력하세요"); return; }
 		} else {
-			if (!encryptFile) { setEncryptError("암호화할 파일을 선택하세요"); return; }
+			if (!encryptFile) { toast.error("암호화할 파일을 선택하세요"); return; }
 		}
 
 		try {
 			setEncryptBusy(true);
-			setEncryptStatus("암호화 중...");
 			const files = encryptMode === "file" && encryptFile ? [encryptFile] : undefined;
 			let result: Uint8Array;
 			if (encryptAuthMode === "password") {
@@ -820,14 +814,13 @@ const App = () => {
 				});
 			}
 			setEncryptedBlob(result);
-			setEncryptStatus(encryptMode === "text"
-				? `암호화 완료 (${result.length} bytes). 다운로드가 시작됩니다.`
-				: `파일 암호화 완료 (${formatBytes(result.length)}). 다운로드가 시작됩니다.`
+			toast.success(encryptMode === "text"
+				? `암호화 완료 (${result.length} bytes)`
+				: `파일 암호화 완료 (${formatBytes(result.length)})`
 			);
 		} catch (err) {
 			console.error(err);
-			setEncryptError((err as Error).message || "암호화에 실패했습니다");
-			setEncryptStatus(null);
+			toast.error((err as Error).message || "암호화에 실패했습니다");
 			setEncryptedBlob(null);
 		} finally {
 			setEncryptBusy(false);
@@ -866,11 +859,9 @@ const App = () => {
 		setDecryptedResult(null);
 		try {
 			setDecryptBusy(true);
-			setDecryptStatus("데이터 불러오는 중...");
 			const dataU8 = await loadOpsecData();
 			const info = decryptDetected ?? detectAuthMode(dataU8);
 			setDecryptDetected(info);
-			setDecryptStatus("복호화 중...");
 			let result: DecryptResult;
 			if (info.mode === "password") {
 				if (!decryptPassword) throw new Error("비밀번호를 입력하세요");
@@ -891,11 +882,16 @@ const App = () => {
 				result = await decryptOpsecPub(dataU8, priB64, peerPub, myPub.trim() || undefined);
 			}
 			setDecryptedResult(result);
-			setDecryptStatus("복호화 완료");
+			if (result.verified === true) {
+				toast.success("복호화 완료 (서명 검증 성공)");
+			} else if (result.verified === false) {
+				toast.warning("복호화 완료 (서명 검증 실패)");
+			} else {
+				toast.success("복호화 완료");
+			}
 		} catch (err) {
 			console.error(err);
-			setDecryptError((err as Error).message || "복호화에 실패했습니다");
-			setDecryptStatus(null);
+			toast.error((err as Error).message || "복호화에 실패했습니다");
 			setDecryptedResult(null);
 		} finally {
 			setDecryptBusy(false);
@@ -913,14 +909,13 @@ const App = () => {
 	}
 
 	async function handleDecryptAdvanceToStep2() {
-		setDecryptError(null);
 		try {
 			const data = await loadOpsecData();
 			const info = detectAuthMode(data);
 			setDecryptDetected(info);
 			setDecryptStep(2);
 		} catch (err) {
-			setDecryptError((err as Error).message || "데이터를 분석할 수 없습니다");
+			toast.error((err as Error).message || "데이터를 분석할 수 없습니다");
 		}
 	}
 
@@ -929,79 +924,86 @@ const App = () => {
 	if (!isAuthed) {
 		if (view === "login") {
 			return (
-				<div className="auth-page" key="login">
-					<div className="auth-card view-animate">
-						<h1 className="auth-title">로그인</h1>
-						<form className="auth-form" onSubmit={handleLogin}>
-							<div className="form-group">
-								<label className="form-label">아이디</label>
-								<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="아이디 입력" autoComplete="username" />
-							</div>
-							<div className="form-group">
-								<label className="form-label">비밀번호</label>
-								<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="current-password" />
-							</div>
-							{error && <div className="status-bar error">{error}</div>}
-							<button type="submit" className="btn btn-primary btn-full" disabled={!canLogin || loginBusy}>
-								{loginBusy ? "로그인 중..." : "로그인"}
-							</button>
-						</form>
-						<p className="auth-hint">
-							<button onClick={() => { setView("landing"); setError(null); }}>← 돌아가기</button>
-						</p>
+				<>
+					<Toaster theme={resolvedDark ? "dark" : "light"} hasNav={false} />
+					<div className="auth-page" key="login">
+						<div className="auth-card view-animate">
+							<h1 className="auth-title">로그인</h1>
+							<form className="auth-form" onSubmit={handleLogin}>
+								<div className="form-group">
+									<label className="form-label">아이디</label>
+									<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="아이디 입력" autoComplete="username" />
+								</div>
+								<div className="form-group">
+									<label className="form-label">비밀번호</label>
+									<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="current-password" />
+								</div>
+								<button type="submit" className="btn btn-primary btn-full" disabled={!canLogin || loginBusy}>
+									{loginBusy ? "로그인 중..." : "로그인"}
+								</button>
+							</form>
+							<p className="auth-hint">
+								<button onClick={() => { setView("landing"); setError(null); }}>← 돌아가기</button>
+							</p>
+						</div>
 					</div>
-				</div>
+				</>
 			);
 		}
 
 		if (view === "signup") {
 			return (
-				<div className="auth-page" key="signup">
-					<div className="auth-card view-animate">
-						<h1 className="auth-title">회원가입</h1>
-						<form className="auth-form" onSubmit={handleSignup}>
-							<div className="form-group">
-								<label className="form-label">아이디</label>
-								<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="사용할 아이디" autoComplete="username" />
-							</div>
-							<div className="form-group">
-								<label className="form-label">비밀번호</label>
-								<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="new-password" />
-							</div>
-							<div className="form-group">
-								<label className="form-label">비밀번호 확인</label>
-								<input type="password" value={loginPassConfirm} onChange={(e) => setLoginPassConfirm(e.target.value)} placeholder="비밀번호 다시 입력" autoComplete="new-password" />
-							</div>
-							{error && <div className="status-bar error">{error}</div>}
-							<button type="submit" className="btn btn-primary btn-full" disabled={!canLogin || loginBusy}>
-								{loginBusy ? "처리 중..." : "가입하기"}
-							</button>
-						</form>
-						<p className="auth-hint">
-							<button onClick={() => { setView("landing"); setError(null); }}>← 돌아가기</button>
-						</p>
+				<>
+					<Toaster theme={resolvedDark ? "dark" : "light"} hasNav={false} />
+					<div className="auth-page" key="signup">
+						<div className="auth-card view-animate">
+							<h1 className="auth-title">회원가입</h1>
+							<form className="auth-form" onSubmit={handleSignup}>
+								<div className="form-group">
+									<label className="form-label">아이디</label>
+									<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="사용할 아이디" autoComplete="username" />
+								</div>
+								<div className="form-group">
+									<label className="form-label">비밀번호</label>
+									<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="new-password" />
+								</div>
+								<div className="form-group">
+									<label className="form-label">비밀번호 확인</label>
+									<input type="password" value={loginPassConfirm} onChange={(e) => setLoginPassConfirm(e.target.value)} placeholder="비밀번호 다시 입력" autoComplete="new-password" />
+								</div>
+								<button type="submit" className="btn btn-primary btn-full" disabled={!canLogin || loginBusy}>
+									{loginBusy ? "처리 중..." : "가입하기"}
+								</button>
+							</form>
+							<p className="auth-hint">
+								<button onClick={() => { setView("landing"); setError(null); }}>← 돌아가기</button>
+							</p>
+						</div>
 					</div>
-				</div>
+				</>
 			);
 		}
 
 		/* Landing */
 		return (
-			<div className="landing" key="landing">
-				<div className="view-animate">
-					<h1 className="brand">
-						Yet<br />Another<br />Security
-					</h1>
+			<>
+				<Toaster theme={resolvedDark ? "dark" : "light"} hasNav={false} />
+				<div className="landing" key="landing">
+					<div className="view-animate">
+						<h1 className="brand">
+							Yet<br />Another<br />Security
+						</h1>
+					</div>
+					<div className="landing-buttons view-animate">
+						<button className="btn btn-primary btn-full" onClick={() => { setView("login"); setError(null); setLoginUsername(""); setLoginPass(""); }}>
+							로그인
+						</button>
+						<button className="btn btn-secondary btn-full" onClick={() => { setView("signup"); setError(null); setLoginUsername(""); setLoginPass(""); setLoginPassConfirm(""); }}>
+							회원가입
+						</button>
+					</div>
 				</div>
-				<div className="landing-buttons view-animate">
-					<button className="btn btn-primary btn-full" onClick={() => { setView("login"); setError(null); setLoginUsername(""); setLoginPass(""); }}>
-						로그인
-					</button>
-					<button className="btn btn-secondary btn-full" onClick={() => { setView("signup"); setError(null); setLoginUsername(""); setLoginPass(""); setLoginPassConfirm(""); }}>
-						회원가입
-					</button>
-				</div>
-			</div>
+			</>
 		);
 	}
 
@@ -1027,8 +1029,6 @@ const App = () => {
 					<button className="btn btn-secondary btn-sm" onClick={openAddContactModal}>+ 추가</button>
 				</div>
 				<p className="section-desc">상대방의 공개키를 관리하여 안전하게 암호화된 메시지를 주고받으세요.</p>
-
-				{contactError && <div className="status-bar error">{contactError}</div>}
 
 				{contactsLoading ? (
 					<p className="text-hint text-center mt-4">불러오는 중...</p>
@@ -1091,8 +1091,9 @@ const App = () => {
 			);
 			const decResp = await decryptStoredPrivateKey(authUsername!, verifyResp.token);
 			setPrivateKeyPem(decResp.privateKey);
+			toast.success("개인키가 잠금 해제되었습니다");
 		} catch (err) {
-			setError((err as Error).message);
+			toast.error((err as Error).message || "개인키 인증에 실패했습니다");
 		} finally {
 			setBusy(false);
 		}
@@ -1103,8 +1104,6 @@ const App = () => {
 			<KeysTab
 				storedAccount={storedAccount}
 				showKeySection={showKeySection}
-				status={status}
-				error={error}
 				copyPublicStatus={copyPublicStatus}
 				copyPrivateStatus={copyPrivateStatus}
 				keyGenStep={keyGenStep}
@@ -1154,7 +1153,6 @@ const App = () => {
 							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>다운로드</button>
 						</div>
 					</div>
-					{encryptStatus && <div className="status-bar success mt-3">{encryptStatus}</div>}
 					<div className="btn-row mt-3">
 						<button className="btn btn-primary" onClick={resetEncryptionForm}>처음으로</button>
 					</div>
@@ -1313,7 +1311,6 @@ const App = () => {
 							</div>
 						)}
 
-						{encryptError && <div className="status-bar error">{encryptError}</div>}
 						{encryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
 
 						<div className="btn-row">
@@ -1340,24 +1337,6 @@ const App = () => {
 			return (
 				<>
 					<h2 className="section-title">복호화 결과</h2>
-					{decryptStatus && <div className="status-bar success mt-3">{decryptStatus}</div>}
-					
-					{/* Signature verification result */}
-					{decryptedResult.verified === true && (
-						<div className="status-bar success" style={{ marginBottom: 12 }}>
-							✓ 서명 검증 성공 - 발신자의 신원이 확인되었습니다
-						</div>
-					)}
-					{decryptedResult.verified === false && decryptedResult.verifyError && (
-						<div className="status-bar error" style={{ marginBottom: 12 }}>
-							✗ 서명 검증 실패: {decryptedResult.verifyError}
-						</div>
-					)}
-					{decryptedResult.verifyError && decryptedResult.verified !== false && (
-						<div className="status-bar error" style={{ marginBottom: 12 }}>
-							⚠ {decryptedResult.verifyError}
-						</div>
-					)}
 
 					<div className="card">
 						{rows.map((r) => (
@@ -1461,8 +1440,6 @@ const App = () => {
 							/>
 						</div>
 
-						{decryptError && <div className="status-bar error">{decryptError}</div>}
-
 						<div className="btn-row btn-row-right">
 							<button className="btn btn-primary" disabled={!decryptPayloadFile && !decryptPayloadInput.trim()} onClick={handleDecryptAdvanceToStep2}>
 								다음
@@ -1554,8 +1531,6 @@ const App = () => {
 							</>
 						)}
 
-						{decryptStatus && <div className="status-bar info">{decryptStatus}</div>}
-						{decryptError && <div className="status-bar error">{decryptError}</div>}
 						{decryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
 
 						<div className="btn-row">
@@ -1614,8 +1589,6 @@ const App = () => {
 							<span className="form-hint">서명 검증이 필요하지 않으면 비워도 됩니다</span>
 						</div>
 
-						{decryptStatus && <div className="status-bar info">{decryptStatus}</div>}
-						{decryptError && <div className="status-bar error">{decryptError}</div>}
 						{decryptBusy && <div className="progress-bar"><div className="progress-fill" /></div>}
 
 						<div className="btn-row">
@@ -1668,8 +1641,9 @@ const App = () => {
 				setShowKeySection(false);
 			}
 			setWebauthnPending(null);
+			toast.success("패스키가 등록되었습니다");
 		} catch (err) {
-			setError((err as Error).message);
+			toast.error((err as Error).message || "패스키 등록에 실패했습니다");
 		} finally {
 			setWebauthnAuthBusy(false);
 		}
@@ -1702,13 +1676,14 @@ const App = () => {
 			
 			setWebauthnPending(null);
 			setShowKeySection(false);
+			toast.success("패스키 인증이 완료되었습니다");
 		} catch (err) {
 			const msg = (err as Error).message || "";
 			if (msg.includes("No WebAuthn credentials registered")) {
 				setWebauthnPending("register");
-				setError("등록된 패스키가 없습니다. 먼저 패스키를 등록해주세요.");
+				toast.error("등록된 패스키가 없습니다. 먼저 패스키를 등록해주세요.");
 			} else {
-				setError(msg);
+				toast.error(msg || "패스키 인증에 실패했습니다");
 			}
 		} finally {
 			setWebauthnAuthBusy(false);
@@ -1717,36 +1692,38 @@ const App = () => {
 
 	if (webauthnPending) {
 		return (
-			<div className="auth-page" key="webauthn">
-				<div className="auth-card view-animate">
-					<h1 className="auth-title">{webauthnPending === "register" ? "패스키 등록" : "패스키 인증"}</h1>
-					<p className="section-desc">
-						{webauthnPending === "register" 
-							? "계정 보호 및 본인 확인을 위해 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 등록된 패스키로 개인키가 안전하게 보호됩니다." 
-							: "본인 확인 및 개인키 복호화를 위해 패스키 인증이 필요합니다."}
-					</p>
-					
-					{error && <div className="status-bar error">{error}</div>}
-					{(status || webauthnAuthBusy) && <div className="status-bar">{status || "처리 중..."}</div>}
-					
-					<button className="btn btn-primary btn-full mt-4" 
-						disabled={webauthnAuthBusy}
-						onClick={webauthnPending === "register" ? doWebauthnSignupFlow : doWebauthnLoginFlow}>
-						{webauthnPending === "register" ? "패스키 등록 완료하기" : "패스키로 인증하기"}
-					</button>
-					<div className="auth-hint">
-						{webauthnPending === "authenticate" && (
-							<button
-								type="button"
-								onClick={() => { setError(null); setWebauthnPending("register"); }}
-							>
-								패스키 신규 등록
-							</button>
-						)}
-						<button type="button" onClick={handleSignOut}>로그아웃</button>
+			<>
+				<Toaster theme={resolvedDark ? "dark" : "light"} hasNav={false} />
+				<div className="auth-page" key="webauthn">
+					<div className="auth-card view-animate">
+						<h1 className="auth-title">{webauthnPending === "register" ? "패스키 등록" : "패스키 인증"}</h1>
+						<p className="section-desc">
+							{webauthnPending === "register" 
+								? "계정 보호 및 본인 확인을 위해 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 등록된 패스키로 개인키가 안전하게 보호됩니다." 
+								: "본인 확인 및 개인키 복호화를 위해 패스키 인증이 필요합니다."}
+						</p>
+						
+						<button className="btn btn-primary btn-full mt-4" 
+							disabled={webauthnAuthBusy}
+							onClick={webauthnPending === "register" ? doWebauthnSignupFlow : doWebauthnLoginFlow}>
+							{webauthnPending === "register" 
+								? (webauthnAuthBusy ? "등록 중..." : "패스키 등록 완료하기") 
+								: (webauthnAuthBusy ? "인증 중..." : "패스키로 인증하기")}
+						</button>
+						<div className="auth-hint">
+							{webauthnPending === "authenticate" && (
+								<button
+									type="button"
+									onClick={() => { setError(null); setWebauthnPending("register"); }}
+								>
+									패스키 신규 등록
+								</button>
+							)}
+							<button type="button" onClick={handleSignOut}>로그아웃</button>
+						</div>
 					</div>
 				</div>
-			</div>
+			</>
 		);
 	}
 
@@ -1754,6 +1731,7 @@ const App = () => {
 
 	return (
 		<div className="page">
+			<Toaster theme={resolvedDark ? "dark" : "light"} hasNav={true} />
 			<div className="topbar">
 				<div className="topbar-left">
 					<span className="topbar-brand">YAS</span>
@@ -1859,7 +1837,6 @@ const App = () => {
 									placeholder="간단한 메모"
 								/>
 							</div>
-							{contactModalError && <div className="status-bar error">{contactModalError}</div>}
 							<div className="modal-footer">
 								<button type="button" className="btn btn-ghost" onClick={closeContactModal}>취소</button>
 								<button type="submit" className="btn btn-primary" disabled={contactBusy || !contactForm.contactUsername.trim()}>

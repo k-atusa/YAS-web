@@ -4,8 +4,6 @@ import type { AccountRecord } from "../../types";
 type KeysTabProps = {
 	storedAccount: AccountRecord | null;
 	showKeySection: boolean;
-	status: string | null;
-	error: string | null;
 	copyPublicStatus: "idle" | "copied" | "error";
 	copyPrivateStatus: "idle" | "copied" | "error";
 	keyGenStep: number;
@@ -28,8 +26,6 @@ type KeysTabProps = {
 export const KeysTab = ({
 	storedAccount,
 	showKeySection,
-	status,
-	error,
 	copyPublicStatus,
 	copyPrivateStatus,
 	keyGenStep,
@@ -114,8 +110,6 @@ export const KeysTab = ({
 						</div>
 					</div>
 				</div>
-				{status && <div className="status-bar success">{status}</div>}
-				{error && <div className="status-bar error">{error}</div>}
 				<div className="btn-row btn-row-right">
 					<button className="btn btn-secondary" onClick={onRegenerate} disabled={busy}>
 						{busy ? "생성 중..." : "키 재생성"}
@@ -145,8 +139,6 @@ export const KeysTab = ({
 							키 쌍 생성
 						</button>
 					</div>
-					{status && <div className="status-bar success mt-3">{status}</div>}
-					{error && <div className="status-bar error mt-3">{error}</div>}
 				</div>
 			) : (
 				<div className="key-card" key="step2">
@@ -208,8 +200,6 @@ export const KeysTab = ({
 							{busy ? "처리 중..." : "암호화하여 저장"}
 						</button>
 					</div>
-					{status && <div className="status-bar success mt-3">{status}</div>}
-					{error && <div className="status-bar error mt-3">{error}</div>}
 				</>
 			)}
 		</>
