@@ -532,15 +532,21 @@ const App = () => {
 		setError(null);
 		setBusy(true);
 		try {
+			const targetUsername = username || authUsername || "";
+			if (!targetUsername) throw new Error("사용자 정보를 찾을 수 없습니다.");
 			const { publicKey, privateKey } = await generateKeyPair();
+			const payload = await buildAccountPayload(targetUsername, publicKey, privateKey, undefined);
+			const result = await saveAccount(payload, authToken ?? undefined);
+			const record: AccountRecord = { ...payload, id: result.id, createdAt: result.createdAt };
+			setStoredAccount(record);
 			setPublicKeyPem(publicKey);
-			setPrivateKeyPem(privateKey);
+			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
-			toast.success("키 쌍이 생성되었습니다. 개인키는 안전하게 보관하세요.");
-			setKeyGenStep(2);
+			setShowKeySection(false);
+			toast.success("키 쌍이 생성되어 안전하게 저장되었습니다");
 		} catch (err) {
 			console.error(err);
-			toast.error("키 쌍 생성에 실패했습니다");
+			toast.error((err as Error).message || "키 쌍 생성에 실패했습니다");
 		} finally {
 			setBusy(false);
 		}
