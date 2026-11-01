@@ -1541,18 +1541,16 @@ const App = () => {
 							<h2 className="section-title">복호화 설정</h2>
 							{decryptDetected?.mode === "publickey" ? renderStepDots(3, decryptStep) : renderStepDots(2, decryptStep)}
 						</div>
-						{decryptDetected && (
-							<div className="detect-banner mb-3">
-								<div className="detect-badge-row">
-									<span className="detect-label">감지된 방식</span>
-									<span className="detect-value">{decryptDetected.mode === "password" ? "🔑 비밀번호" : "👤 공개키"}</span>
-								</div>
-								{decryptDetected.msg && (
-									<div className="detect-msg-row">
-										<span className="detect-label">공개 메시지</span>
-										<p className="detect-msg-text">{decryptDetected.msg}</p>
-									</div>
-								)}
+						<p className="section-desc">
+							{decryptDetected?.mode === "password" ? "복호화에 사용할 비밀번호를 입력하세요." : "복호화에 사용할 개인키를 인증하거나 입력하세요."}
+						</p>
+
+						{decryptDetected?.msg && (
+							<div className="form-group">
+								<label className="form-label">공개 메시지</label>
+								<p style={{ margin: "4px 0 16px 0", fontSize: 14, color: "var(--text)", lineHeight: 1.5, wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+									{decryptDetected.msg}
+								</p>
 							</div>
 						)}
 
