@@ -330,6 +330,12 @@ export const KeysTab = ({
 					: "암호화에 사용할 키 쌍을 생성하거나 직접 입력하여 서버에 안전하게 저장합니다."}
 			</p>
 
+			{!storedAccount && (
+				<div className="info-banner">
+					<span>🔑 아직 등록된 암호화 키가 없습니다. 키를 생성하고 마스터키로 안전하게 저장해주세요.</span>
+				</div>
+			)}
+
 			<div className="tab-toggle mb-3">
 				<button
 					type="button"
