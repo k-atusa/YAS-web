@@ -171,7 +171,6 @@ const App = () => {
 	const navEncryptRef = useRef<HTMLButtonElement>(null);
 	const navDecryptRef = useRef<HTMLButtonElement>(null);
 	const [pressedTab, setPressedTab] = useState<Tab | null>(null);
-	const hasNotifiedNoKey = useRef<string | null>(null);
 	/* Tooltip */
 	const [showUsernameTooltip, setShowUsernameTooltip] = useState(false);
 	const [showSigningTooltip, setShowSigningTooltip] = useState(false);
@@ -352,15 +351,6 @@ const App = () => {
 					if (record) {
 						setPublicKeyPem(record.publicKey);
 						setStatus(null);
-					} else {
-						// 키가 아직 저장되지 않은 신규 계정인 경우 1회 알림
-						if (hasNotifiedNoKey.current !== snap) {
-							hasNotifiedNoKey.current = snap;
-							toast("암호화를 시작하려면 먼저 키를 생성하고 저장해주세요.", {
-								icon: "🔑",
-								duration: 6000,
-							});
-						}
 					}
 				}
 			} catch (err) {
@@ -440,7 +430,6 @@ const App = () => {
 	}
 
 	function handleSignOut() {
-		hasNotifiedNoKey.current = null;
 		setAuthToken(null);
 		setAuthUsername(null);
 		if (r0Secret) {
@@ -984,7 +973,6 @@ const App = () => {
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
-			hasNotifiedNoKey.current = targetUsername;
 			toast.success("키 쌍이 안전하게 저장되었습니다");
 			return true;
 		} catch (err) {
@@ -1031,7 +1019,6 @@ const App = () => {
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
-			hasNotifiedNoKey.current = targetUsername;
 			toast.success("키 쌍이 안전하게 저장되었습니다");
 			return true;
 		} catch (err) {
