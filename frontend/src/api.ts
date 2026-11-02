@@ -1,5 +1,13 @@
 import { API_BASE } from "./config";
-import type { AccountPayload, AccountRecord, AccountVault, ContactPayload, ContactRecord } from "./types";
+import type {
+  AccountPayload,
+  AccountRecord,
+  AccountVault,
+  ContactPayload,
+  ContactRecord,
+  PasskeyCredentialItem,
+  WrappedMasterKey,
+} from "./types";
 
 export async function signup(username: string, password: string): Promise<{ id: string; username: string }> {
   const response = await fetch(`${API_BASE}/auth/signup`, {
@@ -16,7 +24,10 @@ export async function signup(username: string, password: string): Promise<{ id: 
   return response.json();
 }
 
-export async function login(username: string, password: string): Promise<{ token: string; user: { id: string; username: string }; hasPasskey?: boolean }> {
+export async function login(
+  username: string,
+  password: string
+): Promise<{ token: string; user: { id: string; username: string }; r0Salt: string; hasPasskey?: boolean }> {
   const response = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -65,7 +76,7 @@ export async function getAccountByUsername(username: string): Promise<AccountRec
 export async function verifyPassword(
   token: string,
   password: string
-): Promise<{ token: string; expiresAt: string; verified: boolean }> {
+): Promise<{ token: string; expiresAt: string; r0Salt: string; verified: boolean }> {
   const response = await fetch(`${API_BASE}/auth/verify-password`, {
     method: "POST",
     headers: {
@@ -83,23 +94,39 @@ export async function verifyPassword(
   return response.json();
 }
 
+export async function deleteAccount(token: string, password: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/auth/delete-account`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ password }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "계정 탈퇴에 실패했습니다");
+  }
+}
+
 export async function getMyPrivateKeyVault(
   token: string,
-  verificationToken: string
+  verificationToken?: string
 ): Promise<AccountVault> {
   const response = await fetch(`${API_BASE}/accounts/me/vault`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      "X-Verification-Token": verificationToken,
+      ...(verificationToken ? { "X-Verification-Token": verificationToken } : {}),
     },
-    body: JSON.stringify({ verificationToken }),
+    body: JSON.stringify(verificationToken ? { verificationToken } : {}),
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.message || "개인키 접근 인증에 실패했습니다");
+    throw new Error(error.message || "개인키 암호화 데이터 조회에 실패했습니다");
   }
 
   return response.json();
@@ -162,6 +189,56 @@ export async function deleteContact(id: string, token: string): Promise<void> {
 
 // ==================== WebAuthn API ====================
 
+export async function listWebAuthnCredentials(token: string): Promise<PasskeyCredentialItem[]> {
+  const response = await fetch(`${API_BASE}/webauthn/credentials`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "패스키 목록을 불러오지 못했습니다");
+  }
+
+  const data = await response.json();
+  return data.credentials || [];
+}
+
+export async function deleteWebAuthnCredential(token: string, credentialId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/webauthn/credentials/delete`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ credentialId }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "패스키 삭제에 실패했습니다");
+  }
+}
+
+export async function updateWebAuthnCredentialMasterKey(
+  token: string,
+  credentialId: string,
+  encryptedMasterKey: WrappedMasterKey
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/webauthn/credentials/master-key`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ credentialId, encryptedMasterKey }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || "패스키 마스터키 연동에 실패했습니다");
+  }
+}
+
 export async function getWebAuthnRegisterOptions(token: string): Promise<any> {
   const response = await fetch(`${API_BASE}/webauthn/register-options`, {
     method: "POST",
@@ -182,8 +259,10 @@ export async function verifyWebAuthnRegistration(
   publicKey: string,
   counter: number,
   clientDataJSON?: string,
-  transports?: string[]
-): Promise<void> {
+  transports?: string[],
+  name?: string,
+  encryptedMasterKey?: WrappedMasterKey
+): Promise<{ credentialId: string; name: string }> {
   const response = await fetch(`${API_BASE}/webauthn/register-verify`, {
     method: "POST",
     headers: {
@@ -192,10 +271,12 @@ export async function verifyWebAuthnRegistration(
     },
     body: JSON.stringify({
       credentialId,
+      name,
       publicKey,
       counter,
       clientDataJSON,
       transports,
+      encryptedMasterKey,
     }),
   });
 
@@ -203,12 +284,18 @@ export async function verifyWebAuthnRegistration(
     const error = await response.json().catch(() => ({}));
     throw new Error(error.message || "Failed to verify credential");
   }
+
+  return response.json();
 }
 
-export async function getWebAuthnAuthenticateOptions(token: string): Promise<any> {
+export async function getWebAuthnAuthenticateOptions(token: string, credentialId?: string): Promise<any> {
   const response = await fetch(`${API_BASE}/webauthn/authenticate-options`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(credentialId ? { credentialId } : {}),
   });
 
   if (response.status === 400) {
@@ -230,7 +317,13 @@ export async function verifyWebAuthnAuthentication(
   clientDataJSON: string,
   authenticatorData: string,
   signature: string
-): Promise<{ token: string; expiresAt: string }> {
+): Promise<{
+  token: string;
+  expiresAt: string;
+  verified: boolean;
+  credentialId: string;
+  encryptedMasterKey?: WrappedMasterKey;
+}> {
   const response = await fetch(`${API_BASE}/webauthn/authenticate-verify`, {
     method: "POST",
     headers: {

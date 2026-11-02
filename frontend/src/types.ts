@@ -43,6 +43,20 @@ export interface AccountVault {
   kdf: KdfParameters;
 }
 
+export interface WrappedMasterKey {
+  cipherText: string;
+  iv: string;
+  salt: string;
+}
+
+export interface PasskeyCredentialItem {
+  id: string;
+  name: string;
+  transports?: string[];
+  hasMasterKey: boolean;
+  createdAt?: string;
+}
+
 export interface ContactPayload {
   contactUsername: string;
   publicKey: string;

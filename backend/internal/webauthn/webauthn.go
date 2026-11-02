@@ -34,7 +34,15 @@ func GenerateChallenge() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func GenerateRegistrationOptions(username, userID, challenge string) map[string]any {
+func GenerateRegistrationOptions(username, userID, challenge string, existingCredentials ...models.WebAuthnCredential) map[string]any {
+	excludeCreds := make([]map[string]any, 0, len(existingCredentials))
+	for _, cred := range existingCredentials {
+		excludeCreds = append(excludeCreds, map[string]any{
+			"type": "public-key",
+			"id":   cred.ID,
+		})
+	}
+
 	return map[string]any{
 		"challenge": challenge,
 		"rp": map[string]any{
@@ -50,12 +58,12 @@ func GenerateRegistrationOptions(username, userID, challenge string) map[string]
 			{"type": "public-key", "alg": -7},   // ES256
 			{"type": "public-key", "alg": -257}, // RS256
 		},
-		"timeout":     60000,
-		"attestation": "none",
+		"timeout":            60000,
+		"attestation":        "none",
+		"excludeCredentials": excludeCreds,
 		"authenticatorSelection": map[string]any{
-			"authenticatorAttachment": "platform",
-			"residentKey":             "preferred",
-			"userVerification":        "preferred",
+			"residentKey":      "preferred",
+			"userVerification": "required",
 		},
 	}
 }
@@ -73,7 +81,7 @@ func GenerateAuthenticationOptions(challenge string, allowedCredentials []models
 	return map[string]any{
 		"challenge":        challenge,
 		"timeout":          60000,
-		"userVerification": "preferred",
+		"userVerification": "required",
 		"allowCredentials": allowCreds,
 	}
 }
@@ -119,9 +127,19 @@ func VerifyClientData(clientDataJSONBytes []byte, expectedType, storedChallenge 
 		return errors.New("challenge mismatch")
 	}
 
+	if cdata.Origin == "" {
+		return errors.New("missing origin in clientDataJSON")
+	}
 	if config.App.Domain != "" && config.App.Domain != "localhost" {
 		if !strings.Contains(cdata.Origin, config.App.Domain) {
 			return fmt.Errorf("origin mismatch: got %q, expected domain %q", cdata.Origin, config.App.Domain)
+		}
+	} else {
+		if !strings.HasPrefix(cdata.Origin, "http://localhost") &&
+			!strings.HasPrefix(cdata.Origin, "https://localhost") &&
+			!strings.HasPrefix(cdata.Origin, "http://127.0.0.1") &&
+			!strings.HasPrefix(cdata.Origin, "https://127.0.0.1") {
+			return fmt.Errorf("origin mismatch for localhost: got %q", cdata.Origin)
 		}
 	}
 	return nil

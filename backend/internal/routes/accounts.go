@@ -19,6 +19,7 @@ import (
 func AccountsRouter() http.Handler {
 	r := chi.NewRouter()
 	r.With(middleware.RequireAuth).Post("/", handleUpsertAccount)
+	r.With(middleware.RequireAuth).Get("/me/vault", handleGetMyVault)
 	r.With(middleware.RequireAuth).Post("/me/vault", handleGetMyVault)
 	r.Get("/username/{username}", handleGetAccountByUsername)
 	return r
@@ -157,7 +158,9 @@ func handleGetAccountByUsername(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGetMyVault returns the authenticated user's encrypted private key vault ONLY after consuming a valid one-time verificationToken.
+// handleGetMyVault returns the authenticated user's encrypted private key blob.
+// ID/Password session authentication (RequireAuth) grants access to the encrypted private key blob;
+// if an optional single-use verificationToken is provided, it is also verified and consumed.
 func handleGetMyVault(w http.ResponseWriter, r *http.Request) {
 	requester := middleware.GetUser(r)
 	if requester == nil || requester.Sub == "" || requester.Username == "" {
@@ -168,18 +171,22 @@ func handleGetMyVault(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		VerificationToken string `json:"verificationToken"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
 	verToken := strings.TrimSpace(body.VerificationToken)
 	if verToken == "" {
 		verToken = strings.TrimSpace(r.Header.Get("X-Verification-Token"))
 	}
 
-	if err := webauthn.VerifyAndConsumeVerificationToken(verToken, requester.Sub); err != nil {
-		log.Printf("[Vault] Private key access denied for user %s: %v", requester.Username, err)
-		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{
-			"message": "개인키 접근 인증이 필요하거나 인증 토큰이 만료되었습니다",
-		})
-		return
+	if verToken != "" {
+		if err := webauthn.VerifyAndConsumeVerificationToken(verToken, requester.Sub); err != nil {
+			log.Printf("[Vault] Invalid verification token for user %s: %v", requester.Username, err)
+			middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{
+				"message": "인증 토큰이 유효하지 않거나 이미 사용되었습니다",
+			})
+			return
+		}
 	}
 
 	acc, err := db.GetAccountByUsername(requester.Username)

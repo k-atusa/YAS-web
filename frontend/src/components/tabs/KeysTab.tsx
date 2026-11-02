@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { truncateKey } from "../../helpers";
 import { generateKeyPair } from "../../crypto";
-import type { AccountRecord } from "../../types";
+import type { AccountRecord, PasskeyCredentialItem } from "../../types";
 
 type KeysTabProps = {
 	storedAccount: AccountRecord | null;
@@ -23,8 +23,14 @@ type KeysTabProps = {
 	onSetKeyGenStep?: (step: number) => void;
 	onSetShowKeySection: (show: boolean) => void;
 	onRevealPrivateKey?: () => void;
+	onRevealWithMasterKey?: () => void;
 	onHidePrivateKey?: () => void;
 	webauthnAvailable?: boolean;
+	passkeys?: PasskeyCredentialItem[];
+	passkeysBusy?: boolean;
+	onAddPasskey?: () => void;
+	onDeletePasskey?: (credentialId: string, name: string) => void;
+	onDeleteAccount?: () => void;
 };
 
 export const KeysTab = ({
@@ -32,7 +38,6 @@ export const KeysTab = ({
 	showKeySection,
 	copyPublicStatus,
 	copyPrivateStatus,
-	publicKeyPem,
 	privateKeyPem,
 	busy,
 	onSaveManualKeys,
@@ -41,8 +46,14 @@ export const KeysTab = ({
 	onCopyPrivateKey,
 	onSetShowKeySection,
 	onRevealPrivateKey,
+	onRevealWithMasterKey,
 	onHidePrivateKey,
 	webauthnAvailable,
+	passkeys = [],
+	passkeysBusy = false,
+	onAddPasskey,
+	onDeletePasskey,
+	onDeleteAccount,
 }: KeysTabProps) => {
 	const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
 	const [keyMode, setKeyMode] = useState<"generate" | "manual">("generate");
@@ -57,7 +68,104 @@ export const KeysTab = ({
 	const hasStoredKey = Boolean(
 		storedAccount?.publicKey && (storedAccount?.hasPrivateKey || storedAccount?.encryptedPrivateKey?.cipherText)
 	);
+	const hasUsablePasskey = Boolean(webauthnAvailable && passkeys.some((p) => p.hasMasterKey));
 	const saveHandler = onSaveKeys || onSaveManualKeys;
+
+	function renderPasskeyAndAccountSection() {
+		return (
+			<div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
+				<div className="section-header" style={{ marginBottom: 6 }}>
+					<h3 className="section-title" style={{ fontSize: 16 }}>패스키 관리</h3>
+					{onAddPasskey && (
+						<button
+							type="button"
+							className="btn btn-secondary btn-sm"
+							onClick={onAddPasskey}
+							disabled={busy || passkeysBusy || !webauthnAvailable}
+						>
+							{passkeysBusy ? "처리 중..." : "+ 패스키 추가"}
+						</button>
+					)}
+				</div>
+				<p className="section-desc" style={{ marginBottom: 12 }}>
+					여러 기기의 패스키를 등록해두면 각 기기에서 패스키 인증만으로 마스터키를 복호화하여 개인키를 사용할 수 있습니다.
+				</p>
+
+				{passkeys.length === 0 ? (
+					<div className="key-card" style={{ padding: "18px 16px", textAlign: "center" }}>
+						<p className="text-hint" style={{ margin: 0 }}>
+							{webauthnAvailable
+								? "등록된 패스키가 없습니다. '+ 패스키 추가'를 눌러 현재 기기를 등록하세요."
+								: "현재 브라우저 환경에서는 WebAuthn 패스키를 사용할 수 없습니다."}
+						</p>
+					</div>
+				) : (
+					<div className="contact-list">
+						{passkeys.map((pk) => (
+							<div key={pk.id} className="contact-row">
+								<div className="contact-info">
+									<div className="contact-name-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+										<span className="contact-name">{pk.name}</span>
+										<span
+											style={{
+												fontSize: 11,
+												padding: "2px 6px",
+												borderRadius: 6,
+												background: pk.hasMasterKey ? "rgba(34, 197, 94, 0.14)" : "rgba(234, 179, 8, 0.15)",
+												color: pk.hasMasterKey ? "var(--success, #22c55e)" : "var(--text-muted)",
+											}}
+										>
+											{pk.hasMasterKey ? "마스터키 암호화 연동됨" : "마스터키 미연동"}
+										</span>
+									</div>
+								</div>
+								<div className="contact-btns">
+									{onDeletePasskey && (
+										<button
+											type="button"
+											className="btn-ghost btn-sm btn-danger"
+											onClick={() => onDeletePasskey(pk.id, pk.name)}
+											disabled={busy || passkeysBusy}
+										>
+											삭제
+										</button>
+									)}
+								</div>
+							</div>
+						))}
+					</div>
+				)}
+
+				{onDeleteAccount && (
+					<div
+						style={{
+							marginTop: 28,
+							paddingTop: 18,
+							borderTop: "1px solid var(--border)",
+							display: "flex",
+							justifyContent: "space-between",
+							alignItems: "center",
+						}}
+					>
+						<div>
+							<span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)" }}>계정 관리</span>
+							<p className="text-hint" style={{ margin: "2px 0 0 0", fontSize: 12 }}>
+								계정 탈퇴 시 저장된 키, 패스키, 주소록이 모두 영구 삭제됩니다.
+							</p>
+						</div>
+						<button
+							type="button"
+							className="btn-ghost btn-sm btn-danger"
+							onClick={onDeleteAccount}
+							disabled={busy || passkeysBusy}
+						>
+							계정 탈퇴
+						</button>
+					</div>
+				)}
+			</div>
+		);
+	}
 
 	async function handleCreatePreview() {
 		setGeneratingPreview(true);
@@ -182,14 +290,26 @@ export const KeysTab = ({
 									)}
 								</>
 							) : (
-								<button
-									type="button"
-									className="btn btn-secondary btn-sm"
-									onClick={onRevealPrivateKey}
-									disabled={busy}
-								>
-									{busy ? "인증 중..." : webauthnAvailable ? "패스키로 인증하여 보기" : "인증하여 보기"}
-								</button>
+								<div style={{ display: "flex", gap: 6 }}>
+									{hasUsablePasskey && (
+										<button
+											type="button"
+											className="btn btn-secondary btn-sm"
+											onClick={onRevealPrivateKey}
+											disabled={busy}
+										>
+											{busy ? "인증 중..." : "패스키로 보기"}
+										</button>
+									)}
+									<button
+										type="button"
+										className="btn btn-secondary btn-sm"
+										onClick={onRevealWithMasterKey || onRevealPrivateKey}
+										disabled={busy}
+									>
+										{busy && !hasUsablePasskey ? "확인 중..." : "마스터키로 보기"}
+									</button>
+								</div>
 							)}
 						</div>
 					</div>
@@ -199,6 +319,7 @@ export const KeysTab = ({
 						{busy ? "생성 중..." : "키 재생성"}
 					</button>
 				</div>
+				{renderPasskeyAndAccountSection()}
 			</>
 		);
 	}
@@ -383,6 +504,7 @@ export const KeysTab = ({
 					</div>
 				</>
 			)}
+			{renderPasskeyAndAccountSection()}
 		</>
 	);
 };

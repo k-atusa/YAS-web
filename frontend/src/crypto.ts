@@ -13,7 +13,7 @@
  *   Protocol   — Opsec YAS2 binary header format
  */
 
-import type { AccountPayload, EncryptedPrivateKey, KdfParameters } from "./types";
+import type { AccountPayload, EncryptedPrivateKey, KdfParameters, WrappedMasterKey } from "./types";
 
 // TS 5.7+ strict typed arrays — slice() to get a fresh ArrayBuffer, never SharedArrayBuffer
 const asBuf = (u: Uint8Array): ArrayBuffer =>
@@ -115,7 +115,7 @@ export interface DecryptResult {
 const _enc = new TextEncoder();
 const _dec = new TextDecoder();
 
-function u8ToBase64(u8: Uint8Array): string {
+export function u8ToBase64(u8: Uint8Array): string {
   if (u8.length === 0) return "";
   const chunkSize = 0x8000;
   let bin = "";
@@ -743,9 +743,116 @@ async function normalizePassphraseBytes(passphrase: string): Promise<Uint8Array>
   return NormPW(passphrase);
 }
 
-export async function computeWebAuthnPrfSalt(username: string): Promise<ArrayBuffer> {
-  const label = `YAS-WEB-PRF-KEY-V1:${username.trim()}`;
-  return crypto.subtle.digest("SHA-256", asBuf(_enc.encode(label)));
+/**
+ * 비밀번호 -> 결정적난수값0 (R0)
+ * 계정별 무작위 32바이트 솔트(r0Salt)와 비밀번호를 사용하여 arg2st로 32바이트 결정적 난수값(R0)을 파생합니다.
+ */
+export async function deriveDeterministicR0(
+  password: string,
+  r0SaltB64: string
+): Promise<Uint8Array> {
+  if (!r0SaltB64 || !r0SaltB64.trim()) {
+    throw new Error("계정 보안 솔트(r0Salt) 정보를 확인할 수 없습니다.");
+  }
+  const U = await waitForUsag();
+  const NormPW = U.bencode.NormPW as (s: string) => Uint8Array;
+  const HashMaster = U.bencrypt.HashMaster as new (
+    algo: string,
+    s1: number,
+    s2: number
+  ) => {
+    KDF(pw: Uint8Array, salt: Uint8Array): Promise<[Uint8Array, Uint8Array]>;
+  };
+  const r0Salt = base64ToU8(r0SaltB64.trim());
+  if (r0Salt.length < 16) {
+    throw new Error("유효하지 않은 계정 솔트(r0Salt) 길이입니다.");
+  }
+  const hm = new HashMaster("arg2st", 32, 32);
+  const [, r0] = await hm.KDF(NormPW(password), r0Salt);
+  return r0;
+}
+
+/**
+ * (결정적난수값0 + 결정적난수값i)와 무작위 솔트를 결합해 arg2st로 마스터키 암호화용 AES-256-GCM 키를 파생합니다.
+ */
+async function deriveMasterKeyWrappingKey(
+  r0: Uint8Array,
+  ri: Uint8Array,
+  salt: Uint8Array,
+  usage: KeyUsage[]
+): Promise<CryptoKey> {
+  const combined = new Uint8Array(r0.length + ri.length);
+  combined.set(r0, 0);
+  combined.set(ri, r0.length);
+  try {
+    return await deriveArg2stAesKey(combined, salt, usage);
+  } finally {
+    combined.fill(0);
+  }
+}
+
+/**
+ * 패스키i -> 난수값0 + 결정적난수값i -> 마스터키 암호화
+ * 반드시 하드웨어 보안키의 실제 WebAuthn PRF 출력(결정적난수값i)만 허용합니다.
+ */
+export async function encryptMasterKeyWithPasskey(
+  masterKey: string,
+  r0: Uint8Array,
+  prfOutput?: Uint8Array
+): Promise<WrappedMasterKey> {
+  if (!masterKey || !masterKey.trim()) {
+    throw new Error("암호화할 마스터키가 필요합니다.");
+  }
+  if (!r0 || r0.length < 32) {
+    throw new Error("결정적 난수값0(R0)이 유효하지 않습니다. 다시 로그인하거나 비밀번호를 확인해주세요.");
+  }
+  if (!prfOutput || prfOutput.length < 32) {
+    throw new Error(
+      "이 기기 또는 패스키는 하드웨어 암호화 확장(WebAuthn PRF)을 지원하지 않아 마스터키 암호화에 사용할 수 없습니다."
+    );
+  }
+  const salt = randomBytes(32);
+  const iv = randomBytes(12);
+  const wrapKey = await deriveMasterKeyWrappingKey(r0, prfOutput, salt, ["encrypt"]);
+  const cipher = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: asBuf(iv) },
+    wrapKey,
+    asBuf(_enc.encode(masterKey))
+  );
+  return {
+    cipherText: u8ToBase64(new Uint8Array(cipher)),
+    iv: u8ToBase64(iv),
+    salt: u8ToBase64(salt),
+  };
+}
+
+/**
+ * 패스키i -> 난수값0 + 결정적난수값i -> 마스터키 복호화
+ * 반드시 하드웨어 보안키의 실제 WebAuthn PRF 출력(결정적난수값i)만 허용합니다.
+ */
+export async function decryptMasterKeyWithPasskey(
+  wrapped: WrappedMasterKey,
+  r0: Uint8Array,
+  prfOutput?: Uint8Array
+): Promise<string> {
+  if (!r0 || r0.length < 32) {
+    throw new Error("결정적 난수값0(R0)이 없습니다. 계정 비밀번호를 확인해주세요.");
+  }
+  if (!prfOutput || prfOutput.length < 32) {
+    throw new Error(
+      "패스키의 하드웨어 난수값(WebAuthn PRF)을 획득하지 못했습니다. PRF를 지원하는 브라우저와 패스키인지 확인해주세요."
+    );
+  }
+  const salt = base64ToU8(wrapped.salt);
+  const iv = base64ToU8(wrapped.iv);
+  const cipherBytes = base64ToU8(wrapped.cipherText);
+  const wrapKey = await deriveMasterKeyWrappingKey(r0, prfOutput, salt, ["decrypt"]);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: asBuf(iv) },
+    wrapKey,
+    asBuf(cipherBytes)
+  );
+  return _dec.decode(decrypted);
 }
 
 export interface KeyProtectionSecret {
@@ -874,10 +981,11 @@ export async function registerWebAuthnCredential(options: {
   rp: { name: string; id: string };
   user: { id: string; name: string; displayName: string };
   pubKeyCredParams: Array<{ type: "public-key"; alg: number }>;
+  excludeCredentials?: Array<{ type: "public-key"; id: string; transports?: string[] }>;
   timeout?: number;
   attestation?: "none" | "direct" | "indirect";
   authenticatorSelection?: any;
-  username?: string;
+  prfInput: Uint8Array;
 }): Promise<{
   credentialId: string;
   publicKey: string;
@@ -887,9 +995,17 @@ export async function registerWebAuthnCredential(options: {
   prfEnabled: boolean;
   prfOutput?: Uint8Array;
 }> {
+  if (!options.prfInput || options.prfInput.length < 32) {
+    throw new Error("패스키 PRF 시드(결정적난수값0)가 필요합니다.");
+  }
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const userIdBuffer = base64ToArrayBuffer(options.user.id);
-  const prfSalt = await computeWebAuthnPrfSalt(options.username || options.user.name || "default");
+  const prfSalt = asBuf(options.prfInput);
+  const excludeCredentials = (options.excludeCredentials || []).map((cred) => ({
+    type: (cred.type || "public-key") as "public-key",
+    id: base64ToArrayBuffer(cred.id),
+    transports: cred.transports as AuthenticatorTransport[] | undefined,
+  }));
 
   const credential = (await navigator.credentials.create({
     publicKey: {
@@ -901,12 +1017,12 @@ export async function registerWebAuthnCredential(options: {
         displayName: options.user.displayName,
       },
       pubKeyCredParams: options.pubKeyCredParams,
+      excludeCredentials: excludeCredentials.length > 0 ? excludeCredentials : undefined,
       timeout: options.timeout || 60000,
       attestation: options.attestation || "direct",
       authenticatorSelection: options.authenticatorSelection || {
-        authenticatorAttachment: "platform",
         residentKey: "preferred",
-        userVerification: "preferred",
+        userVerification: "required",
       },
       extensions: {
         prf: {
@@ -952,7 +1068,7 @@ export async function authenticateWithWebAuthn(options: {
   allowCredentials?: Array<{ type: "public-key"; id: string; transports?: string[] }>;
   timeout?: number;
   userVerification?: "required" | "preferred" | "discouraged";
-  username?: string;
+  prfInput: Uint8Array;
 }): Promise<{
   credentialId: string;
   clientDataJSON: string;
@@ -961,19 +1077,22 @@ export async function authenticateWithWebAuthn(options: {
   counter: number;
   prfOutput?: Uint8Array;
 }> {
+  if (!options.prfInput || options.prfInput.length < 32) {
+    throw new Error("패스키 PRF 시드(결정적난수값0)가 필요합니다.");
+  }
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const allowCredentials = (options.allowCredentials || []).map((cred) => ({
     type: cred.type as "public-key",
     id: base64ToArrayBuffer(cred.id),
     transports: cred.transports as AuthenticatorTransport[] | undefined,
   }));
-  const prfSalt = await computeWebAuthnPrfSalt(options.username || "default");
+  const prfSalt = asBuf(options.prfInput);
 
   const assertion = (await navigator.credentials.get({
     publicKey: {
       challenge: challengeBuffer,
       timeout: options.timeout || 60000,
-      userVerification: options.userVerification || "preferred",
+      userVerification: options.userVerification || "required",
       allowCredentials: allowCredentials.length > 0 ? allowCredentials : undefined,
       extensions: {
         prf: {

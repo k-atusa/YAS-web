@@ -1,7 +1,9 @@
 package db
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,6 +70,7 @@ func migrate(conn *sql.DB) error {
 		id TEXT PRIMARY KEY,
 		username TEXT NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL,
+		r0_salt TEXT NOT NULL DEFAULT '',
 		webauthn_credentials TEXT NOT NULL DEFAULT '[]',
 		webauthn_challenge TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
@@ -101,11 +104,21 @@ func migrate(conn *sql.DB) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_contacts_owner_id ON contacts(owner_id);
 	`
-	_, err := conn.Exec(schema)
-	return err
+	if _, err := conn.Exec(schema); err != nil {
+		return err
+	}
+	// Ensure r0_salt column exists for databases created prior to this version
+	_, _ = conn.Exec(`ALTER TABLE users ADD COLUMN r0_salt TEXT NOT NULL DEFAULT '';`)
+	return nil
 }
 
 // ==================== User Operations ====================
+
+func NewR0Salt() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return base64.StdEncoding.EncodeToString(b)
+}
 
 func CreateUser(username, passwordHash string) (*models.User, error) {
 	existing, err := GetUserByUsername(username)
@@ -118,6 +131,7 @@ func CreateUser(username, passwordHash string) (*models.User, error) {
 		ID:                  models.NewID(),
 		Username:            username,
 		PasswordHash:        passwordHash,
+		R0Salt:              NewR0Salt(),
 		WebAuthnCredentials: []models.WebAuthnCredential{},
 		CreatedAt:           now,
 		UpdatedAt:           now,
@@ -125,9 +139,9 @@ func CreateUser(username, passwordHash string) (*models.User, error) {
 
 	credsJSON, _ := json.Marshal(user.WebAuthnCredentials)
 	_, err = DB.Exec(
-		`INSERT INTO users (id, username, password_hash, webauthn_credentials, webauthn_challenge, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		user.ID, user.Username, user.PasswordHash, string(credsJSON), "", user.CreatedAt, user.UpdatedAt,
+		`INSERT INTO users (id, username, password_hash, r0_salt, webauthn_credentials, webauthn_challenge, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		user.ID, user.Username, user.PasswordHash, user.R0Salt, string(credsJSON), "", user.CreatedAt, user.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -137,7 +151,7 @@ func CreateUser(username, passwordHash string) (*models.User, error) {
 
 func GetUserByUsername(username string) (*models.User, error) {
 	row := DB.QueryRow(
-		`SELECT id, username, password_hash, webauthn_credentials, webauthn_challenge, created_at, updated_at
+		`SELECT id, username, password_hash, r0_salt, webauthn_credentials, webauthn_challenge, created_at, updated_at
 		 FROM users WHERE username = ?`,
 		username,
 	)
@@ -146,7 +160,7 @@ func GetUserByUsername(username string) (*models.User, error) {
 
 func GetUserByID(id string) (*models.User, error) {
 	row := DB.QueryRow(
-		`SELECT id, username, password_hash, webauthn_credentials, webauthn_challenge, created_at, updated_at
+		`SELECT id, username, password_hash, r0_salt, webauthn_credentials, webauthn_challenge, created_at, updated_at
 		 FROM users WHERE id = ?`,
 		id,
 	)
@@ -155,6 +169,9 @@ func GetUserByID(id string) (*models.User, error) {
 
 func SaveUser(user *models.User) error {
 	user.UpdatedAt = time.Now().UTC()
+	if user.R0Salt == "" {
+		user.R0Salt = NewR0Salt()
+	}
 	if user.WebAuthnCredentials == nil {
 		user.WebAuthnCredentials = []models.WebAuthnCredential{}
 	}
@@ -163,17 +180,44 @@ func SaveUser(user *models.User) error {
 		return err
 	}
 	_, err = DB.Exec(
-		`UPDATE users SET username = ?, password_hash = ?, webauthn_credentials = ?, webauthn_challenge = ?, updated_at = ?
+		`UPDATE users SET username = ?, password_hash = ?, r0_salt = ?, webauthn_credentials = ?, webauthn_challenge = ?, updated_at = ?
 		 WHERE id = ?`,
-		user.Username, user.PasswordHash, string(credsJSON), user.WebAuthnChallenge, user.UpdatedAt, user.ID,
+		user.Username, user.PasswordHash, user.R0Salt, string(credsJSON), user.WebAuthnChallenge, user.UpdatedAt, user.ID,
 	)
 	return err
+}
+
+func DeleteUserAndData(userID, username string) error {
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(`DELETE FROM contacts WHERE owner_id = ?`, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM keys WHERE username = ?`, username); err != nil {
+		return err
+	}
+	res, err := tx.Exec(`DELETE FROM users WHERE id = ?`, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func scanUser(row *sql.Row) (*models.User, error) {
 	var u models.User
 	var credsRaw string
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &credsRaw, &u.WebAuthnChallenge, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.R0Salt, &credsRaw, &u.WebAuthnChallenge, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -185,6 +229,10 @@ func scanUser(row *sql.Row) (*models.User, error) {
 	}
 	if u.WebAuthnCredentials == nil {
 		u.WebAuthnCredentials = []models.WebAuthnCredential{}
+	}
+	if u.R0Salt == "" {
+		u.R0Salt = NewR0Salt()
+		_ = SaveUser(&u)
 	}
 	return &u, nil
 }

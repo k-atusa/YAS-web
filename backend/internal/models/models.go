@@ -12,17 +12,27 @@ func NewID() string {
 	return hex.EncodeToString(b)
 }
 
+type WrappedMasterKey struct {
+	CipherText string `json:"cipherText"`
+	IV         string `json:"iv"`
+	Salt       string `json:"salt"`
+}
+
 type WebAuthnCredential struct {
-	ID         string   `json:"id"`
-	PublicKey  string   `json:"publicKey"`
-	Counter    int      `json:"counter"`
-	Transports []string `json:"transports,omitempty"`
+	ID                 string            `json:"id"`
+	Name               string            `json:"name,omitempty"`
+	PublicKey          string            `json:"publicKey"`
+	Counter            int               `json:"counter"`
+	Transports         []string          `json:"transports,omitempty"`
+	EncryptedMasterKey *WrappedMasterKey `json:"encryptedMasterKey,omitempty"`
+	CreatedAt          time.Time         `json:"createdAt"`
 }
 
 type User struct {
 	ID                  string               `json:"id"`
 	Username            string               `json:"username"`
 	PasswordHash        string               `json:"-"`
+	R0Salt              string               `json:"r0Salt,omitempty"`
 	WebAuthnCredentials []WebAuthnCredential `json:"webauthnCredentials,omitempty"`
 	WebAuthnChallenge   string               `json:"-"`
 	CreatedAt           time.Time            `json:"createdAt"`

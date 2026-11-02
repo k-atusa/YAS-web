@@ -9,6 +9,7 @@ import {
 	getAccountByUsername,
 	getMyPrivateKeyVault,
 	verifyPassword,
+	deleteAccount,
 	login as loginApi,
 	saveAccount,
 	signup,
@@ -19,6 +20,9 @@ import {
 	verifyWebAuthnRegistration,
 	getWebAuthnAuthenticateOptions,
 	verifyWebAuthnAuthentication,
+	listWebAuthnCredentials,
+	deleteWebAuthnCredential,
+	updateWebAuthnCredentialMasterKey,
 } from "./api";
 import {
 	buildAccountPayload,
@@ -35,9 +39,12 @@ import {
 	registerWebAuthnCredential,
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
+	deriveDeterministicR0,
+	encryptMasterKeyWithPasskey,
+	decryptMasterKeyWithPasskey,
 } from "./crypto";
 import type { EncAlgo, AuthMode, DecryptResult, KeyProtectionSecret } from "./crypto";
-import type { AccountRecord, ContactRecord } from "./types";
+import type { AccountRecord, ContactRecord, PasskeyCredentialItem } from "./types";
 
 
 /* ─── App ─── */
@@ -125,17 +132,26 @@ const App = () => {
 	const [decryptStep, setDecryptStep] = useState(1);
 	const [copySecretStatus, setCopySecretStatus] = useState<"idle" | "copied" | "error">("idle");
 
-	/* WebAuthn & Zero-Knowledge Session */
+	/* WebAuthn & Zero-Knowledge Session (R0 held only in volatile memory) */
 	const [webauthnAvailable, setWebauthnAvailable] = useState(false);
 	const [webauthnAuthBusy, setWebauthnAuthBusy] = useState(false);
-	const [webauthnPending, setWebauthnPending] = useState<"register" | "authenticate" | null>(null);
+	const [passkeys, setPasskeys] = useState<PasskeyCredentialItem[]>([]);
+	const [passkeysBusy, setPasskeysBusy] = useState(false);
+	const [r0Secret, setR0Secret] = useState<Uint8Array | null>(null);
 	const [passphrasePrompt, setPassphrasePrompt] = useState<{
 		isOpen: boolean;
 		title: string;
 		description: string;
-		resolve: (value: string | null) => void;
+		inputLabel?: string;
+		inputPlaceholder?: string;
+		confirmLabel?: string;
+		danger?: boolean;
+		extraInputLabel?: string;
+		extraInputPlaceholder?: string;
+		resolve: (value: { secret: string; extra?: string } | null) => void;
 	} | null>(null);
 	const [passphraseInput, setPassphraseInput] = useState("");
+	const [passphraseExtraInput, setPassphraseExtraInput] = useState("");
 
 	/* Theme */
 	const [themeMode, setThemeMode] = useState<"system" | "light" | "dark">(() => {
@@ -283,9 +299,32 @@ const App = () => {
 		return () => { cancelled = true; };
 	}, [authToken]);
 
+	async function refreshPasskeys(token?: string | null) {
+		const activeToken = token ?? authToken;
+		if (!activeToken) {
+			setPasskeys([]);
+			return;
+		}
+		try {
+			const creds = await listWebAuthnCredentials(activeToken);
+			setPasskeys(creds);
+		} catch (err) {
+			if ((err as Error).message === "TOKEN_EXPIRED") {
+				handleSignOut();
+				return;
+			}
+			console.error("Failed to load passkeys:", err);
+		}
+	}
+
 	useEffect(() => {
-		if (!authToken) { setWebauthnAvailable(false); return; }
+		if (!authToken) {
+			setWebauthnAvailable(false);
+			setPasskeys([]);
+			return;
+		}
 		setWebauthnAvailable(isWebAuthnAvailable());
+		void refreshPasskeys(authToken);
 	}, [authToken]);
 
 	useEffect(() => {
@@ -352,13 +391,10 @@ const App = () => {
 		setStatus(null);
 		try {
 			const result = await loginApi(loginUsername, loginPass);
+			const r0 = await deriveDeterministicR0(loginPass, result.r0Salt);
+			setR0Secret(r0);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
-			if (result.hasPasskey === false) {
-				setWebauthnPending("register");
-			} else {
-				setWebauthnPending("authenticate");
-			}
 		} catch (err) {
 			const msg = (err as Error).message || "로그인에 실패했습니다";
 			setError(msg);
@@ -377,9 +413,10 @@ const App = () => {
 		try {
 			await signup(loginUsername, loginPass);
 			const result = await loginApi(loginUsername, loginPass);
+			const r0 = await deriveDeterministicR0(loginPass, result.r0Salt);
+			setR0Secret(r0);
 			setAuthToken(result.token);
 			setAuthUsername(result.user.username);
-			setWebauthnPending("register");
 		} catch (err) {
 			const msg = (err as Error).message || "회원가입에 실패했습니다";
 			setError(msg);
@@ -392,8 +429,12 @@ const App = () => {
 	function handleSignOut() {
 		setAuthToken(null);
 		setAuthUsername(null);
+		if (r0Secret) {
+			r0Secret.fill(0);
+		}
+		setR0Secret(null);
+		setPasskeys([]);
 		setPrivateKeyPem("");
-		setWebauthnPending(null);
 		setTabDirection("none");
 		setLoginPass("");
 		setUsername("");
@@ -575,141 +616,340 @@ const App = () => {
 		}
 	}
 
-	/* ─── Zero-Knowledge WebAuthn PRF & arg2st Key helpers ─── */
+	/* ─── Zero-Knowledge Multi-Device Passkey (R0 + Ri -> MasterKey -> PrivateKey) & arg2st helpers ─── */
 
 	const hasStoredPrivateKey = Boolean(
 		storedAccount?.publicKey && (storedAccount?.hasPrivateKey || storedAccount?.encryptedPrivateKey?.cipherText)
 	);
 
-	function requestPassphrase(
-		title = "마스터키 확인",
-		description = "개인키를 암호화하거나 잠금 해제하려면 마스터키를 입력하세요."
-	): Promise<string | null> {
+	function requestSecretModal(options: {
+		title: string;
+		description: string;
+		inputLabel?: string;
+		inputPlaceholder?: string;
+		confirmLabel?: string;
+		danger?: boolean;
+		extraInputLabel?: string;
+		extraInputPlaceholder?: string;
+		extraInputDefault?: string;
+	}): Promise<{ secret: string; extra?: string } | null> {
 		return new Promise((resolve) => {
 			setPassphraseInput("");
+			setPassphraseExtraInput(options.extraInputDefault ?? "");
 			setPassphrasePrompt({
 				isOpen: true,
-				title,
-				description,
-				resolve: (pass) => {
-					resolve(pass);
+				title: options.title,
+				description: options.description,
+				inputLabel: options.inputLabel ?? "마스터키",
+				inputPlaceholder: options.inputPlaceholder ?? "마스터키 입력...",
+				confirmLabel: options.confirmLabel ?? "확인",
+				danger: options.danger ?? false,
+				extraInputLabel: options.extraInputLabel,
+				extraInputPlaceholder: options.extraInputPlaceholder,
+				resolve: (res) => {
+					resolve(res);
 				},
 			});
 		});
+	}
+
+	async function requestPassphrase(
+		title = "마스터키 확인",
+		description = "개인키를 암호화하거나 잠금 해제하려면 마스터키를 입력하세요."
+	): Promise<string | null> {
+		const res = await requestSecretModal({
+			title,
+			description,
+			inputLabel: "마스터키",
+			inputPlaceholder: "마스터키 입력...",
+		});
+		return res?.secret ?? null;
+	}
+
+	async function requestAccountPassword(
+		title = "계정 비밀번호 확인",
+		description = "계정 비밀번호를 입력하세요.",
+		confirmLabel = "확인",
+		danger = false
+	): Promise<string | null> {
+		const res = await requestSecretModal({
+			title,
+			description,
+			inputLabel: "계정 비밀번호",
+			inputPlaceholder: "계정 비밀번호 입력...",
+			confirmLabel,
+			danger,
+		});
+		return res?.secret ?? null;
+	}
+
+	async function ensureR0Secret(): Promise<Uint8Array> {
+		if (r0Secret && r0Secret.length === 32) {
+			return r0Secret;
+		}
+		if (!authToken || !authUsername) {
+			throw new Error("로그인이 필요합니다.");
+		}
+		const pass = await requestAccountPassword(
+			"계정 비밀번호 확인",
+			"패스키 암호화 키(결정적난수값0)를 계산하기 위해 계정 비밀번호를 한번 입력해주세요."
+		);
+		if (!pass) {
+			throw new Error("계정 비밀번호가 입력되지 않았습니다.");
+		}
+		const verifyRes = await verifyPassword(authToken, pass);
+		const derived = await deriveDeterministicR0(pass, verifyRes.r0Salt);
+		setR0Secret(derived);
+		return derived;
+	}
+
+	async function unlockMasterKeyWithPasskey(): Promise<{ masterKey: string; verificationToken: string }> {
+		if (!authToken || !isAuthed) throw new Error("로그인이 필요합니다.");
+		if (!webauthnAvailable) throw new Error("이 기기 또는 브라우저에서 패스키를 사용할 수 없습니다.");
+
+		const r0 = await ensureR0Secret();
+		setWebauthnAuthBusy(true);
+		try {
+			const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
+			const options = optionsResp.options;
+			const assertion = await authenticateWithWebAuthn({
+				challenge: options.challenge,
+				allowCredentials: options.allowCredentials || [],
+				timeout: options.timeout,
+				userVerification: options.userVerification,
+				prfInput: r0,
+			});
+			const verifyRes = await verifyWebAuthnAuthentication(
+				authToken,
+				assertion.credentialId,
+				assertion.clientDataJSON,
+				assertion.authenticatorData,
+				assertion.signature
+			);
+			if (!verifyRes.encryptedMasterKey) {
+				throw new Error("이 패스키에 저장된 암호화 마스터키가 없습니다. 패스키를 다시 등록하거나 마스터키로 직접 잠금 해제해주세요.");
+			}
+			const masterKey = await decryptMasterKeyWithPasskey(
+				verifyRes.encryptedMasterKey,
+				r0,
+				assertion.prfOutput
+			);
+			return { masterKey, verificationToken: verifyRes.token };
+		} finally {
+			setWebauthnAuthBusy(false);
+		}
 	}
 
 	async function obtainProtectionSecretForSave(
 		title: string,
 		description: string
 	): Promise<KeyProtectionSecret | null> {
-		if (webauthnAvailable && authToken) {
-			setWebauthnAuthBusy(true);
-			try {
-				const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
-				const options = optionsResp.options;
-				const assertion = await authenticateWithWebAuthn({
-					challenge: options.challenge,
-					allowCredentials: options.allowCredentials || [],
-					timeout: options.timeout,
-					userVerification: options.userVerification,
-					username: authUsername || username,
-				});
-				await verifyWebAuthnAuthentication(
-					authToken,
-					assertion.credentialId,
-					assertion.clientDataJSON,
-					assertion.authenticatorData,
-					assertion.signature
-				);
-				if (assertion.prfOutput && assertion.prfOutput.length > 0) {
-					return { prfOutput: assertion.prfOutput };
-				}
-			} finally {
-				setWebauthnAuthBusy(false);
-			}
-		}
-
 		const pass = await requestPassphrase(title, description);
 		if (!pass) return null;
 		return { passphrase: pass };
 	}
 
-	async function unlockStoredPrivateKey(): Promise<string> {
+	async function unlockStoredPrivateKey(mode: "auto" | "passkey" | "masterkey" = "auto"): Promise<string> {
 		if (!authToken || !isAuthed) throw new Error("로그인이 필요합니다");
 		if (!hasStoredPrivateKey) {
 			throw new Error("저장된 개인키가 없습니다.");
 		}
 
-		let verificationToken = "";
-		let prfOutput: Uint8Array | undefined;
-		let verifiedPassphrase: string | undefined;
+		const hasUsablePasskey = webauthnAvailable && passkeys.some((p) => p.hasMasterKey);
+		const usePasskey = mode === "passkey" || (mode === "auto" && hasUsablePasskey);
 
-		if (webauthnAvailable) {
-			setWebauthnAuthBusy(true);
-			try {
-				const optionsResp = await getWebAuthnAuthenticateOptions(authToken);
-				const options = optionsResp.options;
-				const assertion = await authenticateWithWebAuthn({
-					challenge: options.challenge,
-					allowCredentials: options.allowCredentials || [],
-					timeout: options.timeout,
-					userVerification: options.userVerification,
-					username: authUsername || username,
-				});
-				const verifyRes = await verifyWebAuthnAuthentication(
-					authToken,
-					assertion.credentialId,
-					assertion.clientDataJSON,
-					assertion.authenticatorData,
-					assertion.signature
-				);
-				verificationToken = verifyRes.token;
-				prfOutput = assertion.prfOutput;
-			} finally {
-				setWebauthnAuthBusy(false);
-			}
+		let masterKey: string;
+		let verificationToken: string | undefined;
+
+		if (usePasskey) {
+			const unlocked = await unlockMasterKeyWithPasskey();
+			masterKey = unlocked.masterKey;
+			verificationToken = unlocked.verificationToken;
 		} else {
 			const pass = await requestPassphrase(
-				"개인키 접근 인증",
-				"저장된 개인키에 접근하려면 마스터키를 입력하세요."
+				"개인키 잠금 해제",
+				"저장된 개인키를 복호화할 마스터키를 입력하세요."
 			);
 			if (!pass) throw new Error("마스터키가 입력되지 않았습니다.");
-			const verifyRes = await verifyPassword(authToken, pass);
-			verificationToken = verifyRes.token;
-			verifiedPassphrase = pass;
+			masterKey = pass;
 		}
 
 		const vault = await getMyPrivateKeyVault(authToken, verificationToken);
-
-		let secret: KeyProtectionSecret;
-		if (vault.kdf.algorithm === "arg2st-prf") {
-			if (!prfOutput || prfOutput.length === 0) {
-				throw new Error("패스키 PRF 시크릿을 확인할 수 없습니다. PRF를 지원하는 패스키로 인증해주세요.");
-			}
-			secret = { prfOutput };
-		} else {
-			const pass =
-				verifiedPassphrase ??
-				(await requestPassphrase(
-					"개인키 잠금 해제",
-					"저장된 개인키를 복호화할 마스터키를 입력하세요."
-				)) ??
-				undefined;
-			if (!pass) throw new Error("마스터키가 입력되지 않았습니다.");
-			secret = { passphrase: pass };
-		}
 
 		try {
 			const decryptedPem = await decryptStoredPrivateKeyClient(
 				vault.encryptedPrivateKey,
 				vault.kdf,
-				secret
+				{ passphrase: masterKey }
 			);
 			setPrivateKeyPem(decryptedPem);
 			return decryptedPem;
 		} catch (err) {
 			console.error("Local decryption failed:", err);
-			throw new Error("인증된 패스키 또는 마스터키가 일치하지 않거나 저장된 키 데이터가 손상되었습니다.");
+			throw new Error("마스터키가 일치하지 않거나 저장된 키 데이터가 손상되었습니다.");
+		}
+	}
+
+	async function handleAddPasskey() {
+		if (!authToken || !isAuthed) return;
+		if (!webauthnAvailable) {
+			toast.error("현재 브라우저에서 패스키(WebAuthn)를 사용할 수 없습니다.");
+			return;
+		}
+		try {
+			const r0 = await ensureR0Secret();
+			const defaultName = `패스키 ${passkeys.length + 1}`;
+			const modalRes = await requestSecretModal({
+				title: "패스키 추가",
+				description:
+					"등록할 패스키의 이름과 이 패스키로 암호화해 보호할 마스터키를 입력하세요. (비밀번호 난수값0 + 패스키 결정적난수값i → 마스터키 암호화)",
+				extraInputLabel: "패스키 이름",
+				extraInputPlaceholder: "예: MacBook, iPhone, YubiKey...",
+				extraInputDefault: defaultName,
+				inputLabel: "마스터키",
+				inputPlaceholder: "개인키를 보호하는 마스터키 입력...",
+				confirmLabel: "패스키 등록",
+			});
+			if (!modalRes || !modalRes.secret) return;
+
+			const masterKey = modalRes.secret;
+			const passkeyName = (modalRes.extra || "").trim() || defaultName;
+
+			setPasskeysBusy(true);
+			setWebauthnAuthBusy(true);
+
+			// 이미 저장된 개인키가 있다면 입력한 마스터키가 올바른지 먼저 검증
+			if (hasStoredPrivateKey) {
+				const vault = await getMyPrivateKeyVault(authToken);
+				try {
+					await decryptStoredPrivateKeyClient(
+						vault.encryptedPrivateKey,
+						vault.kdf,
+						{ passphrase: masterKey }
+					);
+				} catch {
+					throw new Error("입력한 마스터키가 현재 저장된 개인키의 마스터키와 일치하지 않습니다.");
+				}
+			}
+
+			const optionsResp = await getWebAuthnRegisterOptions(authToken);
+			const registration = await registerWebAuthnCredential({
+				challenge: optionsResp.options.challenge,
+				rp: optionsResp.options.rp,
+				user: optionsResp.options.user,
+				pubKeyCredParams: optionsResp.options.pubKeyCredParams,
+				excludeCredentials: optionsResp.options.excludeCredentials,
+				timeout: optionsResp.options.timeout,
+				attestation: optionsResp.options.attestation,
+				authenticatorSelection: optionsResp.options.authenticatorSelection,
+				prfInput: r0,
+			});
+
+			let prfOutput = registration.prfOutput;
+
+			if (!prfOutput && registration.prfEnabled) {
+				// 일부 플랫폼 인증기는 create() 시점에 prf.enabled만 반환하고 get() 시점에 결정적난수값i를 반환함
+				await verifyWebAuthnRegistration(
+					authToken,
+					registration.credentialId,
+					registration.publicKey,
+					registration.counter,
+					registration.clientDataJSON,
+					registration.transports,
+					passkeyName
+				);
+				try {
+					const authOpts = await getWebAuthnAuthenticateOptions(authToken, registration.credentialId);
+					const assertion = await authenticateWithWebAuthn({
+						challenge: authOpts.options.challenge,
+						allowCredentials: authOpts.options.allowCredentials || [],
+						timeout: authOpts.options.timeout,
+						userVerification: authOpts.options.userVerification,
+						prfInput: r0,
+					});
+					await verifyWebAuthnAuthentication(
+						authToken,
+						assertion.credentialId,
+						assertion.clientDataJSON,
+						assertion.authenticatorData,
+						assertion.signature
+					);
+					prfOutput = assertion.prfOutput;
+					const wrappedMasterKey = await encryptMasterKeyWithPasskey(
+						masterKey,
+						r0,
+						prfOutput
+					);
+					await updateWebAuthnCredentialMasterKey(authToken, registration.credentialId, wrappedMasterKey);
+				} catch (innerErr) {
+					// PRF 평가 실패 또는 취소 시 불완전한 패스키 즉시 롤백 삭제
+					await deleteWebAuthnCredential(authToken, registration.credentialId).catch(() => {});
+					throw innerErr;
+				}
+			} else {
+				const wrappedMasterKey = await encryptMasterKeyWithPasskey(
+					masterKey,
+					r0,
+					prfOutput
+				);
+				await verifyWebAuthnRegistration(
+					authToken,
+					registration.credentialId,
+					registration.publicKey,
+					registration.counter,
+					registration.clientDataJSON,
+					registration.transports,
+					passkeyName,
+					wrappedMasterKey
+				);
+			}
+
+			await refreshPasskeys(authToken);
+			toast.success(`'${passkeyName}' 패스키가 등록되었습니다`);
+		} catch (err) {
+			console.error(err);
+			toast.error((err as Error).message || "패스키 등록에 실패했습니다");
+		} finally {
+			setPasskeysBusy(false);
+			setWebauthnAuthBusy(false);
+		}
+	}
+
+	async function handleDeletePasskey(credentialId: string, name: string) {
+		if (!authToken) return;
+		if (!window.confirm(`'${name}' 패스키를 삭제하시겠습니까?`)) return;
+		setPasskeysBusy(true);
+		try {
+			await deleteWebAuthnCredential(authToken, credentialId);
+			await refreshPasskeys(authToken);
+			toast.success("패스키가 삭제되었습니다");
+		} catch (err) {
+			console.error(err);
+			toast.error((err as Error).message || "패스키 삭제에 실패했습니다");
+		} finally {
+			setPasskeysBusy(false);
+		}
+	}
+
+	async function handleDeleteAccount() {
+		if (!authToken) return;
+		const password = await requestAccountPassword(
+			"계정 탈퇴",
+			"계정을 탈퇴하면 저장된 공개키·암호화된 개인키, 등록된 모든 패스키, 주소록 데이터가 즉시 영구 삭제되며 복구할 수 없습니다. 탈퇴를 진행하려면 계정 비밀번호를 입력하세요.",
+			"계정 탈퇴",
+			true
+		);
+		if (!password) return;
+		setBusy(true);
+		try {
+			await deleteAccount(authToken, password);
+			handleSignOut();
+			toast.success("계정 탈퇴가 완료되었습니다");
+		} catch (err) {
+			console.error(err);
+			toast.error((err as Error).message || "계정 탈퇴에 실패했습니다");
+		} finally {
+			setBusy(false);
 		}
 	}
 
@@ -723,7 +963,7 @@ const App = () => {
 			if (!targetUsername) throw new Error("사용자 정보를 찾을 수 없습니다.");
 			const secret = await obtainProtectionSecretForSave(
 				"키 생성 및 암호화",
-				"생성된 개인키를 클라이언트에서 안전하게 암호화할 마스터키를 확인해주세요."
+				"생성된 개인키를 클라이언트에서 안전하게 암호화할 마스터키를 설정해주세요."
 			);
 			if (!secret) return;
 
@@ -742,7 +982,7 @@ const App = () => {
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
-			toast.success("키 쌍이 안전하게 암호화되어 저장되었습니다");
+			toast.success("키 쌍이 마스터키로 암호화되어 안전하게 저장되었습니다");
 		} catch (err) {
 			console.error(err);
 			toast.error((err as Error).message || "키 쌍 생성에 실패했습니다");
@@ -765,7 +1005,7 @@ const App = () => {
 
 			const secret = await obtainProtectionSecretForSave(
 				"키 등록 및 암호화",
-				"개인키를 클라이언트에서 안전하게 암호화할 마스터키를 확인해주세요."
+				"개인키를 클라이언트에서 안전하게 암호화할 마스터키를 입력해주세요."
 			);
 			if (!secret) return;
 
@@ -789,7 +1029,7 @@ const App = () => {
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
-			toast.success("키 쌍이 등록되어 안전하게 저장되었습니다");
+			toast.success("키 쌍이 마스터키로 암호화되어 안전하게 저장되었습니다");
 		} catch (err) {
 			console.error(err);
 			toast.error((err as Error).message || "키 등록에 실패했습니다");
@@ -805,7 +1045,7 @@ const App = () => {
 		try {
 			const secret = await obtainProtectionSecretForSave(
 				"키 업로드 및 암호화",
-				"개인키를 클라이언트에서 암호화하여 저장할 마스터키를 확인해주세요."
+				"개인키를 클라이언트에서 암호화하여 저장할 마스터키를 입력해주세요."
 			);
 			if (!secret) return;
 
@@ -838,7 +1078,7 @@ const App = () => {
 			const targetUsername = username || authUsername || "";
 			const secret = await obtainProtectionSecretForSave(
 				"키 재생성 및 암호화",
-				"새로 생성할 개인키를 암호화할 마스터키를 확인해주세요."
+				"새로 생성할 개인키를 암호화할 마스터키를 입력해주세요."
 			);
 			if (!secret) return;
 
@@ -866,15 +1106,27 @@ const App = () => {
 		}
 	}
 
-	/* ─── WebAuthn ─── */
+	/* ─── WebAuthn / MasterKey Unlock ─── */
 
 	async function handleWebAuthnAuthenticate() {
 		setBusy(true);
 		try {
-			await unlockStoredPrivateKey();
-			toast.success("보안 키 인증 및 개인키 잠금 해제 완료");
+			await unlockStoredPrivateKey("passkey");
+			toast.success("패스키로 마스터키 복호화 및 개인키 잠금 해제 완료");
 		} catch (err) {
-			toast.error((err as Error).message || "보안 키 인증 실패");
+			toast.error((err as Error).message || "패스키 인증 실패");
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	async function handleMasterKeyAuthenticate() {
+		setBusy(true);
+		try {
+			await unlockStoredPrivateKey("masterkey");
+			toast.success("마스터키로 개인키 잠금 해제 완료");
+		} catch (err) {
+			toast.error((err as Error).message || "마스터키 잠금 해제 실패");
 		} finally {
 			setBusy(false);
 		}
@@ -1373,10 +1625,23 @@ const App = () => {
 		try {
 			setBusy(true);
 			setError(null);
-			await unlockStoredPrivateKey();
-			toast.success("개인키가 잠금 해제되었습니다");
+			await unlockStoredPrivateKey("passkey");
+			toast.success("패스키로 개인키가 잠금 해제되었습니다");
 		} catch (err) {
-			toast.error((err as Error).message || "개인키 인증에 실패했습니다");
+			toast.error((err as Error).message || "패스키 인증에 실패했습니다");
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	async function handleRevealPrivateKeyWithMasterKey() {
+		try {
+			setBusy(true);
+			setError(null);
+			await unlockStoredPrivateKey("masterkey");
+			toast.success("마스터키로 개인키가 잠금 해제되었습니다");
+		} catch (err) {
+			toast.error((err as Error).message || "마스터키 인증에 실패했습니다");
 		} finally {
 			setBusy(false);
 		}
@@ -1403,11 +1668,17 @@ const App = () => {
 				onSetKeyGenStep={setKeyGenStep}
 				onSetShowKeySection={setShowKeySection}
 				onRevealPrivateKey={handleRevealPrivateKey}
+				onRevealWithMasterKey={handleRevealPrivateKeyWithMasterKey}
 				onHidePrivateKey={() => {
 					setPrivateKeyPem("");
 					setCopyPrivateStatus("idle");
 				}}
 				webauthnAvailable={webauthnAvailable}
+				passkeys={passkeys}
+				passkeysBusy={passkeysBusy}
+				onAddPasskey={handleAddPasskey}
+				onDeletePasskey={handleDeletePasskey}
+				onDeleteAccount={handleDeleteAccount}
 			/>
 		);
 	}
@@ -1819,7 +2090,7 @@ const App = () => {
 												}
 											}}
 										>
-											보안 키로 인증
+											패스키 / 마스터키로 인증
 										</button>
 										<button className={decryptPrivateKeySource === "manual" ? "active" : ""} onClick={() => setDecryptPrivateKeySource("manual")}>직접 입력</button>
 									</div>
@@ -1828,9 +2099,16 @@ const App = () => {
 										<>
 											{hasStoredPrivateKey && isAuthed ? (
 												<>
-													<button className="btn btn-secondary btn-full" onClick={handleWebAuthnAuthenticate} disabled={decryptBusy || webauthnAuthBusy}>
-														{webauthnAuthBusy ? "인증 중..." : "🔐 보안 키로 인증"}
-													</button>
+													<div className="btn-row" style={{ gap: 8 }}>
+														{webauthnAvailable && passkeys.some((p) => p.hasMasterKey) && (
+															<button className="btn btn-secondary btn-full" onClick={handleWebAuthnAuthenticate} disabled={decryptBusy || webauthnAuthBusy || busy}>
+																{webauthnAuthBusy ? "인증 중..." : "🔐 패스키로 인증"}
+															</button>
+														)}
+														<button className="btn btn-secondary btn-full" onClick={handleMasterKeyAuthenticate} disabled={decryptBusy || webauthnAuthBusy || busy}>
+															🔑 마스터키로 인증
+														</button>
+													</div>
 													{privateKeyPem && <p className="text-hint mt-3" style={{ color: "var(--success)" }}>✓ 개인키 잠금 해제 완료</p>}
 												</>
 											) : (
@@ -1931,121 +2209,6 @@ const App = () => {
 			case "encrypt": return renderEncryptTab();
 			case "decrypt": return renderDecryptTab();
 		}
-	}
-
-
-	async function doWebauthnSignupFlow() {
-		try {
-			setWebauthnAuthBusy(true);
-			setError(null);
-			const optionsResp = await getWebAuthnRegisterOptions(authToken!);
-			const registration = await registerWebAuthnCredential({
-				challenge: optionsResp.options.challenge, rp: optionsResp.options.rp, user: optionsResp.options.user,
-				pubKeyCredParams: optionsResp.options.pubKeyCredParams, timeout: optionsResp.options.timeout,
-				attestation: optionsResp.options.attestation, authenticatorSelection: optionsResp.options.authenticatorSelection,
-				username: authUsername || loginUsername,
-			});
-			await verifyWebAuthnRegistration(
-				authToken!,
-				registration.credentialId,
-				registration.publicKey,
-				registration.counter,
-				registration.clientDataJSON,
-				registration.transports
-			);
-
-			const account = await getAccountByUsername(authUsername!);
-			if (account) {
-				setPublicKeyPem(account.publicKey);
-				setStoredAccount(account);
-				setShowKeySection(false);
-			}
-			setWebauthnPending(null);
-			toast.success("패스키가 등록되었습니다");
-		} catch (err) {
-			toast.error((err as Error).message || "패스키 등록에 실패했습니다");
-		} finally {
-			setWebauthnAuthBusy(false);
-		}
-	}
-
-	async function doWebauthnLoginFlow() {
-		try {
-			setWebauthnAuthBusy(true);
-			setError(null);
-			const optionsResp = await getWebAuthnAuthenticateOptions(authToken!);
-			const authentication = await authenticateWithWebAuthn({
-				challenge: optionsResp.options.challenge, allowCredentials: optionsResp.options.allowCredentials || [],
-				timeout: optionsResp.options.timeout, userVerification: optionsResp.options.userVerification,
-				username: authUsername || loginUsername,
-			});
-			await verifyWebAuthnAuthentication(
-				authToken!,
-				authentication.credentialId,
-				authentication.clientDataJSON,
-				authentication.authenticatorData,
-				authentication.signature
-			);
-
-			const account = await getAccountByUsername(authUsername!);
-			if (account) {
-				setPublicKeyPem(account.publicKey);
-				setStoredAccount(account);
-				setShowKeySection(false);
-			} else {
-				setShowKeySection(true);
-			}
-
-			setWebauthnPending(null);
-			toast.success("패스키 인증이 완료되었습니다");
-		} catch (err) {
-			const msg = (err as Error).message || "";
-			if (msg.includes("No WebAuthn credentials registered")) {
-				setWebauthnPending("register");
-				toast.error("등록된 패스키가 없습니다. 먼저 패스키를 등록해주세요.");
-			} else {
-				toast.error(msg || "패스키 인증에 실패했습니다");
-			}
-		} finally {
-			setWebauthnAuthBusy(false);
-		}
-	}
-
-	if (webauthnPending) {
-		return (
-			<>
-				<Toaster theme={resolvedDark ? "dark" : "light"} hasNav={false} />
-				<div className="auth-page" key="webauthn">
-					<div className="auth-card view-animate">
-						<h1 className="auth-title">{webauthnPending === "register" ? "패스키 등록" : "패스키 인증"}</h1>
-						<p className="section-desc">
-							{webauthnPending === "register"
-								? "계정 보호 및 본인 확인을 위해 기기의 생체 인식(지문/Face ID)이나 패스키를 등록합니다. 등록된 패스키로 개인키가 안전하게 보호됩니다."
-								: "본인 확인 및 개인키 복호화를 위해 패스키 인증이 필요합니다."}
-						</p>
-
-						<button className="btn btn-primary btn-full mt-4"
-							disabled={webauthnAuthBusy}
-							onClick={webauthnPending === "register" ? doWebauthnSignupFlow : doWebauthnLoginFlow}>
-							{webauthnPending === "register"
-								? (webauthnAuthBusy ? "등록 중..." : "패스키 등록 완료하기")
-								: (webauthnAuthBusy ? "인증 중..." : "패스키로 인증하기")}
-						</button>
-						<div className="auth-hint">
-							{webauthnPending === "authenticate" && (
-								<button
-									type="button"
-									onClick={() => { setError(null); setWebauthnPending("register"); }}
-								>
-									패스키 신규 등록
-								</button>
-							)}
-							<button type="button" onClick={handleSignOut}>로그아웃</button>
-						</div>
-					</div>
-				</div>
-			</>
-		);
 	}
 
 	/* ─── Main layout ─── */
@@ -2169,7 +2332,7 @@ const App = () => {
 				</div>
 			)}
 
-			{/* Zero-Knowledge Passphrase prompt modal */}
+			{/* Zero-Knowledge Passphrase / Account Password / Passkey prompt modal */}
 			{passphrasePrompt && passphrasePrompt.isOpen && (
 				<div
 					className="modal-overlay"
@@ -2190,17 +2353,31 @@ const App = () => {
 								e.preventDefault();
 								const pass = passphraseInput.trim();
 								if (!pass) return;
-								passphrasePrompt.resolve(pass);
+								passphrasePrompt.resolve({
+									secret: pass,
+									extra: passphraseExtraInput.trim() || undefined,
+								});
 								setPassphrasePrompt(null);
 							}}
 						>
+							{passphrasePrompt.extraInputLabel && (
+								<div className="form-group mb-3">
+									<label className="form-label">{passphrasePrompt.extraInputLabel}</label>
+									<input
+										type="text"
+										value={passphraseExtraInput}
+										onChange={(e) => setPassphraseExtraInput(e.target.value)}
+										placeholder={passphrasePrompt.extraInputPlaceholder || ""}
+									/>
+								</div>
+							)}
 							<div className="form-group mb-3">
-								<label className="form-label">마스터키</label>
+								<label className="form-label">{passphrasePrompt.inputLabel || "마스터키"}</label>
 								<input
 									type="password"
 									value={passphraseInput}
 									onChange={(e) => setPassphraseInput(e.target.value)}
-									placeholder="마스터키 입력..."
+									placeholder={passphrasePrompt.inputPlaceholder || "마스터키 입력..."}
 									autoFocus
 									required
 								/>
@@ -2216,8 +2393,13 @@ const App = () => {
 								>
 									취소
 								</button>
-								<button type="submit" className="btn btn-primary" disabled={!passphraseInput.trim()}>
-									확인
+								<button
+									type="submit"
+									className={`btn ${passphrasePrompt.danger ? "btn-danger" : "btn-primary"}`}
+									style={passphrasePrompt.danger ? { color: "#ef4444" } : undefined}
+									disabled={!passphraseInput.trim()}
+								>
+									{passphrasePrompt.confirmLabel || "확인"}
 								</button>
 							</div>
 						</form>

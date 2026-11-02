@@ -46,6 +46,7 @@ func AuthRouter() http.Handler {
 	r.Post("/signup", handleSignup)
 	r.Post("/login", handleLogin)
 	r.With(middleware.RequireAuth).Post("/verify-password", handleVerifyPassword)
+	r.With(middleware.RequireAuth).Post("/delete-account", handleDeleteAccount)
 	return r
 }
 
@@ -200,6 +201,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			"id":       user.ID,
 			"username": user.Username,
 		},
+		"r0Salt":     user.R0Salt,
 		"hasPasskey": len(user.WebAuthnCredentials) > 0,
 	})
 }
@@ -239,6 +241,44 @@ func handleVerifyPassword(w http.ResponseWriter, r *http.Request) {
 	middleware.WriteJSON(w, http.StatusOK, map[string]any{
 		"token":     token,
 		"expiresAt": expiresAt,
+		"r0Salt":    user.R0Salt,
 		"verified":  true,
+	})
+}
+
+func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	reqUser := middleware.GetUser(r)
+	if reqUser == nil || reqUser.Sub == "" {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "로그인이 필요합니다"})
+		return
+	}
+
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Password == "" {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "비밀번호를 입력해주세요"})
+		return
+	}
+
+	user, err := db.GetUserByID(reqUser.Sub)
+	if err != nil {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "사용자 정보를 찾을 수 없습니다"})
+		return
+	}
+
+	if !verifyPasswordArg2st(body.Password, user.PasswordHash) {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "비밀번호가 올바르지 않습니다"})
+		return
+	}
+
+	if err := db.DeleteUserAndData(user.ID, user.Username); err != nil {
+		log.Printf("Delete account failed for %s: %v", user.Username, err)
+		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "계정 탈퇴 처리에 실패했습니다"})
+		return
+	}
+
+	middleware.WriteJSON(w, http.StatusOK, map[string]string{
+		"message": "계정이 삭제되었습니다",
 	})
 }

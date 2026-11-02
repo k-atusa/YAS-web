@@ -3,8 +3,11 @@ package routes
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"yas-web-backend/internal/config"
 	"yas-web-backend/internal/db"
@@ -18,11 +21,154 @@ import (
 func WebAuthnRouter() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequireAuth)
+	r.Get("/credentials", handleListCredentials)
+	r.Delete("/credentials", handleDeleteCredential)
+	r.Post("/credentials/delete", handleDeleteCredential)
+	r.Put("/credentials/master-key", handleUpdateCredentialMasterKey)
 	r.Post("/register-options", handleRegisterOptions)
 	r.Post("/register-verify", handleRegisterVerify)
 	r.Post("/authenticate-options", handleAuthenticateOptions)
 	r.Post("/authenticate-verify", handleAuthenticateVerify)
 	return r
+}
+
+func handleListCredentials(w http.ResponseWriter, r *http.Request) {
+	reqUser := middleware.GetUser(r)
+	if reqUser == nil || reqUser.Sub == "" {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return
+	}
+
+	user, err := db.GetUserByID(reqUser.Sub)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "User not found"})
+			return
+		}
+		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to fetch credentials"})
+		return
+	}
+
+	type credItem struct {
+		ID           string    `json:"id"`
+		Name         string    `json:"name"`
+		Transports   []string  `json:"transports,omitempty"`
+		HasMasterKey bool      `json:"hasMasterKey"`
+		CreatedAt    time.Time `json:"createdAt"`
+	}
+
+	items := make([]credItem, 0, len(user.WebAuthnCredentials))
+	for i, c := range user.WebAuthnCredentials {
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			name = fmt.Sprintf("패스키 %d", i+1)
+		}
+		items = append(items, credItem{
+			ID:           c.ID,
+			Name:         name,
+			Transports:   c.Transports,
+			HasMasterKey: c.EncryptedMasterKey != nil && c.EncryptedMasterKey.CipherText != "",
+			CreatedAt:    c.CreatedAt,
+		})
+	}
+
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{"credentials": items})
+}
+
+func handleDeleteCredential(w http.ResponseWriter, r *http.Request) {
+	reqUser := middleware.GetUser(r)
+	if reqUser == nil || reqUser.Sub == "" {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return
+	}
+
+	credID := strings.TrimSpace(r.URL.Query().Get("id"))
+	if credID == "" {
+		var body struct {
+			CredentialID string `json:"credentialId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		credID = strings.TrimSpace(body.CredentialID)
+	}
+	if credID == "" {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "credentialId is required"})
+		return
+	}
+
+	user, err := db.GetUserByID(reqUser.Sub)
+	if err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to delete credential"})
+		return
+	}
+
+	filtered := make([]models.WebAuthnCredential, 0, len(user.WebAuthnCredentials))
+	found := false
+	for _, c := range user.WebAuthnCredentials {
+		if c.ID == credID {
+			found = true
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	if !found {
+		middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "패스키를 찾을 수 없습니다"})
+		return
+	}
+
+	user.WebAuthnCredentials = filtered
+	if err := db.SaveUser(user); err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "패스키 삭제에 실패했습니다"})
+		return
+	}
+
+	middleware.WriteJSON(w, http.StatusOK, map[string]string{"message": "패스키가 삭제되었습니다"})
+}
+
+func handleUpdateCredentialMasterKey(w http.ResponseWriter, r *http.Request) {
+	reqUser := middleware.GetUser(r)
+	if reqUser == nil || reqUser.Sub == "" {
+		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+		return
+	}
+
+	var body struct {
+		CredentialID       string                   `json:"credentialId"`
+		EncryptedMasterKey *models.WrappedMasterKey `json:"encryptedMasterKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.CredentialID == "" || body.EncryptedMasterKey == nil {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid payload"})
+		return
+	}
+	if body.EncryptedMasterKey.CipherText == "" || body.EncryptedMasterKey.IV == "" || body.EncryptedMasterKey.Salt == "" {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "encryptedMasterKey fields are required"})
+		return
+	}
+
+	user, err := db.GetUserByID(reqUser.Sub)
+	if err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to update credential"})
+		return
+	}
+
+	updated := false
+	for i := range user.WebAuthnCredentials {
+		if user.WebAuthnCredentials[i].ID == body.CredentialID {
+			user.WebAuthnCredentials[i].EncryptedMasterKey = body.EncryptedMasterKey
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		middleware.WriteJSON(w, http.StatusNotFound, map[string]string{"message": "Credential not found"})
+		return
+	}
+
+	if err := db.SaveUser(user); err != nil {
+		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to save credential"})
+		return
+	}
+
+	middleware.WriteJSON(w, http.StatusOK, map[string]string{"message": "Master key bound to passkey"})
 }
 
 func handleRegisterOptions(w http.ResponseWriter, r *http.Request) {
@@ -44,7 +190,7 @@ func handleRegisterOptions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	challenge := webauthn.GenerateChallenge()
-	options := webauthn.GenerateRegistrationOptions(user.Username, user.ID, challenge)
+	options := webauthn.GenerateRegistrationOptions(user.Username, user.ID, challenge, user.WebAuthnCredentials...)
 
 	user.WebAuthnChallenge = challenge
 	if err := db.SaveUser(user); err != nil {
@@ -64,18 +210,20 @@ func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		CredentialID   string   `json:"credentialId"`
-		PublicKey      string   `json:"publicKey"`
-		ClientDataJSON string   `json:"clientDataJSON"`
-		Counter        *int     `json:"counter"`
-		Transports     []string `json:"transports"`
+		CredentialID       string                   `json:"credentialId"`
+		Name               string                   `json:"name"`
+		PublicKey          string                   `json:"publicKey"`
+		ClientDataJSON     string                   `json:"clientDataJSON"`
+		Counter            *int                     `json:"counter"`
+		Transports         []string                 `json:"transports"`
+		EncryptedMasterKey *models.WrappedMasterKey `json:"encryptedMasterKey"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid payload"})
 		return
 	}
-	if body.CredentialID == "" || body.PublicKey == "" {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "credentialId and publicKey are required"})
+	if body.CredentialID == "" || body.PublicKey == "" || body.ClientDataJSON == "" {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "credentialId, publicKey, and clientDataJSON are required"})
 		return
 	}
 
@@ -89,22 +237,31 @@ func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Verify challenge from clientDataJSON if provided
-	if user.WebAuthnChallenge != "" && body.ClientDataJSON != "" {
-		cdataBytes, err := webauthn.DecodeBase64Flexible(body.ClientDataJSON)
-		if err != nil {
-			middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid clientDataJSON base64"})
-			return
-		}
-		if err := webauthn.VerifyClientData(cdataBytes, "webauthn.create", user.WebAuthnChallenge); err != nil {
-			log.Printf("[WebAuthn] Register ClientData verification failed: %v", err)
-			middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Registration challenge failed: " + err.Error()})
-			return
-		}
+	if user.WebAuthnChallenge == "" {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "No active registration challenge found"})
+		return
+	}
+
+	activeChallenge := user.WebAuthnChallenge
+	user.WebAuthnChallenge = ""
+
+	// 1. Verify challenge from clientDataJSON (mandatory)
+	cdataBytes, err := webauthn.DecodeBase64Flexible(body.ClientDataJSON)
+	if err != nil {
+		_ = db.SaveUser(user)
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid clientDataJSON base64"})
+		return
+	}
+	if err := webauthn.VerifyClientData(cdataBytes, "webauthn.create", activeChallenge); err != nil {
+		_ = db.SaveUser(user)
+		log.Printf("[WebAuthn] Register ClientData verification failed: %v", err)
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Registration challenge failed: " + err.Error()})
+		return
 	}
 
 	// 2. Validate Public Key structure (must be valid SPKI ASN.1 DER)
 	if err := webauthn.ValidatePublicKey(body.PublicKey); err != nil {
+		_ = db.SaveUser(user)
 		log.Printf("[WebAuthn] Invalid public key: %v", err)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid public key: " + err.Error()})
 		return
@@ -113,7 +270,7 @@ func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
 	// Check if credential already registered
 	for _, c := range user.WebAuthnCredentials {
 		if c.ID == body.CredentialID {
-			middleware.WriteJSON(w, http.StatusConflict, map[string]string{"message": "Credential already registered"})
+			middleware.WriteJSON(w, http.StatusConflict, map[string]string{"message": "이미 등록된 패스키입니다"})
 			return
 		}
 	}
@@ -123,11 +280,19 @@ func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
 		initialCounter = *body.Counter
 	}
 
+	credName := strings.TrimSpace(body.Name)
+	if credName == "" {
+		credName = fmt.Sprintf("패스키 %d", len(user.WebAuthnCredentials)+1)
+	}
+
 	user.WebAuthnCredentials = append(user.WebAuthnCredentials, models.WebAuthnCredential{
-		ID:         body.CredentialID,
-		PublicKey:  body.PublicKey,
-		Counter:    initialCounter,
-		Transports: body.Transports,
+		ID:                 body.CredentialID,
+		Name:               credName,
+		PublicKey:          body.PublicKey,
+		Counter:            initialCounter,
+		Transports:         body.Transports,
+		EncryptedMasterKey: body.EncryptedMasterKey,
+		CreatedAt:          time.Now().UTC(),
 	})
 	user.WebAuthnChallenge = ""
 
@@ -137,7 +302,11 @@ func handleRegisterVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	middleware.WriteJSON(w, http.StatusOK, map[string]string{"message": "Credential registered successfully"})
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{
+		"message":      "Credential registered successfully",
+		"credentialId": body.CredentialID,
+		"name":         credName,
+	})
 }
 
 func handleAuthenticateOptions(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +315,11 @@ func handleAuthenticateOptions(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSON(w, http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
 		return
 	}
+
+	var body struct {
+		CredentialID string `json:"credentialId"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
 
 	user, err := db.GetUserByID(reqUser.Sub)
 	if err != nil {
@@ -162,8 +336,21 @@ func handleAuthenticateOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allowed := user.WebAuthnCredentials
+	if body.CredentialID != "" {
+		filtered := make([]models.WebAuthnCredential, 0, 1)
+		for _, c := range user.WebAuthnCredentials {
+			if c.ID == body.CredentialID {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) > 0 {
+			allowed = filtered
+		}
+	}
+
 	challenge := webauthn.GenerateChallenge()
-	options := webauthn.GenerateAuthenticationOptions(challenge, user.WebAuthnCredentials)
+	options := webauthn.GenerateAuthenticationOptions(challenge, allowed)
 
 	user.WebAuthnChallenge = challenge
 	if err := db.SaveUser(user); err != nil {
@@ -211,6 +398,9 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	activeChallenge := user.WebAuthnChallenge
+	user.WebAuthnChallenge = ""
+
 	// 1. Find matching credential
 	idx := -1
 	for i, c := range user.WebAuthnCredentials {
@@ -220,6 +410,7 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if idx == -1 {
+		_ = db.SaveUser(user)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Credential not found"})
 		return
 	}
@@ -227,10 +418,12 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 	// 2. Decode clientDataJSON and verify challenge & type
 	cdataBytes, err := webauthn.DecodeBase64Flexible(body.ClientDataJSON)
 	if err != nil {
+		_ = db.SaveUser(user)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid clientDataJSON base64"})
 		return
 	}
-	if err := webauthn.VerifyClientData(cdataBytes, "webauthn.get", user.WebAuthnChallenge); err != nil {
+	if err := webauthn.VerifyClientData(cdataBytes, "webauthn.get", activeChallenge); err != nil {
+		_ = db.SaveUser(user)
 		log.Printf("[WebAuthn] ClientData verification failed: %v", err)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "ClientData verification failed: " + err.Error()})
 		return
@@ -239,11 +432,13 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 	// 3. Decode authenticatorData and verify RP ID hash, flags, counter
 	authDataBytes, err := webauthn.DecodeBase64Flexible(body.AuthenticatorData)
 	if err != nil {
+		_ = db.SaveUser(user)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid authenticatorData base64"})
 		return
 	}
 	newCounter, err := webauthn.VerifyAuthenticatorData(authDataBytes, config.App.Domain, user.WebAuthnCredentials[idx].Counter)
 	if err != nil {
+		_ = db.SaveUser(user)
 		log.Printf("[WebAuthn] AuthenticatorData verification failed: %v", err)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "AuthenticatorData verification failed: " + err.Error()})
 		return
@@ -252,10 +447,12 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 	// 4. Decode signature and verify cryptographic signature
 	sigBytes, err := webauthn.DecodeBase64Flexible(body.Signature)
 	if err != nil {
+		_ = db.SaveUser(user)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid signature base64"})
 		return
 	}
 	if err := webauthn.VerifySignature(user.WebAuthnCredentials[idx].PublicKey, authDataBytes, cdataBytes, sigBytes); err != nil {
+		_ = db.SaveUser(user)
 		log.Printf("[WebAuthn] Signature verification failed: %v", err)
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Signature verification failed: invalid passkey signature"})
 		return
@@ -263,7 +460,6 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Update user state (counter & consume challenge to prevent replay)
 	user.WebAuthnCredentials[idx].Counter = newCounter
-	user.WebAuthnChallenge = ""
 	if err := db.SaveUser(user); err != nil {
 		middleware.WriteJSON(w, http.StatusInternalServerError, map[string]string{"message": "Failed to verify authentication"})
 		return
@@ -277,8 +473,10 @@ func handleAuthenticateVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	middleware.WriteJSON(w, http.StatusOK, map[string]any{
-		"token":     token,
-		"expiresAt": expiresAt,
-		"verified":  true,
+		"token":              token,
+		"expiresAt":          expiresAt,
+		"verified":           true,
+		"credentialId":       user.WebAuthnCredentials[idx].ID,
+		"encryptedMasterKey": user.WebAuthnCredentials[idx].EncryptedMasterKey,
 	})
 }
