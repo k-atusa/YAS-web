@@ -665,21 +665,19 @@ const App = () => {
 	}
 
 	async function requestMasterKeyPassphraseCreation(
-		title = "마스터키 설정",
-		description?: string
+		title = "마스터키 설정"
 	): Promise<string | null> {
 		setIsGeneratingPassphrase(true);
 		setPassphraseInput("");
 		setPassphraseCopyStatus("idle");
 
-		const initialPromise = fetchDictionaryPassphrase(4);
+		const initialPromise = fetchDictionaryPassphrase();
 
 		const modalPromise = new Promise<{ secret: string; extra?: string } | null>((resolve) => {
 			setPassphrasePrompt({
 				isOpen: true,
 				title,
-				description: description || "생성된 패스프레이즈가 마스터키로 사용됩니다. 안전한 곳에 보관하세요.",
-				confirmLabel: "마스터키로 사용",
+				confirmLabel: "확인",
 				isPassphraseCreation: true,
 				resolve,
 			});
@@ -689,7 +687,7 @@ const App = () => {
 			const phrase = await initialPromise;
 			setPassphraseInput(phrase);
 		} catch (e) {
-			console.error("Failed to set initial passphrase", e);
+			console.error("Failed to set initial master key", e);
 		} finally {
 			setIsGeneratingPassphrase(false);
 		}
@@ -702,11 +700,11 @@ const App = () => {
 		setIsGeneratingPassphrase(true);
 		setPassphraseCopyStatus("idle");
 		try {
-			const phrase = await fetchDictionaryPassphrase(4);
+			const phrase = await fetchDictionaryPassphrase();
 			setPassphraseInput(phrase);
 		} catch (err) {
 			console.error(err);
-			toast.error("패스프레이즈 생성에 실패했습니다");
+			toast.error("마스터키 생성에 실패했습니다");
 		} finally {
 			setIsGeneratingPassphrase(false);
 		}
@@ -717,7 +715,7 @@ const App = () => {
 		try {
 			await navigator.clipboard.writeText(passphraseInput);
 			setPassphraseCopyStatus("copied");
-			toast.success("패스프레이즈가 복사되었습니다");
+			toast.success("마스터키가 복사되었습니다");
 			setTimeout(() => setPassphraseCopyStatus("idle"), 2000);
 		} catch {
 			toast.error("복사에 실패했습니다");
@@ -2453,25 +2451,18 @@ const App = () => {
 						>
 							{passphrasePrompt.isPassphraseCreation ? (
 								<div className="form-group mb-3">
-									<label className="form-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-										<span>마스터키 (패스프레이즈)</span>
-										<span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 400 }}>4단어 사전 조합</span>
-									</label>
 									<div className="passphrase-generator-box">
 										<textarea
 											className="passphrase-text-display"
 											value={passphraseInput}
 											onChange={(e) => setPassphraseInput(e.target.value)}
-											placeholder={isGeneratingPassphrase ? "패스프레이즈를 생성하는 중입니다..." : "패스프레이즈..."}
+											placeholder={isGeneratingPassphrase ? "생성 중..." : "마스터키 입력..."}
 											rows={2}
 											disabled={isGeneratingPassphrase}
 											autoFocus
 											required
 										/>
-										<div className="passphrase-controls-row">
-											<span className="passphrase-meta-hint">
-												{isGeneratingPassphrase ? "생성 중..." : "직접 수정하거나 새로 생성할 수 있습니다."}
-											</span>
+										<div className="passphrase-controls-row" style={{ justifyContent: "flex-end" }}>
 											<div className="passphrase-btn-group">
 												<button
 													type="button"

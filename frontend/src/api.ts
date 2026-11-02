@@ -406,22 +406,32 @@ function generateLocalPassphrase(wordCount = 4): string {
 }
 
 /**
- * Generates a random dictionary passphrase using https://makemeapassword.ligos.net/api/v1/passphrase/json
+ * Generates a random dictionary passphrase using https://makemeapassword.ligos.net/api/v1/passphrase/json?pc=10&wc=5&sp=1&nums=0&whenNum=never
+ * Randomly picks one from the results that contains no numbers.
  * Falls back to local crypto random dictionary words if network/offline occurs.
  */
-export async function fetchDictionaryPassphrase(wordCount = 4): Promise<string> {
+export async function fetchDictionaryPassphrase(): Promise<string> {
   try {
     const res = await fetch(
-      `https://makemeapassword.ligos.net/api/v1/passphrase/json?pc=1&wc=${wordCount}&sp=y`
+      "https://makemeapassword.ligos.net/api/v1/passphrase/json?pc=10&wc=5&sp=1&nums=0&whenNum=never"
     );
     if (res.ok) {
       const data = await res.json();
-      if (data && Array.isArray(data.pws) && data.pws.length > 0 && typeof data.pws[0] === "string") {
-        return data.pws[0].trim();
+      if (data && Array.isArray(data.pws) && data.pws.length > 0) {
+        // 결과 중 숫자가 포함되어 있지 않은 패스프레이즈 필터링 후 랜덤 선택
+        const noNumberPhrases = data.pws
+          .filter((p: unknown) => typeof p === "string" && !/\d/.test(p as string))
+          .map((p: string) => p.trim())
+          .filter((p: string) => p.length > 0);
+
+        if (noNumberPhrases.length > 0) {
+          const randomIndex = Math.floor(Math.random() * noNumberPhrases.length);
+          return noNumberPhrases[randomIndex];
+        }
       }
     }
   } catch (err) {
     console.warn("Ligos passphrase API unavailable, using local dictionary fallback", err);
   }
-  return generateLocalPassphrase(wordCount);
+  return generateLocalPassphrase(5);
 }
