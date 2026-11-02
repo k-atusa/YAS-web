@@ -141,7 +141,7 @@ const App = () => {
 	const [passphrasePrompt, setPassphrasePrompt] = useState<{
 		isOpen: boolean;
 		title: string;
-		description: string;
+		description?: string;
 		inputLabel?: string;
 		inputPlaceholder?: string;
 		confirmLabel?: string;
@@ -624,7 +624,7 @@ const App = () => {
 
 	function requestSecretModal(options: {
 		title: string;
-		description: string;
+		description?: string;
 		inputLabel?: string;
 		inputPlaceholder?: string;
 		confirmLabel?: string;
@@ -655,7 +655,7 @@ const App = () => {
 
 	async function requestPassphrase(
 		title = "마스터키 확인",
-		description = "개인키를 암호화하거나 잠금 해제하려면 마스터키를 입력하세요."
+		description?: string
 	): Promise<string | null> {
 		const res = await requestSecretModal({
 			title,
@@ -668,7 +668,7 @@ const App = () => {
 
 	async function requestAccountPassword(
 		title = "계정 비밀번호 확인",
-		description = "계정 비밀번호를 입력하세요.",
+		description?: string,
 		confirmLabel = "확인",
 		danger = false
 	): Promise<string | null> {
@@ -690,10 +690,7 @@ const App = () => {
 		if (!authToken || !authUsername) {
 			throw new Error("로그인이 필요합니다.");
 		}
-		const pass = await requestAccountPassword(
-			"계정 비밀번호 확인",
-			"패스키 암호화 키(결정적난수값0)를 계산하기 위해 계정 비밀번호를 한번 입력해주세요."
-		);
+		const pass = await requestAccountPassword("계정 비밀번호 확인");
 		if (!pass) {
 			throw new Error("계정 비밀번호가 입력되지 않았습니다.");
 		}
@@ -727,7 +724,7 @@ const App = () => {
 				assertion.signature
 			);
 			if (!verifyRes.encryptedMasterKey) {
-				throw new Error("이 패스키에 저장된 암호화 마스터키가 없습니다. 패스키를 다시 등록하거나 마스터키로 직접 잠금 해제해주세요.");
+				throw new Error("해당 패스키의 인증 정보가 없습니다. 마스터키로 직접 인증하거나 패스키를 다시 등록해주세요.");
 			}
 			const masterKey = await decryptMasterKeyWithPasskey(
 				verifyRes.encryptedMasterKey,
@@ -741,10 +738,9 @@ const App = () => {
 	}
 
 	async function obtainProtectionSecretForSave(
-		title: string,
-		description: string
+		title: string
 	): Promise<KeyProtectionSecret | null> {
-		const pass = await requestPassphrase(title, description);
+		const pass = await requestPassphrase(title);
 		if (!pass) return null;
 		return { passphrase: pass };
 	}
@@ -766,10 +762,7 @@ const App = () => {
 			masterKey = unlocked.masterKey;
 			verificationToken = unlocked.verificationToken;
 		} else {
-			const pass = await requestPassphrase(
-				"개인키 잠금 해제",
-				"저장된 개인키를 복호화할 마스터키를 입력하세요."
-			);
+			const pass = await requestPassphrase("마스터키 입력");
 			if (!pass) throw new Error("마스터키가 입력되지 않았습니다.");
 			masterKey = pass;
 		}
@@ -801,13 +794,11 @@ const App = () => {
 			const defaultName = `패스키 ${passkeys.length + 1}`;
 			const modalRes = await requestSecretModal({
 				title: "패스키 추가",
-				description:
-					"등록할 패스키의 이름과 이 패스키로 암호화해 보호할 마스터키를 입력하세요. (Apple 키체인, Windows Hello, YubiKey 등 PRF 지원 하드웨어 보안키 권장)",
 				extraInputLabel: "패스키 이름",
 				extraInputPlaceholder: "예: MacBook, iPhone, YubiKey...",
 				extraInputDefault: defaultName,
 				inputLabel: "마스터키",
-				inputPlaceholder: "개인키를 보호하는 마스터키 입력...",
+				inputPlaceholder: "마스터키 입력...",
 				confirmLabel: "패스키 등록",
 			});
 			if (!modalRes || !modalRes.secret) return;
@@ -828,7 +819,7 @@ const App = () => {
 						{ passphrase: masterKey }
 					);
 				} catch {
-					throw new Error("입력한 마스터키가 현재 저장된 개인키의 마스터키와 일치하지 않습니다.");
+					throw new Error("마스터키가 일치하지 않습니다.");
 				}
 			}
 
@@ -935,7 +926,7 @@ const App = () => {
 		if (!authToken) return;
 		const password = await requestAccountPassword(
 			"계정 탈퇴",
-			"계정을 탈퇴하면 저장된 공개키·암호화된 개인키, 등록된 모든 패스키, 주소록 데이터가 즉시 영구 삭제되며 복구할 수 없습니다. 탈퇴를 진행하려면 계정 비밀번호를 입력하세요.",
+			"계정을 탈퇴하면 모든 데이터가 즉시 영구 삭제되며 복구할 수 없습니다.",
 			"계정 탈퇴",
 			true
 		);
@@ -961,10 +952,7 @@ const App = () => {
 		try {
 			const targetUsername = username || authUsername || "";
 			if (!targetUsername) throw new Error("사용자 정보를 찾을 수 없습니다.");
-			const secret = await obtainProtectionSecretForSave(
-				"키 생성 및 암호화",
-				"생성된 개인키를 클라이언트에서 안전하게 암호화할 마스터키를 설정해주세요."
-			);
+			const secret = await obtainProtectionSecretForSave("마스터키 설정");
 			if (!secret) return;
 
 			const { publicKey, privateKey } = await generateKeyPair();
@@ -982,7 +970,7 @@ const App = () => {
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
-			toast.success("키 쌍이 마스터키로 암호화되어 안전하게 저장되었습니다");
+			toast.success("키 쌍이 안전하게 저장되었습니다");
 		} catch (err) {
 			console.error(err);
 			toast.error((err as Error).message || "키 쌍 생성에 실패했습니다");
@@ -1003,10 +991,7 @@ const App = () => {
 				throw new Error(val.error || "유효하지 않은 키 쌍입니다.");
 			}
 
-			const secret = await obtainProtectionSecretForSave(
-				"키 등록 및 암호화",
-				"개인키를 클라이언트에서 안전하게 암호화할 마스터키를 입력해주세요."
-			);
+			const secret = await obtainProtectionSecretForSave("마스터키 입력");
 			if (!secret) return;
 
 			const payload = await buildAccountPayload(
@@ -1029,7 +1014,7 @@ const App = () => {
 			setPrivateKeyPem("");
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
-			toast.success("키 쌍이 마스터키로 암호화되어 안전하게 저장되었습니다");
+			toast.success("키 쌍이 안전하게 저장되었습니다");
 		} catch (err) {
 			console.error(err);
 			toast.error((err as Error).message || "키 등록에 실패했습니다");
@@ -1043,10 +1028,7 @@ const App = () => {
 		setBusy(true);
 		setError(null);
 		try {
-			const secret = await obtainProtectionSecretForSave(
-				"키 업로드 및 암호화",
-				"개인키를 클라이언트에서 암호화하여 저장할 마스터키를 입력해주세요."
-			);
+			const secret = await obtainProtectionSecretForSave("마스터키 입력");
 			if (!secret) return;
 
 			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, secret, undefined);
@@ -1076,10 +1058,7 @@ const App = () => {
 		setError(null);
 		try {
 			const targetUsername = username || authUsername || "";
-			const secret = await obtainProtectionSecretForSave(
-				"키 재생성 및 암호화",
-				"새로 생성할 개인키를 암호화할 마스터키를 입력해주세요."
-			);
+			const secret = await obtainProtectionSecretForSave("마스터키 설정");
 			if (!secret) return;
 
 			const { publicKey, privateKey } = await generateKeyPair();
@@ -1112,7 +1091,7 @@ const App = () => {
 		setBusy(true);
 		try {
 			await unlockStoredPrivateKey("passkey");
-			toast.success("패스키로 마스터키 복호화 및 개인키 잠금 해제 완료");
+			toast.success("패스키 인증 완료");
 		} catch (err) {
 			toast.error((err as Error).message || "패스키 인증 실패");
 		} finally {
@@ -1124,9 +1103,9 @@ const App = () => {
 		setBusy(true);
 		try {
 			await unlockStoredPrivateKey("masterkey");
-			toast.success("마스터키로 개인키 잠금 해제 완료");
+			toast.success("마스터키 인증 완료");
 		} catch (err) {
-			toast.error((err as Error).message || "마스터키 잠금 해제 실패");
+			toast.error((err as Error).message || "마스터키 인증 실패");
 		} finally {
 			setBusy(false);
 		}
@@ -1626,7 +1605,7 @@ const App = () => {
 			setBusy(true);
 			setError(null);
 			await unlockStoredPrivateKey("passkey");
-			toast.success("패스키로 개인키가 잠금 해제되었습니다");
+			toast.success("패스키 인증 완료");
 		} catch (err) {
 			toast.error((err as Error).message || "패스키 인증에 실패했습니다");
 		} finally {
@@ -1639,7 +1618,7 @@ const App = () => {
 			setBusy(true);
 			setError(null);
 			await unlockStoredPrivateKey("masterkey");
-			toast.success("마스터키로 개인키가 잠금 해제되었습니다");
+			toast.success("마스터키 인증 완료");
 		} catch (err) {
 			toast.error((err as Error).message || "마스터키 인증에 실패했습니다");
 		} finally {
@@ -2109,7 +2088,7 @@ const App = () => {
 															🔑 마스터키로 인증
 														</button>
 													</div>
-													{privateKeyPem && <p className="text-hint mt-3" style={{ color: "var(--success)" }}>✓ 개인키 잠금 해제 완료</p>}
+													{privateKeyPem && <p className="text-hint mt-3" style={{ color: "var(--success)" }}>✓ 인증 완료</p>}
 												</>
 											) : (
 												<p className="text-hint">저장된 키가 없습니다. 직접 입력을 사용하세요.</p>
@@ -2345,9 +2324,11 @@ const App = () => {
 				>
 					<div className="modal-box">
 						<h3 className="modal-title">{passphrasePrompt.title}</h3>
-						<p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 }}>
-							{passphrasePrompt.description}
-						</p>
+						{passphrasePrompt.description && (
+							<p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 }}>
+								{passphrasePrompt.description}
+							</p>
+						)}
 						<form
 							onSubmit={(e) => {
 								e.preventDefault();

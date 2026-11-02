@@ -74,7 +74,7 @@ export const KeysTab = ({
 	function renderPasskeyAndAccountSection() {
 		return (
 			<div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
-				<div className="section-header" style={{ marginBottom: 6 }}>
+				<div className="section-header" style={{ marginBottom: 12 }}>
 					<h3 className="section-title" style={{ fontSize: 16 }}>패스키 관리</h3>
 					{onAddPasskey && (
 						<button
@@ -87,9 +87,6 @@ export const KeysTab = ({
 						</button>
 					)}
 				</div>
-				<p className="section-desc" style={{ marginBottom: 12 }}>
-					여러 기기의 패스키를 등록해두면 각 기기에서 패스키 인증만으로 마스터키를 복호화하여 개인키를 사용할 수 있습니다.
-				</p>
 
 				{passkeys.length === 0 ? (
 					<div className="key-card" style={{ padding: "18px 16px", textAlign: "center" }}>
@@ -115,7 +112,7 @@ export const KeysTab = ({
 												color: pk.hasMasterKey ? "var(--success, #22c55e)" : "var(--text-muted)",
 											}}
 										>
-											{pk.hasMasterKey ? "마스터키 암호화 연동됨" : "마스터키 미연동"}
+											{pk.hasMasterKey ? "연동됨" : "미연동"}
 										</span>
 									</div>
 								</div>

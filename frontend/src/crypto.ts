@@ -804,7 +804,7 @@ export async function encryptMasterKeyWithPasskey(
     throw new Error("암호화할 마스터키가 필요합니다.");
   }
   if (!r0 || r0.length < 32) {
-    throw new Error("결정적 난수값0(R0)이 유효하지 않습니다. 다시 로그인하거나 비밀번호를 확인해주세요.");
+    throw new Error("인증 정보가 유효하지 않습니다. 다시 로그인하거나 비밀번호를 확인해주세요.");
   }
   if (!prfOutput || prfOutput.length < 32) {
     throw new Error(
@@ -836,7 +836,7 @@ export async function decryptMasterKeyWithPasskey(
   prfOutput?: Uint8Array
 ): Promise<string> {
   if (!r0 || r0.length < 32) {
-    throw new Error("결정적 난수값0(R0)이 없습니다. 계정 비밀번호를 확인해주세요.");
+    throw new Error("인증 정보가 유효하지 않습니다. 계정 비밀번호를 다시 확인해주세요.");
   }
   if (!prfOutput || prfOutput.length < 32) {
     throw new Error(
@@ -877,7 +877,7 @@ async function encryptPrivateKey(
     secretBytes = await normalizePassphraseBytes(secret.passphrase);
     algorithm = "arg2st";
   } else {
-    throw new Error("개인키를 암호화할 패스키(PRF) 시크릿 또는 마스터키가 필요합니다.");
+    throw new Error("인증에 필요한 정보가 누락되었습니다.");
   }
 
   const aesKey = await deriveArg2stAesKey(secretBytes, salt, ["encrypt"]);
@@ -939,12 +939,12 @@ export async function decryptStoredPrivateKeyClient(
   let secretBytes: Uint8Array;
   if (kdf.algorithm === "arg2st-prf") {
     if (!normalizedSecret.prfOutput || normalizedSecret.prfOutput.length === 0) {
-      throw new Error("패스키 PRF 키를 확인할 수 없습니다. 패스키 인증을 다시 시도하세요.");
+      throw new Error("패스키 인증을 다시 시도해주세요.");
     }
     secretBytes = normalizedSecret.prfOutput;
   } else if (kdf.algorithm === "arg2st") {
     if (!normalizedSecret.passphrase || !normalizedSecret.passphrase.trim()) {
-      throw new Error("개인키 복호화를 위한 마스터키가 필요합니다.");
+      throw new Error("마스터키가 필요합니다.");
     }
     secretBytes = await normalizePassphraseBytes(normalizedSecret.passphrase);
   } else {
@@ -996,7 +996,7 @@ export async function registerWebAuthnCredential(options: {
   prfOutput?: Uint8Array;
 }> {
   if (!options.prfInput || options.prfInput.length < 32) {
-    throw new Error("패스키 PRF 시드(결정적난수값0)가 필요합니다.");
+    throw new Error("인증 정보가 필요합니다.");
   }
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const userIdBuffer = base64ToArrayBuffer(options.user.id);
@@ -1078,7 +1078,7 @@ export async function authenticateWithWebAuthn(options: {
   prfOutput?: Uint8Array;
 }> {
   if (!options.prfInput || options.prfInput.length < 32) {
-    throw new Error("패스키 PRF 시드(결정적난수값0)가 필요합니다.");
+    throw new Error("인증 정보가 필요합니다.");
   }
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const allowCredentials = (options.allowCredentials || []).map((cred) => ({
