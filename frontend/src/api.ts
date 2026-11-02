@@ -356,3 +356,72 @@ export async function verifyWebAuthnAuthentication(
 
   return response.json();
 }
+
+const FALLBACK_WORDS = [
+  "ability", "absent", "absorb", "abstract", "academy", "accent", "account", "action",
+  "active", "actor", "advance", "airport", "album", "alert", "algebra", "alien",
+  "alley", "alpha", "alpine", "amber", "anchor", "angel", "anthem", "apple",
+  "apron", "arcade", "arctic", "arena", "arrow", "artist", "aspect", "atom",
+  "attic", "august", "autumn", "avatar", "avenue", "bacon", "badge", "baker",
+  "balcony", "bamboo", "banana", "banner", "baron", "barrel", "beacon", "beauty",
+  "bicycle", "binary", "bird", "biscuit", "blade", "blanket", "blast", "blossom",
+  "bounce", "breeze", "bridge", "bronze", "bubble", "bullet", "cabin", "cactus",
+  "camel", "camera", "canyon", "canvas", "captain", "caravan", "carbon", "carpet",
+  "castle", "cater", "cedar", "celery", "cereal", "chalk", "champion", "channel",
+  "chapter", "charcoal", "charm", "cherry", "chest", "cider", "cinnamon", "circle",
+  "citizen", "citrus", "civic", "clay", "cliff", "climate", "clover", "cluster",
+  "coastal", "cobra", "coffee", "coin", "colony", "comet", "compass", "concert",
+  "copper", "coral", "corner", "cosmos", "cotton", "cradle", "crater", "creek",
+  "cricket", "crown", "crystal", "cube", "current", "curtain", "cushion", "cylinder",
+  "dairy", "daisy", "dancer", "dawn", "decade", "delta", "desert", "device",
+  "diamond", "diner", "disco", "dolphin", "dragon", "drift", "drum", "dynasty",
+  "eagle", "echo", "eclipse", "effort", "elastic", "elder", "element", "elevator",
+  "embark", "emerald", "engine", "enigma", "epoch", "equator", "escape", "essence",
+  "eternal", "event", "exile", "fabric", "falcon", "fame", "fantasy", "farmer",
+  "feather", "field", "filter", "finch", "finger", "firm", "fiscal", "flavor",
+  "flight", "flock", "floral", "flute", "foothill", "forest", "fossil", "founder",
+  "fountain", "fox", "frost", "fruit", "furnace", "galaxy", "gallery", "gamma",
+  "garden", "garlic", "gateway", "gemini", "genius", "gentle", "geology", "glacier",
+  "glance", "glider", "glimmer", "globe", "glory", "glove", "goblet", "goddess",
+  "golden", "gospel", "grain", "granite", "grapes", "grass", "gravity", "grove",
+  "guitar", "habitat", "hammer", "harbor", "harvest", "haven", "hawk", "hazard",
+  "hazel", "header", "heart", "helmet", "heroic", "highway", "horizon", "humble",
+  "hunter", "hybrid", "hyper", "iceberg", "icon", "impact", "impulse", "indigo",
+  "island", "jacket", "jaguar", "jasper", "jelly", "jewel", "jigsaw", "jockey",
+  "journey", "jubilee", "jungle", "jupiter", "kayak", "kernel", "kettle", "keyboard",
+  "kinetic", "kingdom", "kitchen", "knight", "koala", "ladder", "lagoon", "lantern",
+  "laptop", "laser", "laurel", "lavender", "legend", "lemon", "leopard", "level",
+  "liberty", "light", "lily", "limit", "linen", "lion", "liquid", "lizard",
+  "llama", "lobster", "logic", "lotus", "lumber", "lunar", "luxury", "lyric"
+];
+
+function generateLocalPassphrase(wordCount = 4): string {
+  const chosen: string[] = [];
+  const randomIndices = new Uint32Array(wordCount);
+  window.crypto.getRandomValues(randomIndices);
+  for (let i = 0; i < wordCount; i++) {
+    chosen.push(FALLBACK_WORDS[randomIndices[i] % FALLBACK_WORDS.length]);
+  }
+  return chosen.join(" ");
+}
+
+/**
+ * Generates a random dictionary passphrase using https://makemeapassword.ligos.net/api/v1/passphrase/json
+ * Falls back to local crypto random dictionary words if network/offline occurs.
+ */
+export async function fetchDictionaryPassphrase(wordCount = 4): Promise<string> {
+  try {
+    const res = await fetch(
+      `https://makemeapassword.ligos.net/api/v1/passphrase/json?pc=1&wc=${wordCount}&sp=y`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.pws) && data.pws.length > 0 && typeof data.pws[0] === "string") {
+        return data.pws[0].trim();
+      }
+    }
+  } catch (err) {
+    console.warn("Ligos passphrase API unavailable, using local dictionary fallback", err);
+  }
+  return generateLocalPassphrase(wordCount);
+}

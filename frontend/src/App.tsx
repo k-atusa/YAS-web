@@ -23,6 +23,7 @@ import {
 	listWebAuthnCredentials,
 	deleteWebAuthnCredential,
 	updateWebAuthnCredentialMasterKey,
+	fetchDictionaryPassphrase,
 } from "./api";
 import {
 	buildAccountPayload,
@@ -149,10 +150,14 @@ const App = () => {
 		danger?: boolean;
 		extraInputLabel?: string;
 		extraInputPlaceholder?: string;
+		isPassphraseCreation?: boolean;
 		resolve: (value: { secret: string; extra?: string } | null) => void;
 	} | null>(null);
 	const [passphraseInput, setPassphraseInput] = useState("");
 	const [passphraseExtraInput, setPassphraseExtraInput] = useState("");
+	const [isGeneratingPassphrase, setIsGeneratingPassphrase] = useState(false);
+	const [passphraseCopyStatus, setPassphraseCopyStatus] = useState<"idle" | "copied">("idle");
+	const [showMaskedPassword, setShowMaskedPassword] = useState(false);
 
 	/* Theme */
 	const [themeMode, setThemeMode] = useState<"system" | "light" | "dark">(() => {
@@ -640,6 +645,7 @@ const App = () => {
 	}): Promise<{ secret: string; extra?: string } | null> {
 		return new Promise((resolve) => {
 			setPassphraseInput("");
+			setShowMaskedPassword(false);
 			setPassphraseExtraInput(options.extraInputDefault ?? "");
 			setPassphrasePrompt({
 				isOpen: true,
@@ -656,6 +662,66 @@ const App = () => {
 				},
 			});
 		});
+	}
+
+	async function requestMasterKeyPassphraseCreation(
+		title = "마스터키 설정",
+		description?: string
+	): Promise<string | null> {
+		setIsGeneratingPassphrase(true);
+		setPassphraseInput("");
+		setPassphraseCopyStatus("idle");
+
+		const initialPromise = fetchDictionaryPassphrase(4);
+
+		const modalPromise = new Promise<{ secret: string; extra?: string } | null>((resolve) => {
+			setPassphrasePrompt({
+				isOpen: true,
+				title,
+				description: description || "생성된 패스프레이즈가 마스터키로 사용됩니다. 안전한 곳에 보관하세요.",
+				confirmLabel: "마스터키로 사용",
+				isPassphraseCreation: true,
+				resolve,
+			});
+		});
+
+		try {
+			const phrase = await initialPromise;
+			setPassphraseInput(phrase);
+		} catch (e) {
+			console.error("Failed to set initial passphrase", e);
+		} finally {
+			setIsGeneratingPassphrase(false);
+		}
+
+		const res = await modalPromise;
+		return res?.secret ?? null;
+	}
+
+	async function handleRegeneratePassphrase() {
+		setIsGeneratingPassphrase(true);
+		setPassphraseCopyStatus("idle");
+		try {
+			const phrase = await fetchDictionaryPassphrase(4);
+			setPassphraseInput(phrase);
+		} catch (err) {
+			console.error(err);
+			toast.error("패스프레이즈 생성에 실패했습니다");
+		} finally {
+			setIsGeneratingPassphrase(false);
+		}
+	}
+
+	async function handleCopyPassphrase() {
+		if (!passphraseInput) return;
+		try {
+			await navigator.clipboard.writeText(passphraseInput);
+			setPassphraseCopyStatus("copied");
+			toast.success("패스프레이즈가 복사되었습니다");
+			setTimeout(() => setPassphraseCopyStatus("idle"), 2000);
+		} catch {
+			toast.error("복사에 실패했습니다");
+		}
 	}
 
 	async function requestPassphrase(
@@ -743,9 +809,9 @@ const App = () => {
 	}
 
 	async function obtainProtectionSecretForSave(
-		title: string
+		title = "마스터키 설정"
 	): Promise<KeyProtectionSecret | null> {
-		const pass = await requestPassphrase(title);
+		const pass = await requestMasterKeyPassphraseCreation(title);
 		if (!pass) return null;
 		return { passphrase: pass };
 	}
@@ -998,7 +1064,7 @@ const App = () => {
 				throw new Error(val.error || "유효하지 않은 키 쌍입니다.");
 			}
 
-			const secret = await obtainProtectionSecretForSave("마스터키 입력");
+			const secret = await obtainProtectionSecretForSave("마스터키 설정");
 			if (!secret) return false;
 
 			const payload = await buildAccountPayload(
@@ -1037,7 +1103,7 @@ const App = () => {
 		setBusy(true);
 		setError(null);
 		try {
-			const secret = await obtainProtectionSecretForSave("마스터키 입력");
+			const secret = await obtainProtectionSecretForSave("마스터키 설정");
 			if (!secret) return;
 
 			const payload = await buildAccountPayload(username, publicKeyPem, privateKeyPem, secret, undefined);
@@ -2385,28 +2451,96 @@ const App = () => {
 								setPassphrasePrompt(null);
 							}}
 						>
-							{passphrasePrompt.extraInputLabel && (
+							{passphrasePrompt.isPassphraseCreation ? (
 								<div className="form-group mb-3">
-									<label className="form-label">{passphrasePrompt.extraInputLabel}</label>
-									<input
-										type="text"
-										value={passphraseExtraInput}
-										onChange={(e) => setPassphraseExtraInput(e.target.value)}
-										placeholder={passphrasePrompt.extraInputPlaceholder || ""}
-									/>
+									<label className="form-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+										<span>마스터키 (패스프레이즈)</span>
+										<span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 400 }}>4단어 사전 조합</span>
+									</label>
+									<div className="passphrase-generator-box">
+										<textarea
+											className="passphrase-text-display"
+											value={passphraseInput}
+											onChange={(e) => setPassphraseInput(e.target.value)}
+											placeholder={isGeneratingPassphrase ? "패스프레이즈를 생성하는 중입니다..." : "패스프레이즈..."}
+											rows={2}
+											disabled={isGeneratingPassphrase}
+											autoFocus
+											required
+										/>
+										<div className="passphrase-controls-row">
+											<span className="passphrase-meta-hint">
+												{isGeneratingPassphrase ? "생성 중..." : "직접 수정하거나 새로 생성할 수 있습니다."}
+											</span>
+											<div className="passphrase-btn-group">
+												<button
+													type="button"
+													className={`btn btn-secondary btn-sm ${passphraseCopyStatus === "copied" ? "copy-feedback" : ""}`}
+													onClick={handleCopyPassphrase}
+													disabled={!passphraseInput.trim() || isGeneratingPassphrase}
+												>
+													{passphraseCopyStatus === "copied" ? "✓ 복사됨" : "복사"}
+												</button>
+												<button
+													type="button"
+													className="btn btn-secondary btn-sm"
+													onClick={handleRegeneratePassphrase}
+													disabled={isGeneratingPassphrase}
+												>
+													{isGeneratingPassphrase ? "생성 중..." : "다시 생성"}
+												</button>
+											</div>
+										</div>
+									</div>
 								</div>
+							) : (
+								<>
+									{passphrasePrompt.extraInputLabel && (
+										<div className="form-group mb-3">
+											<label className="form-label">{passphrasePrompt.extraInputLabel}</label>
+											<input
+												type="text"
+												value={passphraseExtraInput}
+												onChange={(e) => setPassphraseExtraInput(e.target.value)}
+												placeholder={passphrasePrompt.extraInputPlaceholder || ""}
+											/>
+										</div>
+									)}
+									<div className="form-group mb-3">
+										<label className="form-label">{passphrasePrompt.inputLabel || "마스터키"}</label>
+										<div style={{ position: "relative" }}>
+											<input
+												type={showMaskedPassword ? "text" : "password"}
+												value={passphraseInput}
+												onChange={(e) => setPassphraseInput(e.target.value)}
+												placeholder={passphrasePrompt.inputPlaceholder || "마스터키 입력..."}
+												autoFocus
+												required
+												style={{ paddingRight: 48 }}
+											/>
+											<button
+												type="button"
+												onClick={() => setShowMaskedPassword(!showMaskedPassword)}
+												style={{
+													position: "absolute",
+													right: 8,
+													top: "50%",
+													transform: "translateY(-50%)",
+													background: "none",
+													border: "none",
+													color: "var(--text-muted)",
+													cursor: "pointer",
+													fontSize: 12,
+													padding: "4px 8px",
+												}}
+												tabIndex={-1}
+											>
+												{showMaskedPassword ? "숨김" : "표시"}
+											</button>
+										</div>
+									</div>
+								</>
 							)}
-							<div className="form-group mb-3">
-								<label className="form-label">{passphrasePrompt.inputLabel || "마스터키"}</label>
-								<input
-									type="password"
-									value={passphraseInput}
-									onChange={(e) => setPassphraseInput(e.target.value)}
-									placeholder={passphrasePrompt.inputPlaceholder || "마스터키 입력..."}
-									autoFocus
-									required
-								/>
-							</div>
 							<div className="modal-footer">
 								<button
 									type="button"
@@ -2422,7 +2556,7 @@ const App = () => {
 									type="submit"
 									className={`btn ${passphrasePrompt.danger ? "btn-danger" : "btn-primary"}`}
 									style={passphrasePrompt.danger ? { color: "#ef4444" } : undefined}
-									disabled={!passphraseInput.trim()}
+									disabled={!passphraseInput.trim() || isGeneratingPassphrase}
 								>
 									{passphrasePrompt.confirmLabel || "확인"}
 								</button>
