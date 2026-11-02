@@ -1605,11 +1605,11 @@ const App = () => {
 									<span className="contact-pk-preview" style={{ marginRight: "12px", opacity: 0.6 }}>
 										{truncateKey(c.publicKey)}
 									</span>
-									<button className={`btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`} onClick={() => handleCopyPublicKey(c.publicKey)}>
+									<button className={`btn btn-secondary btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`} onClick={() => handleCopyPublicKey(c.publicKey)}>
 										{copyPublicStatus === "copied" ? "✓ 복사됨" : "복사"}
 									</button>
-									<button className="btn-ghost btn-sm" onClick={() => openEditContactModal(c)}>수정</button>
-									<button className="btn-ghost btn-sm btn-danger" onClick={() => handleDeleteContact(c.id)}>삭제</button>
+									<button className="btn btn-ghost btn-sm" onClick={() => openEditContactModal(c)}>수정</button>
+									<button className="btn btn-ghost btn-sm btn-danger" onClick={() => handleDeleteContact(c.id)}>삭제</button>
 								</div>
 							</div>
 						))}
@@ -1855,7 +1855,7 @@ const App = () => {
 											<span className="file-info-name">{encryptFile.name}</span>
 											<span className="file-info-size"> · {formatBytes(encryptFile.size)}</span>
 										</div>
-										<button className="btn-ghost btn-sm" onClick={() => applySelectedEncryptFile(null)}>제거</button>
+										<button className="btn btn-ghost btn-sm" onClick={() => applySelectedEncryptFile(null)}>제거</button>
 									</div>
 								)}
 							</div>
@@ -2000,7 +2000,7 @@ const App = () => {
 											<span className="file-info-name">{decryptPayloadFile.name}</span>
 											<span className="file-info-size"> · {formatBytes(decryptPayloadFile.size)}</span>
 										</div>
-										<button className="btn-ghost btn-sm" onClick={() => { setDecryptPayloadFile(null); setDecryptDetected(null); }}>제거</button>
+										<button className="btn btn-ghost btn-sm" onClick={() => { setDecryptPayloadFile(null); setDecryptDetected(null); }}>제거</button>
 									</div>
 								)}
 							</div>

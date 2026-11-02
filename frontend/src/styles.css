@@ -559,33 +559,47 @@ select {
 
 /* ─── Buttons ─── */
 
-.btn {
+.btn,
+button.btn,
+.btn-ghost {
+	box-sizing: border-box;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
-	padding: 13px 28px;
+	height: 40px;
+	padding: 0 18px;
 	border-radius: 8px;
-	font-size: 15px;
-	font-weight: 600;
+	font-size: 14px;
+	font-weight: 500;
 	font-family: inherit;
+	line-height: 1;
 	cursor: pointer;
-	transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
-	border: none;
+	transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease, transform 0.05s ease;
+	border: 1px solid transparent;
 	white-space: nowrap;
+	user-select: none;
+}
+
+.btn:active:not(:disabled),
+button.btn:active:not(:disabled),
+.btn-ghost:active:not(:disabled) {
+	transform: scale(0.98);
 }
 
 .btn-primary {
 	background: var(--active);
 	color: var(--active-text);
+	border-color: var(--active);
+	font-weight: 600;
 }
 
 .btn-primary:hover:not(:disabled) {
-	opacity: 0.85;
+	opacity: 0.9;
 }
 
 .btn-primary:disabled {
-	opacity: 0.3;
+	opacity: 0.35;
 	cursor: not-allowed;
 }
 
@@ -597,6 +611,7 @@ select {
 
 .btn-secondary:hover:not(:disabled) {
 	background: var(--hover);
+	border-color: var(--border-hover, var(--border));
 }
 
 .btn-secondary:disabled {
@@ -605,33 +620,50 @@ select {
 }
 
 .btn-ghost {
+	background: transparent;
 	color: var(--text-sub);
-	padding: 8px 14px;
-	font-size: 14px;
-	border-radius: 8px;
-	transition: color 0.15s, background 0.15s;
+	border: 1px solid transparent;
 }
 
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled) {
 	color: var(--text);
 	background: var(--hover);
 }
 
+.btn-ghost:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.btn.copy-feedback,
 .btn-ghost.copy-feedback {
-	color: var(--success);
+	color: var(--success) !important;
+	border-color: rgba(34, 197, 94, 0.3) !important;
 }
 
 .btn-full {
 	width: 100%;
 }
 
-.btn-sm {
-	padding: 7px 14px;
+/* Small Button (32px standard) */
+.btn-sm,
+.btn.btn-sm,
+.btn-ghost.btn-sm {
+	height: 32px;
+	padding: 0 12px;
 	font-size: 13px;
+	font-weight: 500;
+	border-radius: 6px;
+	gap: 6px;
 }
 
 .btn-danger {
 	color: var(--error) !important;
+}
+
+.btn-danger:hover:not(:disabled) {
+	background: rgba(239, 68, 68, 0.1) !important;
+	border-color: rgba(239, 68, 68, 0.25) !important;
 }
 
 .btn-row {
@@ -639,6 +671,7 @@ select {
 	gap: 10px;
 	margin-top: 20px;
 	justify-content: space-between;
+	align-items: center;
 }
 
 .btn-row-right {
@@ -804,7 +837,7 @@ select {
 .contact-btns {
 	display: flex;
 	align-items: center;
-	gap: 2px;
+	gap: 6px;
 	flex-shrink: 0;
 }
 

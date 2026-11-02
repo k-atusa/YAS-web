@@ -123,7 +123,7 @@ export const KeysTab = ({
 									{onDeletePasskey && (
 										<button
 											type="button"
-											className="btn-ghost btn-sm btn-danger"
+											className="btn btn-ghost btn-sm btn-danger"
 											onClick={() => onDeletePasskey(pk.id, pk.name)}
 											disabled={busy || passkeysBusy}
 										>
@@ -155,7 +155,7 @@ export const KeysTab = ({
 						</div>
 						<button
 							type="button"
-							className="btn-ghost btn-sm btn-danger"
+							className="btn btn-ghost btn-sm btn-danger"
 							onClick={onDeleteAccount}
 							disabled={busy || passkeysBusy}
 						>
@@ -252,7 +252,7 @@ export const KeysTab = ({
 						<div className="key-actions">
 							<button
 								type="button"
-								className={`btn btn-ghost btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`}
+								className={`btn btn-secondary btn-sm ${copyPublicStatus === "copied" ? "copy-feedback" : ""}`}
 								onClick={() => onCopyPublicKey(storedAccount?.publicKey)}
 							>
 								{copyPublicStatus === "copied" ? "✓ 복사됨" : "복사"}
@@ -271,10 +271,10 @@ export const KeysTab = ({
 						</div>
 						<div className="key-actions">
 							{privateKeyPem ? (
-								<>
+								<div style={{ display: "flex", gap: 6 }}>
 									<button
 										type="button"
-										className={`btn btn-ghost btn-sm ${copyPrivateStatus === "copied" ? "copy-feedback" : ""}`}
+										className={`btn btn-secondary btn-sm ${copyPrivateStatus === "copied" ? "copy-feedback" : ""}`}
 										onClick={() => onCopyPrivateKey(privateKeyPem)}
 									>
 										{copyPrivateStatus === "copied" ? "✓ 복사됨" : "복사"}
@@ -288,7 +288,7 @@ export const KeysTab = ({
 											숨기기
 										</button>
 									)}
-								</>
+								</div>
 							) : (
 								<div style={{ display: "flex", gap: 6 }}>
 									{hasUsablePasskey && (
@@ -315,7 +315,7 @@ export const KeysTab = ({
 					</div>
 				</div>
 				<div className="btn-row btn-row-right">
-					<button className="btn btn-secondary" onClick={() => setConfirmingRegenerate(true)} disabled={busy}>
+					<button className="btn btn-secondary btn-sm" onClick={() => setConfirmingRegenerate(true)} disabled={busy}>
 						{busy ? "생성 중..." : "키 재생성"}
 					</button>
 				</div>
@@ -369,7 +369,7 @@ export const KeysTab = ({
 									<div className="key-actions">
 										<button
 											type="button"
-											className={`btn btn-ghost btn-sm ${localCopyPublic === "copied" ? "copy-feedback" : ""}`}
+											className={`btn btn-secondary btn-sm ${localCopyPublic === "copied" ? "copy-feedback" : ""}`}
 											onClick={() => handleCopyPreviewKey(previewPublic, "public")}
 										>
 											{localCopyPublic === "copied" ? "✓ 복사됨" : "복사"}
@@ -385,7 +385,7 @@ export const KeysTab = ({
 									<div className="key-actions">
 										<button
 											type="button"
-											className={`btn btn-ghost btn-sm ${localCopyPrivate === "copied" ? "copy-feedback" : ""}`}
+											className={`btn btn-secondary btn-sm ${localCopyPrivate === "copied" ? "copy-feedback" : ""}`}
 											onClick={() => handleCopyPreviewKey(previewPrivate, "private")}
 										>
 											{localCopyPrivate === "copied" ? "✓ 복사됨" : "복사"}
