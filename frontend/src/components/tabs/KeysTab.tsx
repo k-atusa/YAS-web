@@ -132,34 +132,6 @@ export const KeysTab = ({
 						))}
 					</div>
 				)}
-
-				{onDeleteAccount && (
-					<div
-						style={{
-							marginTop: 28,
-							paddingTop: 18,
-							borderTop: "1px solid var(--border)",
-							display: "flex",
-							justifyContent: "space-between",
-							alignItems: "center",
-						}}
-					>
-						<div>
-							<span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-muted)" }}>계정 관리</span>
-							<p className="text-hint" style={{ margin: "2px 0 0 0", fontSize: 12 }}>
-								계정 탈퇴 시 저장된 키, 패스키, 주소록이 모두 영구 삭제됩니다.
-							</p>
-						</div>
-						<button
-							type="button"
-							className="btn btn-ghost btn-sm btn-danger"
-							onClick={onDeleteAccount}
-							disabled={busy || passkeysBusy}
-						>
-							계정 탈퇴
-						</button>
-					</div>
-				)}
 			</div>
 		);
 	}

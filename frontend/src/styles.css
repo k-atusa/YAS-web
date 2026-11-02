@@ -267,6 +267,20 @@ a:active {
 	color: var(--text);
 }
 
+.topbar-delete-account {
+	font-size: 13px;
+	color: var(--text-hint);
+	padding: 4px 0;
+	transition: color 0.15s;
+	background: none;
+	border: none;
+	cursor: pointer;
+}
+
+.topbar-delete-account:hover {
+	color: var(--error, #ef4444);
+}
+
 .topbar-logout {
 	font-size: 13px;
 	color: var(--text-hint);
