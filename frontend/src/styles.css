@@ -1154,6 +1154,25 @@ button.btn:active:not(:disabled),
 
 /* ─── Result ─── */
 
+.result-list {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin: 20px 0 28px 0;
+}
+
+.result-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 12px 0;
+	border-bottom: 1px solid var(--border-light);
+}
+
+.result-row:last-child {
+	border-bottom: none;
+}
+
 .result-grid {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
@@ -1164,19 +1183,20 @@ button.btn:active:not(:disabled),
 .result-item {
 	display: flex;
 	flex-direction: column;
-	gap: 3px;
+	gap: 4px;
 }
 
 .result-label {
-	font-size: 14px;
-	color: var(--text-sub);
-	font-weight: 600;
+	font-size: 13px;
+	color: var(--text-muted);
+	font-weight: 500;
 	letter-spacing: -0.01em;
 }
 
 .result-value {
-	font-weight: 600;
 	font-size: 15px;
+	font-weight: 600;
+	color: var(--text);
 }
 
 .result-value-text {

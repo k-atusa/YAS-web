@@ -111,6 +111,7 @@ const App = () => {
 	const [encryptStatus, setEncryptStatus] = useState<string | null>(null);
 	const [encryptError, setEncryptError] = useState<string | null>(null);
 	const [encryptedBlob, setEncryptedBlob] = useState<Uint8Array | null>(null);
+	const [copyEncryptedStatus, setCopyEncryptedStatus] = useState<"idle" | "copied" | "error">("idle");
 	const [encryptStep, setEncryptStep] = useState(1);
 
 	/* Decrypt */
@@ -486,6 +487,7 @@ const App = () => {
 		setPrivateKeyPem("");
 		setCopyPrivateStatus("idle");
 		setCopySecretStatus("idle");
+		setCopyEncryptedStatus("idle");
 		setTab(nextTab);
 	}
 
@@ -1150,6 +1152,7 @@ const App = () => {
 		applySelectedEncryptFile(null);
 		setIsFileDragActive(false);
 		setEncryptedBlob(null);
+		setCopyEncryptedStatus("idle");
 		setEncryptStep(1);
 		setEncryptStatus(null);
 		setEncryptError(null);
@@ -1381,8 +1384,14 @@ const App = () => {
 		try {
 			const encoded = encode64WithSplit(encryptedBlob, "#", 80, 10);
 			await navigator.clipboard.writeText(encoded);
+			setCopyEncryptedStatus("copied");
+			toast.success("암호화된 텍스트가 복사되었습니다");
+			setTimeout(() => setCopyEncryptedStatus("idle"), 2000);
 		} catch (err) {
 			console.error(err);
+			setCopyEncryptedStatus("error");
+			toast.error("복사에 실패했습니다");
+			setTimeout(() => setCopyEncryptedStatus("idle"), 2000);
 		}
 	}
 
@@ -1673,29 +1682,49 @@ const App = () => {
 
 	function renderEncryptTab() {
 		if (encryptedBlob) {
+			const md5Hash = SparkMD5.ArrayBuffer.hash(
+				encryptedBlob.buffer.slice(encryptedBlob.byteOffset, encryptedBlob.byteOffset + encryptedBlob.byteLength) as ArrayBuffer
+			);
+			const generatedFileName = `secure_file_${md5Hash.substring(0, 6)}.yas`;
+
 			return (
 				<>
 					<h2 className="section-title">암호화 완료</h2>
-					<div className="card mt-3">
-						<div className="result-grid">
-							<div className="result-item">
-								<span className="result-label">방식</span>
-								<span className="result-value">{encryptAuthMode === "password" ? "비밀번호" : "공개키"}</span>
-							</div>
-							<div className="result-item">
-								<span className="result-label">크기</span>
-								<span className="result-value">{formatBytes(encryptedBlob.length)}</span>
-							</div>
+					<p className="section-desc">데이터가 안전하게 암호화되었습니다.</p>
+
+					<div className="result-list">
+						<div className="result-row">
+							<span className="result-label">암호화 방식</span>
+							<span className="result-value">{encryptAuthMode === "password" ? "비밀번호" : "공개키"}</span>
 						</div>
-						<div className="btn-row">
-							{encryptedBlob.length < 10240 && (
-								<button className="btn btn-secondary btn-sm" onClick={handleCopyEncryptedBase64}>텍스트 복사</button>
-							)}
-							<button className="btn btn-secondary btn-sm" onClick={handleDownloadEncryptedBlob}>다운로드</button>
+						<div className="result-row">
+							<span className="result-label">크기</span>
+							<span className="result-value">{formatBytes(encryptedBlob.length)}</span>
+						</div>
+						<div className="result-row">
+							<span className="result-label">파일명</span>
+							<span className="result-value">{generatedFileName}</span>
 						</div>
 					</div>
-					<div className="btn-row mt-3">
-						<button className="btn btn-primary" onClick={resetEncryptionForm}>처음으로</button>
+
+					<div className="btn-row">
+						<button className="btn btn-secondary" onClick={resetEncryptionForm}>
+							처음으로
+						</button>
+						<div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+							{encryptedBlob.length < 10240 && (
+								<button
+									type="button"
+									className={`btn btn-secondary ${copyEncryptedStatus === "copied" ? "copy-feedback" : ""}`}
+									onClick={handleCopyEncryptedBase64}
+								>
+									{copyEncryptedStatus === "copied" ? "✓ 복사됨" : "텍스트 복사"}
+								</button>
+							)}
+							<button type="button" className="btn btn-primary" onClick={handleDownloadEncryptedBlob}>
+								다운로드
+							</button>
+						</div>
 					</div>
 				</>
 			);
