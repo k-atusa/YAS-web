@@ -14,8 +14,8 @@ type KeysTabProps = {
 	canUpload?: boolean;
 	busy: boolean;
 	onGenerateKeys?: () => void;
-	onSaveManualKeys?: (pub: string, pri: string) => Promise<void>;
-	onSaveKeys?: (pub: string, pri: string) => Promise<void>;
+	onSaveManualKeys?: (pub: string, pri: string) => Promise<boolean | void>;
+	onSaveKeys?: (pub: string, pri: string) => Promise<boolean | void>;
 	onUpload?: () => void;
 	onRegenerate: () => void;
 	onCopyPublicKey: (value?: string) => void;
@@ -182,7 +182,7 @@ export const KeysTab = ({
 		if (showKeySection && keyMode === "generate" && !previewPublic && !generatingPreview) {
 			handleCreatePreview();
 		}
-	}, [showKeySection, keyMode]);
+	}, [showKeySection, keyMode, previewPublic]);
 
 	async function handleCopyPreviewKey(text: string, type: "public" | "private") {
 		if (!text) return;
@@ -393,15 +393,8 @@ export const KeysTab = ({
 							<p className="text-hint mt-2">개인키는 브라우저에서 안전하게 암호화된 후 서버에 저장됩니다.</p>
 						</>
 					) : (
-						<div className="key-card" style={{ padding: "28px 20px", textAlign: "center" }}>
-							<button
-								type="button"
-								className="btn btn-secondary"
-								onClick={handleCreatePreview}
-								disabled={busy || generatingPreview}
-							>
-								키 쌍 생성
-							</button>
+						<div className="key-card" style={{ padding: "32px 20px", textAlign: "center" }}>
+							<p className="text-hint" style={{ margin: 0 }}>새로운 키 쌍을 생성하고 있습니다...</p>
 						</div>
 					)}
 
@@ -434,9 +427,11 @@ export const KeysTab = ({
 								className="btn btn-primary"
 								onClick={async () => {
 									if (previewPublic && previewPrivate && saveHandler) {
-										await saveHandler(previewPublic, previewPrivate);
-										setPreviewPublic("");
-										setPreviewPrivate("");
+										const success = await saveHandler(previewPublic, previewPrivate);
+										if (success !== false) {
+											setPreviewPublic("");
+											setPreviewPrivate("");
+										}
 									}
 								}}
 								disabled={busy || generatingPreview || !previewPublic || !previewPrivate}
@@ -488,9 +483,11 @@ export const KeysTab = ({
 							className="btn btn-primary"
 							onClick={async () => {
 								if (saveHandler) {
-									await saveHandler(manualPublicKey, manualPrivateKey);
-									setManualPublicKey("");
-									setManualPrivateKey("");
+									const success = await saveHandler(manualPublicKey, manualPrivateKey);
+									if (success !== false) {
+										setManualPublicKey("");
+										setManualPrivateKey("");
+									}
 								}
 							}}
 							disabled={busy || !manualPublicKey.trim() || !manualPrivateKey.trim()}

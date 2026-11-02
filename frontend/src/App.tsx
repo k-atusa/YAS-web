@@ -946,14 +946,14 @@ const App = () => {
 
 	/* ─── Key generation ─── */
 
-	async function handleGenerateKeys() {
+	async function handleGenerateKeys(): Promise<boolean> {
 		setError(null);
 		setBusy(true);
 		try {
 			const targetUsername = username || authUsername || "";
 			if (!targetUsername) throw new Error("사용자 정보를 찾을 수 없습니다.");
 			const secret = await obtainProtectionSecretForSave("마스터키 설정");
-			if (!secret) return;
+			if (!secret) return false;
 
 			const { publicKey, privateKey } = await generateKeyPair();
 			const payload = await buildAccountPayload(targetUsername, publicKey, privateKey, secret, undefined);
@@ -971,15 +971,17 @@ const App = () => {
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
 			toast.success("키 쌍이 안전하게 저장되었습니다");
+			return true;
 		} catch (err) {
 			console.error(err);
 			toast.error((err as Error).message || "키 쌍 생성에 실패했습니다");
+			return false;
 		} finally {
 			setBusy(false);
 		}
 	}
 
-	async function handleSaveManualKeys(pubInput: string, priInput: string) {
+	async function handleSaveManualKeys(pubInput: string, priInput: string): Promise<boolean> {
 		setError(null);
 		setBusy(true);
 		try {
@@ -992,7 +994,7 @@ const App = () => {
 			}
 
 			const secret = await obtainProtectionSecretForSave("마스터키 입력");
-			if (!secret) return;
+			if (!secret) return false;
 
 			const payload = await buildAccountPayload(
 				targetUsername,
@@ -1015,9 +1017,11 @@ const App = () => {
 			setCopyPrivateStatus("idle");
 			setShowKeySection(false);
 			toast.success("키 쌍이 안전하게 저장되었습니다");
+			return true;
 		} catch (err) {
 			console.error(err);
 			toast.error((err as Error).message || "키 등록에 실패했습니다");
+			return false;
 		} finally {
 			setBusy(false);
 		}
