@@ -808,7 +808,7 @@ export async function encryptMasterKeyWithPasskey(
   }
   if (!prfOutput || prfOutput.length < 32) {
     throw new Error(
-      "이 기기 또는 패스키는 하드웨어 암호화 확장(WebAuthn PRF)을 지원하지 않아 마스터키 암호화에 사용할 수 없습니다."
+      "현재 선택하신 패스키(예: Bitwarden 등 서드파티 앱)는 키 파생 확장(WebAuthn PRF)을 지원하지 않습니다. Apple 키체인(Touch ID), Windows Hello, YubiKey 등의 하드웨어 보안키를 선택하시거나, 마스터키를 직접 사용해주세요."
     );
   }
   const salt = randomBytes(32);
@@ -840,7 +840,7 @@ export async function decryptMasterKeyWithPasskey(
   }
   if (!prfOutput || prfOutput.length < 32) {
     throw new Error(
-      "패스키의 하드웨어 난수값(WebAuthn PRF)을 획득하지 못했습니다. PRF를 지원하는 브라우저와 패스키인지 확인해주세요."
+      "현재 선택하신 패스키(예: Bitwarden 등 서드파티 앱)는 키 파생 확장(WebAuthn PRF)을 지원하지 않습니다. Apple 키체인(Touch ID), Windows Hello, YubiKey 등의 하드웨어 보안키를 선택하시거나, 마스터키를 직접 사용해주세요."
     );
   }
   const salt = base64ToU8(wrapped.salt);

@@ -802,7 +802,7 @@ const App = () => {
 			const modalRes = await requestSecretModal({
 				title: "패스키 추가",
 				description:
-					"등록할 패스키의 이름과 이 패스키로 암호화해 보호할 마스터키를 입력하세요. (비밀번호 난수값0 + 패스키 결정적난수값i → 마스터키 암호화)",
+					"등록할 패스키의 이름과 이 패스키로 암호화해 보호할 마스터키를 입력하세요. (Apple 키체인, Windows Hello, YubiKey 등 PRF 지원 하드웨어 보안키 권장)",
 				extraInputLabel: "패스키 이름",
 				extraInputPlaceholder: "예: MacBook, iPhone, YubiKey...",
 				extraInputDefault: defaultName,
