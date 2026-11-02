@@ -37,7 +37,6 @@ func main() {
 }
 
 // newRouter wires the API routes and the embedded single-page frontend.
-// Frontend and API share one origin, so no CORS handling is needed.
 func newRouter() (http.Handler, error) {
 	static, err := webui.FS()
 	if err != nil {
@@ -48,6 +47,7 @@ func newRouter() (http.Handler, error) {
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
+	r.Use(middleware.Cors)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.MaxBodyBytes(1 << 20)) // 1 MiB: only JSON payloads (keys, contacts)
 

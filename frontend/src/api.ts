@@ -9,8 +9,19 @@ import type {
   WrappedMasterKey,
 } from "./types";
 
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err) {
+    if (err instanceof TypeError && (err.message === "Failed to fetch" || err.message.includes("fetch"))) {
+      throw new Error("서버와 통신할 수 없습니다. 서버가 실행 중인지 확인해주세요.");
+    }
+    throw err;
+  }
+}
+
 export async function signup(username: string, password: string): Promise<{ id: string; username: string }> {
-  const response = await fetch(`${API_BASE}/auth/signup`, {
+  const response = await apiFetch(`${API_BASE}/auth/signup`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -28,7 +39,7 @@ export async function login(
   username: string,
   password: string
 ): Promise<{ token: string; user: { id: string; username: string }; r0Salt: string; hasPasskey?: boolean }> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
+  const response = await apiFetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -43,7 +54,7 @@ export async function login(
 }
 
 export async function saveAccount(payload: AccountPayload, token?: string): Promise<{ id: string; createdAt: string }> {
-  const response = await fetch(`${API_BASE}/accounts`, {
+  const response = await apiFetch(`${API_BASE}/accounts`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -61,7 +72,7 @@ export async function saveAccount(payload: AccountPayload, token?: string): Prom
 }
 
 export async function getAccountByUsername(username: string): Promise<AccountRecord | null> {
-  const response = await fetch(`${API_BASE}/accounts/username/${encodeURIComponent(username)}`);
+  const response = await apiFetch(`${API_BASE}/accounts/username/${encodeURIComponent(username)}`);
 
   if (response.status === 404) return null;
 
@@ -77,7 +88,7 @@ export async function verifyPassword(
   token: string,
   password: string
 ): Promise<{ token: string; expiresAt: string; r0Salt: string; verified: boolean }> {
-  const response = await fetch(`${API_BASE}/auth/verify-password`, {
+  const response = await apiFetch(`${API_BASE}/auth/verify-password`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -95,7 +106,7 @@ export async function verifyPassword(
 }
 
 export async function deleteAccount(token: string, password: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/delete-account`, {
+  const response = await apiFetch(`${API_BASE}/auth/delete-account`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -114,7 +125,7 @@ export async function getMyPrivateKeyVault(
   token: string,
   verificationToken?: string
 ): Promise<AccountVault> {
-  const response = await fetch(`${API_BASE}/accounts/me/vault`, {
+  const response = await apiFetch(`${API_BASE}/accounts/me/vault`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -133,7 +144,7 @@ export async function getMyPrivateKeyVault(
 }
 
 export async function listContacts(token: string): Promise<ContactRecord[]> {
-  const response = await fetch(`${API_BASE}/contacts`, {
+  const response = await apiFetch(`${API_BASE}/contacts`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -150,7 +161,7 @@ export async function listContacts(token: string): Promise<ContactRecord[]> {
 }
 
 export async function createContact(payload: ContactPayload, token: string): Promise<ContactRecord> {
-  const response = await fetch(`${API_BASE}/contacts`, {
+  const response = await apiFetch(`${API_BASE}/contacts`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -172,7 +183,7 @@ export async function createContact(payload: ContactPayload, token: string): Pro
 }
 
 export async function deleteContact(id: string, token: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/contacts/${encodeURIComponent(id)}`, {
+  const response = await apiFetch(`${API_BASE}/contacts/${encodeURIComponent(id)}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -190,7 +201,7 @@ export async function deleteContact(id: string, token: string): Promise<void> {
 // ==================== WebAuthn API ====================
 
 export async function listWebAuthnCredentials(token: string): Promise<PasskeyCredentialItem[]> {
-  const response = await fetch(`${API_BASE}/webauthn/credentials`, {
+  const response = await apiFetch(`${API_BASE}/webauthn/credentials`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -204,7 +215,7 @@ export async function listWebAuthnCredentials(token: string): Promise<PasskeyCre
 }
 
 export async function deleteWebAuthnCredential(token: string, credentialId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/webauthn/credentials/delete`, {
+  const response = await apiFetch(`${API_BASE}/webauthn/credentials/delete`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -224,7 +235,7 @@ export async function updateWebAuthnCredentialMasterKey(
   credentialId: string,
   encryptedMasterKey: WrappedMasterKey
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/webauthn/credentials/master-key`, {
+  const response = await apiFetch(`${API_BASE}/webauthn/credentials/master-key`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -240,7 +251,7 @@ export async function updateWebAuthnCredentialMasterKey(
 }
 
 export async function getWebAuthnRegisterOptions(token: string): Promise<any> {
-  const response = await fetch(`${API_BASE}/webauthn/register-options`, {
+  const response = await apiFetch(`${API_BASE}/webauthn/register-options`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -263,7 +274,7 @@ export async function verifyWebAuthnRegistration(
   name?: string,
   encryptedMasterKey?: WrappedMasterKey
 ): Promise<{ credentialId: string; name: string }> {
-  const response = await fetch(`${API_BASE}/webauthn/register-verify`, {
+  const response = await apiFetch(`${API_BASE}/webauthn/register-verify`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -289,7 +300,7 @@ export async function verifyWebAuthnRegistration(
 }
 
 export async function getWebAuthnAuthenticateOptions(token: string, credentialId?: string): Promise<any> {
-  const response = await fetch(`${API_BASE}/webauthn/authenticate-options`, {
+  const response = await apiFetch(`${API_BASE}/webauthn/authenticate-options`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -324,7 +335,7 @@ export async function verifyWebAuthnAuthentication(
   credentialId: string;
   encryptedMasterKey?: WrappedMasterKey;
 }> {
-  const response = await fetch(`${API_BASE}/webauthn/authenticate-verify`, {
+  const response = await apiFetch(`${API_BASE}/webauthn/authenticate-verify`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
