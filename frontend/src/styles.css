@@ -1332,59 +1332,88 @@ button.btn:active:not(:disabled),
 	margin-top: 24px;
 }
 
-/* ─── Passphrase Generator Modal Box ─── */
+/* ─── Master Key Display Card (Creation Modal) ─── */
 
-.passphrase-generator-box {
+.masterkey-display-card {
 	background: var(--bg);
 	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
-	padding: 14px 16px;
+	border-radius: var(--radius);
+	padding: 22px 20px;
+	margin-bottom: 24px;
 	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	transition: border-color 0.15s ease;
+	align-items: center;
+	justify-content: center;
+	min-height: 84px;
+	box-sizing: border-box;
+	transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.1s ease;
+	cursor: pointer;
 }
 
-.passphrase-generator-box:focus-within {
-	border-color: var(--border-hover, var(--border));
+.masterkey-display-card:hover {
+	border-color: var(--border-hover, #555);
 }
 
-.passphrase-text-display {
+.masterkey-display-card:active {
+	transform: scale(0.995);
+}
+
+.masterkey-display-card.copied {
+	border-color: var(--success);
+	background: var(--success-bg, rgba(46, 125, 50, 0.08));
+}
+
+.masterkey-display-text {
 	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 	font-size: 15px;
-	line-height: 1.5;
+	line-height: 1.6;
 	font-weight: 600;
 	color: var(--text);
 	word-break: break-word;
-	min-height: 54px;
-	background: transparent;
-	border: none;
-	width: 100%;
-	resize: none;
-	outline: none;
-	padding: 0;
-	box-sizing: border-box;
-	cursor: default;
+	overflow-wrap: break-word;
+	text-align: center;
+	letter-spacing: 0.02em;
 	user-select: all;
+	margin: 0;
 }
 
-.passphrase-controls-row {
+.masterkey-loading-text {
+	font-size: 14px;
+	color: var(--text-muted, var(--text-sub));
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.modal-footer-split {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding-top: 10px;
-	border-top: 1px solid var(--border-light);
+	margin-top: 24px;
+	gap: 12px;
+	flex-wrap: wrap;
 }
 
-.passphrase-meta-hint {
-	font-size: 12px;
-	color: var(--text-muted);
-}
-
-.passphrase-btn-group {
+.modal-footer-split .modal-actions-left,
+.modal-footer-split .modal-actions-right {
 	display: flex;
-	gap: 6px;
+	gap: 8px;
 	align-items: center;
+}
+
+.modal-footer-split .btn {
+	height: 36px;
+	padding: 0 14px;
+	font-size: 13.5px;
+	border-radius: var(--radius-sm);
+}
+
+@keyframes spin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+	animation: spin 0.8s linear infinite;
 }
 
 /* ─── Progress ─── */

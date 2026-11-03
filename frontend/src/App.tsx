@@ -2450,39 +2450,101 @@ const App = () => {
 							}}
 						>
 							{passphrasePrompt.isPassphraseCreation ? (
-								<div className="form-group mb-3">
-									<div className="passphrase-generator-box">
-										<textarea
-											className="passphrase-text-display"
-											value={passphraseInput}
-											readOnly
-											placeholder={isGeneratingPassphrase ? "생성 중..." : ""}
-											rows={2}
-											disabled={isGeneratingPassphrase}
-											required
-										/>
-										<div className="passphrase-controls-row" style={{ justifyContent: "flex-end" }}>
-											<div className="passphrase-btn-group">
-												<button
-													type="button"
-													className={`btn btn-secondary btn-sm ${passphraseCopyStatus === "copied" ? "copy-feedback" : ""}`}
-													onClick={handleCopyPassphrase}
-													disabled={!passphraseInput.trim() || isGeneratingPassphrase}
+								<>
+									<div
+										className={`masterkey-display-card ${passphraseCopyStatus === "copied" ? "copied" : ""}`}
+										onClick={handleCopyPassphrase}
+										title="클릭하여 복사"
+									>
+										{isGeneratingPassphrase ? (
+											<span className="masterkey-loading-text">
+												<svg
+													width="16"
+													height="16"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													strokeWidth="2"
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													className="animate-spin"
 												>
-													{passphraseCopyStatus === "copied" ? "✓ 복사됨" : "복사"}
-												</button>
-												<button
-													type="button"
-													className="btn btn-secondary btn-sm"
-													onClick={handleRegeneratePassphrase}
-													disabled={isGeneratingPassphrase}
+													<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+													<path d="M3 3v5h5" />
+												</svg>
+												생성 중...
+											</span>
+										) : (
+											<p className="masterkey-display-text">{passphraseInput}</p>
+										)}
+									</div>
+
+									<div className="modal-footer-split">
+										<div className="modal-actions-left">
+											<button
+												type="button"
+												className={`btn btn-secondary ${passphraseCopyStatus === "copied" ? "copy-feedback" : ""}`}
+												onClick={handleCopyPassphrase}
+												disabled={!passphraseInput.trim() || isGeneratingPassphrase}
+											>
+												{passphraseCopyStatus === "copied" ? (
+													<>
+														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+														<span>복사됨</span>
+													</>
+												) : (
+													<>
+														<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+														<span>복사</span>
+													</>
+												)}
+											</button>
+											<button
+												type="button"
+												className="btn btn-secondary"
+												onClick={handleRegeneratePassphrase}
+												disabled={isGeneratingPassphrase}
+											>
+												<svg
+													width="14"
+													height="14"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													strokeWidth="2"
+													strokeLinecap="round"
+													strokeLinejoin="round"
+													className={isGeneratingPassphrase ? "animate-spin" : ""}
 												>
-													{isGeneratingPassphrase ? "생성 중..." : "다시 생성"}
-												</button>
-											</div>
+													<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+													<path d="M3 3v5h5" />
+													<path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+													<path d="M16 21h5v-5" />
+												</svg>
+												<span>다시 생성</span>
+											</button>
+										</div>
+										<div className="modal-actions-right">
+											<button
+												type="button"
+												className="btn btn-ghost"
+												onClick={() => {
+													passphrasePrompt.resolve(null);
+													setPassphrasePrompt(null);
+												}}
+											>
+												취소
+											</button>
+											<button
+												type="submit"
+												className="btn btn-primary"
+												disabled={!passphraseInput.trim() || isGeneratingPassphrase}
+											>
+												{passphrasePrompt.confirmLabel || "확인"}
+											</button>
 										</div>
 									</div>
-								</div>
+								</>
 							) : (
 								<>
 									{passphrasePrompt.extraInputLabel && (
@@ -2529,28 +2591,28 @@ const App = () => {
 											</button>
 										</div>
 									</div>
+									<div className="modal-footer">
+										<button
+											type="button"
+											className="btn btn-ghost"
+											onClick={() => {
+												passphrasePrompt.resolve(null);
+												setPassphrasePrompt(null);
+											}}
+										>
+											취소
+										</button>
+										<button
+											type="submit"
+											className={`btn ${passphrasePrompt.danger ? "btn-danger" : "btn-primary"}`}
+											style={passphrasePrompt.danger ? { color: "#ef4444" } : undefined}
+											disabled={!passphraseInput.trim()}
+										>
+											{passphrasePrompt.confirmLabel || "확인"}
+										</button>
+									</div>
 								</>
 							)}
-							<div className="modal-footer">
-								<button
-									type="button"
-									className="btn btn-ghost"
-									onClick={() => {
-										passphrasePrompt.resolve(null);
-										setPassphrasePrompt(null);
-									}}
-								>
-									취소
-								</button>
-								<button
-									type="submit"
-									className={`btn ${passphrasePrompt.danger ? "btn-danger" : "btn-primary"}`}
-									style={passphrasePrompt.danger ? { color: "#ef4444" } : undefined}
-									disabled={!passphraseInput.trim() || isGeneratingPassphrase}
-								>
-									{passphrasePrompt.confirmLabel || "확인"}
-								</button>
-							</div>
 						</form>
 					</div>
 				</div>
