@@ -2455,11 +2455,10 @@ const App = () => {
 										<textarea
 											className="passphrase-text-display"
 											value={passphraseInput}
-											onChange={(e) => setPassphraseInput(e.target.value)}
-											placeholder={isGeneratingPassphrase ? "생성 중..." : "마스터키 입력..."}
+											readOnly
+											placeholder={isGeneratingPassphrase ? "생성 중..." : ""}
 											rows={2}
 											disabled={isGeneratingPassphrase}
-											autoFocus
 											required
 										/>
 										<div className="passphrase-controls-row" style={{ justifyContent: "flex-end" }}>

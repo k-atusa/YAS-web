@@ -402,12 +402,13 @@ function generateLocalPassphrase(wordCount = 4): string {
   for (let i = 0; i < wordCount; i++) {
     chosen.push(FALLBACK_WORDS[randomIndices[i] % FALLBACK_WORDS.length]);
   }
-  return chosen.join(" ");
+  return chosen.join("-");
 }
 
 /**
  * Generates a random dictionary passphrase using https://makemeapassword.ligos.net/api/v1/passphrase/json?pc=10&wc=5&sp=1&nums=0&whenNum=never
  * Randomly picks one from the results that contains no numbers.
+ * Words are separated by "-" instead of spaces.
  * Falls back to local crypto random dictionary words if network/offline occurs.
  */
 export async function fetchDictionaryPassphrase(): Promise<string> {
@@ -426,7 +427,7 @@ export async function fetchDictionaryPassphrase(): Promise<string> {
 
         if (noNumberPhrases.length > 0) {
           const randomIndex = Math.floor(Math.random() * noNumberPhrases.length);
-          return noNumberPhrases[randomIndex];
+          return noNumberPhrases[randomIndex].split(/\s+/).join("-");
         }
       }
     }

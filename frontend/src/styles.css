@@ -1364,6 +1364,8 @@ button.btn:active:not(:disabled),
 	outline: none;
 	padding: 0;
 	box-sizing: border-box;
+	cursor: default;
+	user-select: all;
 }
 
 .passphrase-controls-row {
