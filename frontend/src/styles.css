@@ -1201,8 +1201,8 @@ button.btn:active:not(:disabled),
 }
 
 .result-label {
-	font-size: 13px;
-	color: var(--text-muted);
+	font-size: 15px;
+	color: var(--text-sub);
 	font-weight: 500;
 	letter-spacing: -0.01em;
 }
