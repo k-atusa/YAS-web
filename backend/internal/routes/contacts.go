@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"yas-web-backend/internal/db"
 	"yas-web-backend/internal/middleware"
@@ -86,8 +87,16 @@ func handleUpsertContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(body.ContactUsername) < 3 || len(body.ContactUsername) > 64 || len(body.Label) > 120 || len(body.Notes) > 500 {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid payload"})
+	if err := validateUsername(body.ContactUsername); err != nil {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
+		return
+	}
+	if utf8.RuneCountInString(body.Label) > 120 {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "라벨은 120자 이하로 입력해주세요."})
+		return
+	}
+	if utf8.RuneCountInString(body.Notes) > 500 {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "메모는 500자 이하로 입력해주세요."})
 		return
 	}
 	if body.PublicKey != "" && !isValidPublicKey(body.PublicKey) {

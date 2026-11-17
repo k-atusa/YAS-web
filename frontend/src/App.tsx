@@ -59,6 +59,9 @@ const TAB_INDEX: Record<Tab, number> = {
 	decrypt: 3,
 };
 
+const USERNAME_REGEX = /^[A-Za-z][A-Za-z0-9]{1,15}$/;
+const USERNAME_RULE_MESSAGE = "아이디는 영문으로 시작하는 2~16자의 영문·숫자만 사용할 수 있습니다 (한글·특수문자·공백 불가).";
+
 const App = () => {
 	/* Auth */
 	const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem("authToken"));
@@ -418,6 +421,11 @@ const App = () => {
 	async function handleSignup(e: React.FormEvent) {
 		e.preventDefault();
 		if (!canLogin) return;
+		if (!USERNAME_REGEX.test(loginUsername)) {
+			setError(USERNAME_RULE_MESSAGE);
+			toast.error(USERNAME_RULE_MESSAGE);
+			return;
+		}
 		setLoginBusy(true);
 		setError(null);
 		setStatus(null);
@@ -580,6 +588,10 @@ const App = () => {
 		if (!authToken) return;
 		const trimmedUsername = contactForm.contactUsername.trim();
 		if (!trimmedUsername) { toast.error("사용자 아이디는 필수입니다"); return; }
+		if (!USERNAME_REGEX.test(trimmedUsername)) {
+			toast.error(USERNAME_RULE_MESSAGE);
+			return;
+		}
 		setContactBusy(true);
 		setContactModalError(null);
 		try {
@@ -1596,11 +1608,13 @@ const App = () => {
 							<form className="auth-form" onSubmit={handleSignup}>
 								<div className="form-group">
 									<label className="form-label">아이디</label>
-									<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="사용할 아이디" autoComplete="username" />
+									<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="아이디 입력" autoComplete="username" />
+									<span className="form-hint">2~16자의 영문·숫자만 사용 가능</span>
 								</div>
 								<div className="form-group">
 									<label className="form-label">비밀번호</label>
 									<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="new-password" />
+									<span className="form-hint">영문 대·소문자, 숫자, 특수문자를 포함해 10자 이상 입력하세요</span>
 								</div>
 								<div className="form-group">
 									<label className="form-label">비밀번호 확인</label>
@@ -2430,9 +2444,10 @@ const App = () => {
 									type="text"
 									value={contactForm.contactUsername}
 									onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
-									placeholder="아이디"
+									placeholder="아이디 입력"
 									required
 								/>
+								<span className="form-hint">2~16자의 영문·숫자만 사용 가능</span>
 							</div>
 							<div className="form-group">
 								<label className="form-label">메모 (선택)</label>
