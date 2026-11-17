@@ -281,12 +281,27 @@ export async function generateKeyPair(
 
 // ==================== Key cleaning & validation ====================
 
+const FRAGMENT_SPLITTERS = ["!", "@", "#", "$", "%", "^", "&", "*", "~", "|"] as const;
+
 export function cleanBase64Key(raw: string): string {
   if (!raw) return "";
   let cleaned = raw.trim();
   cleaned = cleaned.replace(/-----BEGIN [^-]+-----/g, "");
   cleaned = cleaned.replace(/-----END [^-]+-----/g, "");
   cleaned = cleaned.replace(/\s+/g, "");
+
+  for (const sp of FRAGMENT_SPLITTERS) {
+    const escaped = sp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const markerRe = new RegExp(`${escaped}(?:START|END|\\d+/\\d+)${escaped}`);
+    if (markerRe.test(cleaned)) {
+      cleaned = cleaned
+        .split(sp)
+        .filter((_, idx) => idx % 2 === 0)
+        .join("");
+      break;
+    }
+  }
+
   return cleaned;
 }
 

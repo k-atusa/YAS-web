@@ -30,13 +30,13 @@ import {
 	decryptStoredPrivateKeyClient,
 	generateKeyPair,
 	validateKeyPair,
+	cleanBase64Key,
 	encryptOpsec,
 	decryptOpsecPw,
 	decryptOpsecPub,
 	detectAuthMode,
 	base64ToU8,
 	encode64WithSplit,
-	decode64WithSplit,
 	registerWebAuthnCredential,
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
@@ -1371,7 +1371,7 @@ const App = () => {
 	}
 
 	async function resolvePrivateKeyB64(): Promise<string> {
-		const manual = decryptPrivateKeyInput.trim();
+		const manual = cleanBase64Key(decryptPrivateKeyInput);
 		if (manual) return manual;
 		if (privateKeyPem) return privateKeyPem;
 		if (hasStoredPrivateKey) {
@@ -1396,10 +1396,7 @@ const App = () => {
 		const raw = decryptPayloadInput.trim();
 		if (!raw) throw new Error("암호문 텍스트를 붙여넣으세요");
 		try {
-			if (raw.includes("#START#") || raw.includes("#END#")) {
-				return decode64WithSplit(raw, "#");
-			}
-			return base64ToU8(raw);
+			return base64ToU8(cleanBase64Key(raw));
 		} catch {
 			throw new Error("올바르지 않은 암호문 형식입니다");
 		}
@@ -1506,11 +1503,11 @@ const App = () => {
 			} else {
 				const priB64 = await resolvePrivateKeyB64();
 
-				let finalPeerPub = decryptPeerPublicKey.trim();
+				let finalPeerPub = cleanBase64Key(decryptPeerPublicKey);
 				if (decryptPeerKeySource === "contact" && decryptSelectedContactId) {
 					const contact = contacts.find((c) => c.id === decryptSelectedContactId);
 					if (contact?.publicKey) {
-						finalPeerPub = contact.publicKey.trim();
+						finalPeerPub = cleanBase64Key(contact.publicKey);
 					}
 				}
 				const peerPub = finalPeerPub || undefined;
@@ -2134,9 +2131,7 @@ const App = () => {
 										setDecryptError(null);
 										if (val.trim()) {
 											try {
-												const decoded = val.includes("#START#") || val.includes("#END#")
-													? decode64WithSplit(val.trim(), "#")
-													: base64ToU8(val.trim());
+												const decoded = base64ToU8(cleanBase64Key(val));
 												tryAutoDetect(decoded);
 											} catch {
 												setDecryptDetected(null);
