@@ -808,15 +808,11 @@ const App = () => {
 		}
 	}
 
-	async function obtainProtectionSecretForSave(
-		title = "마스터키 설정"
-	): Promise<KeyProtectionSecret | null> {
-		const pass = await requestMasterKeyPassphraseCreation(title);
-		if (!pass) return null;
-		return { passphrase: pass };
-	}
-
-	async function unlockStoredPrivateKey(mode: "auto" | "passkey" | "masterkey" = "auto"): Promise<string> {
+	async function authenticateAndVerifyExistingMasterKey(
+		mode: "auto" | "passkey" | "masterkey" = "auto",
+		promptTitle = "마스터키 입력",
+		promptDescription?: string
+	): Promise<{ masterKey: string; decryptedPem: string } | null> {
 		if (!authToken || !isAuthed) throw new Error("로그인이 필요합니다");
 		if (!hasStoredPrivateKey) {
 			throw new Error("저장된 개인키가 없습니다.");
@@ -833,8 +829,8 @@ const App = () => {
 			masterKey = unlocked.masterKey;
 			verificationToken = unlocked.verificationToken;
 		} else {
-			const pass = await requestPassphrase("마스터키 입력");
-			if (!pass) throw new Error("마스터키가 입력되지 않았습니다.");
+			const pass = await requestPassphrase(promptTitle, promptDescription);
+			if (!pass) return null;
 			masterKey = pass;
 		}
 
@@ -846,16 +842,45 @@ const App = () => {
 				vault.kdf,
 				{ passphrase: masterKey }
 			);
-			setPrivateKeyPem(decryptedPem);
-			return decryptedPem;
+			return { masterKey, decryptedPem };
 		} catch (err) {
 			console.error("Local decryption failed:", err);
 			throw new Error("마스터키가 일치하지 않거나 저장된 키 데이터가 손상되었습니다.");
 		}
 	}
 
+	async function obtainProtectionSecretForSave(
+		title = "마스터키 설정",
+		authMode: "auto" | "passkey" | "masterkey" = "auto"
+	): Promise<KeyProtectionSecret | null> {
+		if (!hasStoredPrivateKey) {
+			const pass = await requestMasterKeyPassphraseCreation(title);
+			if (!pass) return null;
+			return { passphrase: pass };
+		}
+
+		const verified = await authenticateAndVerifyExistingMasterKey(
+			authMode,
+			"기존 마스터키 인증",
+			"키를 재생성하려면 기존 마스터키를 입력하세요."
+		);
+		if (!verified) return null;
+		return { passphrase: verified.masterKey };
+	}
+
+	async function unlockStoredPrivateKey(mode: "auto" | "passkey" | "masterkey" = "auto"): Promise<string> {
+		const verified = await authenticateAndVerifyExistingMasterKey(mode, "마스터키 입력");
+		if (!verified) throw new Error("마스터키가 입력되지 않았습니다.");
+		setPrivateKeyPem(verified.decryptedPem);
+		return verified.decryptedPem;
+	}
+
 	async function handleAddPasskey() {
 		if (!authToken || !isAuthed) return;
+		if (!hasStoredPrivateKey) {
+			toast.error("먼저 공개키와 개인키를 생성하여 저장해주세요.");
+			return;
+		}
 		if (!webauthnAvailable) {
 			toast.error("현재 브라우저에서 패스키(WebAuthn)를 사용할 수 없습니다.");
 			return;
@@ -880,18 +905,16 @@ const App = () => {
 			setPasskeysBusy(true);
 			setWebauthnAuthBusy(true);
 
-			// 이미 저장된 개인키가 있다면 입력한 마스터키가 올바른지 먼저 검증
-			if (hasStoredPrivateKey) {
-				const vault = await getMyPrivateKeyVault(authToken);
-				try {
-					await decryptStoredPrivateKeyClient(
-						vault.encryptedPrivateKey,
-						vault.kdf,
-						{ passphrase: masterKey }
-					);
-				} catch {
-					throw new Error("마스터키가 일치하지 않습니다.");
-				}
+			// 입력한 마스터키가 저장된 개인키와 일치하는지 먼저 검증
+			const vault = await getMyPrivateKeyVault(authToken);
+			try {
+				await decryptStoredPrivateKeyClient(
+					vault.encryptedPrivateKey,
+					vault.kdf,
+					{ passphrase: masterKey }
+				);
+			} catch {
+				throw new Error("마스터키가 일치하지 않습니다.");
 			}
 
 			const optionsResp = await getWebAuthnRegisterOptions(authToken);
@@ -1052,7 +1075,11 @@ const App = () => {
 		}
 	}
 
-	async function handleSaveManualKeys(pubInput: string, priInput: string): Promise<boolean> {
+	async function handleSaveManualKeys(
+		pubInput: string,
+		priInput: string,
+		authMode: "auto" | "passkey" | "masterkey" = "auto"
+	): Promise<boolean> {
 		setError(null);
 		setBusy(true);
 		try {
@@ -1064,7 +1091,7 @@ const App = () => {
 				throw new Error(val.error || "유효하지 않은 키 쌍입니다.");
 			}
 
-			const secret = await obtainProtectionSecretForSave("마스터키 설정");
+			const secret = await obtainProtectionSecretForSave("마스터키 설정", authMode);
 			if (!secret) return false;
 
 			const payload = await buildAccountPayload(
