@@ -1,0 +1,12 @@
+services:
+  yas-web:
+    image: d3vle0/yas-web:latest
+    container_name: yas-web
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      # DOMAIN: ${DOMAIN:-localhost}
+      # JWT_SECRET: ${JWT_SECRET:-}
+    volumes:
+      - ./data:/app/data
