@@ -1061,11 +1061,19 @@ button.btn:active:not(:disabled),
 .file-drop {
 	border: 2px dashed var(--border);
 	border-radius: var(--radius);
-	padding: 40px 20px;
+	padding: 0;
 	text-align: center;
 	cursor: pointer;
 	transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 	background: var(--surface);
+}
+
+.file-drop-label {
+	display: block;
+	width: 100%;
+	padding: 40px 20px;
+	box-sizing: border-box;
+	cursor: pointer;
 }
 
 .file-drop:hover,

@@ -176,6 +176,8 @@ const App = () => {
 	const navKeysRef = useRef<HTMLButtonElement>(null);
 	const navEncryptRef = useRef<HTMLButtonElement>(null);
 	const navDecryptRef = useRef<HTMLButtonElement>(null);
+	const encryptFileInputRef = useRef<HTMLInputElement>(null);
+	const decryptFileInputRef = useRef<HTMLInputElement>(null);
 	const [pressedTab, setPressedTab] = useState<Tab | null>(null);
 	/* Tooltip */
 	const [showUsernameTooltip, setShowUsernameTooltip] = useState(false);
@@ -1916,13 +1918,18 @@ const App = () => {
 							<div className="form-group">
 								<div
 									className={`file-drop ${isFileDragActive ? "active" : ""}`}
+									onClick={(e) => {
+										if (e.target === e.currentTarget && !encryptBusy) {
+											encryptFileInputRef.current?.click();
+										}
+									}}
 									onDragEnter={handleFileDragEnter}
 									onDragOver={handleFileDragOver}
 									onDragLeave={handleFileDragLeave}
 									onDrop={handleFileDrop}
 								>
-									<input id="encrypt-file" type="file" onChange={handleEncryptFileChange} disabled={encryptBusy} className="sr-only" />
-									<label htmlFor="encrypt-file" style={{ cursor: "pointer" }}>
+									<input ref={encryptFileInputRef} id="encrypt-file" type="file" onChange={handleEncryptFileChange} disabled={encryptBusy} className="sr-only" />
+									<label htmlFor="encrypt-file" className="file-drop-label">
 										<div className="file-drop-icon">📁</div>
 										<p className="file-drop-text">파일을 끌어놓거나 클릭하세요</p>
 										<p className="file-drop-hint">브라우저에서 암호화됩니다</p>
@@ -2061,13 +2068,18 @@ const App = () => {
 							<div className="form-group">
 								<div
 									className={`file-drop ${isDecryptFileDragActive ? "active" : ""}`}
+									onClick={(e) => {
+										if (e.target === e.currentTarget && !decryptBusy) {
+											decryptFileInputRef.current?.click();
+										}
+									}}
 									onDragEnter={handleDecryptDragEnter}
 									onDragOver={handleDecryptDragOver}
 									onDragLeave={handleDecryptDragLeave}
 									onDrop={handleDecryptFileDrop}
 								>
-									<input id="decrypt-file" type="file" onChange={handleDecryptFileChange} disabled={decryptBusy} className="sr-only" />
-									<label htmlFor="decrypt-file" style={{ cursor: "pointer" }}>
+									<input ref={decryptFileInputRef} id="decrypt-file" type="file" onChange={handleDecryptFileChange} disabled={decryptBusy} className="sr-only" />
+									<label htmlFor="decrypt-file" className="file-drop-label">
 										<div className="file-drop-icon">📂</div>
 										<p className="file-drop-text">암호화된 파일을 끌어놓거나 클릭하세요</p>
 										<p className="file-drop-hint">.yas 파일을 여기에 놓으세요</p>
