@@ -8,17 +8,12 @@
  *
  * Algorithms:
  *   Symmetric  — AES-GCM (gcm1), AES-GCM chunked (gcmx1)
- *   KDF        — SHA3 (sha3), Argon2id low (arg2low), Argon2id standard (arg2st)
- *   Asymmetric — Curve448 X448+Ed448 (ecc1), Hybrid PQC1 (pqc1)
+ *   KDF        — Argon2id standard (arg2st)
+ *   Asymmetric — Hybrid PQC1 (pqc1)
  *   Protocol   — Opsec YAS2 binary header format
- *
- * For backward compatibility, read paths also understand the legacy v1 KDF
- * codes ("arg1", "pbk1", "arg2", "pbk2") and legacy field names
- * ("headal", "bodyal", "contal", "sz", "nm", "pwh", "ehk"). The new code
- * only ever writes the USAG-lib format.
  */
 
-import type { AccountPayload, EncryptedPrivateKey, KdfParameters } from "./types";
+import type { AccountPayload, EncryptedPrivateKey, KdfParameters, WrappedMasterKey } from "./types";
 
 // TS 5.7+ strict typed arrays — slice() to get a fresh ArrayBuffer, never SharedArrayBuffer
 const asBuf = (u: Uint8Array): ArrayBuffer =>
@@ -49,7 +44,7 @@ declare global {
 let _usagReady: Promise<UsagBundle> | null = null;
 
 /** Wait for USAG-lib (preloaded in index.html) to be ready. */
-export function waitForUsag(): Promise<UsagBundle> {
+function waitForUsag(): Promise<UsagBundle> {
   if (_usagReady) return _usagReady;
   _usagReady = new Promise<UsagBundle>((resolve, reject) => {
     if (typeof window === "undefined") {
@@ -76,15 +71,15 @@ export function waitForUsag(): Promise<UsagBundle> {
 
 // ==================== Public types ====================
 
-export type AsymAlgo = "ecc1" | "pqc1";
-export type KdfMethod = "arg2low" | "arg2st" | "sha3";
+export type AsymAlgo = "pqc1";
+export type KdfMethod = "arg2st";
 export type EncAlgo = "gcm1" | "gcmx1";
-export type PackAlgo = "zip1" | "tar1";
+type PackAlgo = "zip1" | "tar1";
 export type AuthMode = "password" | "publickey";
 
-export interface EncryptPasswordOptions {
+interface EncryptPasswordOptions {
   mode: "password";
-  kdfMethod: KdfMethod;
+  kdfMethod?: KdfMethod;
   password: string;
   encAlgo: EncAlgo;
   smsg?: string;
@@ -93,9 +88,9 @@ export interface EncryptPasswordOptions {
   packAlgo?: PackAlgo;
 }
 
-export interface EncryptPublicKeyOptions {
+interface EncryptPublicKeyOptions {
   mode: "publickey";
-  asymAlgo: AsymAlgo;
+  asymAlgo?: AsymAlgo;
   peerPublicKey: string; // base64
   myPrivateKey?: string; // base64 (for signing)
   encAlgo: EncAlgo;
@@ -131,61 +126,30 @@ export function u8ToBase64(u8: Uint8Array): string {
   return btoa(bin);
 }
 
+export function base64UrlToBase64(str: string): string {
+  if (!str) return "";
+  let output = str.replace(/-/g, "+").replace(/_/g, "/").replace(/\s/g, "");
+  const mod4 = output.length % 4;
+  if (mod4 === 2) {
+    output += "==";
+  } else if (mod4 === 3) {
+    output += "=";
+  } else if (mod4 === 1) {
+    throw new Error("Invalid base64 string length");
+  }
+  return output;
+}
+
 export function base64ToU8(b64: string): Uint8Array {
   if (!b64) return new Uint8Array(0);
-  const bin = atob(b64);
+  const normalized = base64UrlToBase64(b64);
+  const bin = atob(normalized);
   const u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   return u8;
 }
 
-export function encodeUtf8(data: string): ArrayBuffer {
-  return _enc.encode(data).buffer as ArrayBuffer;
-}
-export function decodeUtf8(buffer: ArrayBuffer): string {
-  return _dec.decode(buffer);
-}
-
 // ==================== YAS2 inner config helpers (used for detect + legacy) ====================
-
-/**
- * Encode the YAS2 inner config dictionary.
- * Format: for each entry: [keyLen:1B][keyBytes][dataLen:1B or 2B][dataBytes]
- *   - dataLen 1B when < 256
- *   - dataLen 2B (with keyLen+128 flag) when >= 256
- */
-function encodeCfg(data: Record<string, Uint8Array | string>): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  for (const [key, val] of Object.entries(data)) {
-    const valU8 = typeof val === "string" ? _enc.encode(val) : val;
-    const keyBytes = _enc.encode(key);
-    const kl = keyBytes.length;
-    const dl = valU8.length;
-    if (kl > 127) throw new Error(`Key length too long: ${kl}`);
-    if (dl > 65535) throw new Error(`Data size too big: ${dl}`);
-    if (dl > 255) {
-      chunks.push(new Uint8Array([kl + 128]));
-      chunks.push(keyBytes);
-      const sz = new Uint8Array(2);
-      new DataView(sz.buffer).setUint16(0, dl, true);
-      chunks.push(sz);
-    } else {
-      chunks.push(new Uint8Array([kl]));
-      chunks.push(keyBytes);
-      chunks.push(new Uint8Array([dl]));
-    }
-    chunks.push(valU8);
-  }
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.length;
-  }
-  return out;
-}
 
 /** Decode YAS2 inner config. Returns {key -> Uint8Array}. */
 function decodeCfg(data: Uint8Array): Record<string, Uint8Array> {
@@ -289,16 +253,7 @@ export function detectAuthMode(
       const cfg = decodeCfg(hdrData);
       const algo = cfg["hal"] ? _dec.decode(cfg["hal"]) : cfg["headal"] ? _dec.decode(cfg["headal"]) : "";
       const msg = cfg["msg"] ? _dec.decode(cfg["msg"]) : "";
-      const pwAlgos = new Set([
-        "arg2low",
-        "arg2st",
-        "sha3",
-        // legacy (decrypt-only)
-        "arg1",
-        "pbk1",
-        "arg2",
-        "pbk2",
-      ]);
+      const pwAlgos = new Set(["arg2st", "arg2"]);
       return {
         mode: pwAlgos.has(algo) ? "password" : "publickey",
         algo,
@@ -313,15 +268,144 @@ export function detectAuthMode(
 // ==================== Key generation ====================
 
 export async function generateKeyPair(
-  algo: AsymAlgo
+  _algo?: AsymAlgo
 ): Promise<{ publicKey: string; privateKey: string }> {
   const U = await waitForUsag();
   const AsymMaster = U.bencrypt.AsymMaster as new (a: string) => {
     Genkey(): Promise<[Uint8Array, Uint8Array]>;
   };
-  const am = new AsymMaster(algo);
+  const am = new AsymMaster("pqc1");
   const [pub, pri] = await am.Genkey();
   return { publicKey: u8ToBase64(pub), privateKey: u8ToBase64(pri) };
+}
+
+// ==================== Key cleaning & validation ====================
+
+export function cleanBase64Key(raw: string): string {
+  if (!raw) return "";
+  let cleaned = raw.trim();
+  cleaned = cleaned.replace(/-----BEGIN [^-]+-----/g, "");
+  cleaned = cleaned.replace(/-----END [^-]+-----/g, "");
+  cleaned = cleaned.replace(/\s+/g, "");
+  return cleaned;
+}
+
+export async function validateKeyPair(
+  publicKeyInput: string,
+  privateKeyInput: string
+): Promise<{ valid: boolean; error?: string; cleanPublicKey?: string; cleanPrivateKey?: string }> {
+  const pubClean = cleanBase64Key(publicKeyInput);
+  const priClean = cleanBase64Key(privateKeyInput);
+
+  if (!pubClean) {
+    return { valid: false, error: "공개키를 입력해주세요." };
+  }
+  if (!priClean) {
+    return { valid: false, error: "개인키를 입력해주세요." };
+  }
+
+  let pubU8: Uint8Array;
+  try {
+    pubU8 = base64ToU8(pubClean);
+  } catch {
+    return { valid: false, error: "공개키가 올바른 암호문 형식이 아닙니다." };
+  }
+
+  let priU8: Uint8Array;
+  try {
+    priU8 = base64ToU8(priClean);
+  } catch {
+    return { valid: false, error: "개인키가 올바른 암호문 형식이 아닙니다." };
+  }
+
+  if (pubU8.length !== 4273) {
+    return {
+      valid: false,
+      error: `공개키 형식이 올바르지 않습니다. (디코딩 크기: ${pubU8.length}B, 필요: 4273B)`,
+    };
+  }
+
+  if (priU8.length !== 8177) {
+    return {
+      valid: false,
+      error: `개인키 형식이 올바르지 않습니다. (디코딩 크기: ${priU8.length}B, 필요: 8177B)`,
+    };
+  }
+
+  try {
+    const U = await waitForUsag();
+    const AsymMaster = U.bencrypt.AsymMaster as new (a: string) => {
+      Loadkey(publicBuf: Uint8Array | null, privateBuf: Uint8Array | null): Promise<void>;
+      Sign(data: Uint8Array): Promise<Uint8Array>;
+      Verify(data: Uint8Array, signature: Uint8Array): Promise<boolean>;
+      Encrypt(data: Uint8Array): Promise<Uint8Array>;
+      Decrypt(data: Uint8Array): Promise<Uint8Array>;
+    };
+
+    const am = new AsymMaster("pqc1");
+    try {
+      await am.Loadkey(pubU8, priU8);
+    } catch (e) {
+      return { valid: false, error: `키 로드 실패: ${(e as Error).message}` };
+    }
+
+    // Verify key pair match using digital signature
+    const testPayload = new Uint8Array([89, 65, 83, 45, 87, 69, 66]); // "YAS-WEB"
+    try {
+      const signature = await am.Sign(testPayload);
+      const isVerified = await am.Verify(testPayload, signature);
+      if (!isVerified) {
+        return { valid: false, error: "공개키와 개인키가 일치하지 않는 쌍입니다." };
+      }
+    } catch (e) {
+      return { valid: false, error: `서명 검증 실패: ${(e as Error).message}` };
+    }
+
+    // Verify key pair match using encryption/decryption
+    try {
+      const enc = await am.Encrypt(testPayload);
+      const dec = await am.Decrypt(enc);
+      if (dec.length !== testPayload.length || !dec.every((b, i) => b === testPayload[i])) {
+        return { valid: false, error: "공개키와 개인키가 일치하지 않는 쌍입니다." };
+      }
+    } catch (e) {
+      return { valid: false, error: `암/복호화 검증 실패: ${(e as Error).message}` };
+    }
+
+    return { valid: true, cleanPublicKey: pubClean, cleanPrivateKey: priClean };
+  } catch (err) {
+    return { valid: false, error: (err as Error).message || "키 검증에 실패했습니다." };
+  }
+}
+
+export async function validatePublicKey(
+  publicKeyInput: string
+): Promise<{ valid: boolean; error?: string; cleanKey?: string }> {
+  const pubClean = cleanBase64Key(publicKeyInput);
+  if (!pubClean) return { valid: false, error: "공개키를 입력해주세요." };
+  let pubU8: Uint8Array;
+  try {
+    pubU8 = base64ToU8(pubClean);
+  } catch {
+    return { valid: false, error: "공개키가 올바른 암호문 형식이 아닙니다." };
+  }
+  if (pubU8.length !== 4273) {
+    return {
+      valid: false,
+      error: `공개키 형식이 올바르지 않습니다. (디코딩 크기: ${pubU8.length}B, 필요: 4273B)`,
+    };
+  }
+  try {
+    const U = await waitForUsag();
+    const AsymMaster = U.bencrypt.AsymMaster as new (a: string) => {
+      Loadkey(publicBuf: Uint8Array | null, privateBuf: Uint8Array | null): Promise<void>;
+    };
+    const am = new AsymMaster("pqc1");
+    await am.Loadkey(pubU8, null);
+    return { valid: true, cleanKey: pubClean };
+  } catch (e) {
+    return { valid: false, error: `공개키 검증 실패: ${(e as Error).message}` };
+  }
 }
 
 // ==================== High-level encryption ====================
@@ -380,7 +464,7 @@ export async function encryptOpsec(options: EncryptOptions): Promise<Uint8Array>
       pw: Uint8Array,
       kf: Uint8Array
     ) => Promise<Uint8Array>;
-    headerBytes = await Encpw(options.kdfMethod, pw, new Uint8Array(0));
+    headerBytes = await Encpw("arg2st", pw, new Uint8Array(0));
   } else {
     const peerPub = base64ToU8(options.peerPublicKey);
     const myPri = options.myPrivateKey ? base64ToU8(options.myPrivateKey) : null;
@@ -389,7 +473,7 @@ export async function encryptOpsec(options: EncryptOptions): Promise<Uint8Array>
       peerPub: Uint8Array,
       myPri: Uint8Array | null
     ) => Promise<Uint8Array>;
-    headerBytes = await Encpub(options.asymAlgo, peerPub, myPri);
+    headerBytes = await Encpub("pqc1", peerPub, myPri);
   }
 
   const TestWriter = U.bencrypt.TestWriter as new () => {
@@ -466,24 +550,6 @@ function resolvePackAlgo(op: any): PackAlgo {
 
 // ==================== Password-mode decryption ====================
 
-/** Map legacy v1 KDF names to a USAG-lib compatible one. */
-function mapLegacyKdf(algo: string): KdfMethod | "legacy-v1" {
-  switch (algo) {
-    case "sha3":
-    case "arg2low":
-    case "arg2st":
-      return algo;
-    case "arg2":
-    case "pbk2":
-      // Closest USAG-lib equivalent (standard Argon2id).
-      return "arg2st";
-    case "arg1":
-    case "pbk1":
-    default:
-      return "legacy-v1";
-  }
-}
-
 export async function decryptOpsecPw(
   dataU8: Uint8Array,
   password: string
@@ -506,13 +572,14 @@ export async function decryptOpsecPw(
   View(headerData);
 
   const algo: string = op._headAlgo || "";
+  if (algo !== "arg2st" && algo !== "arg2") {
+    throw new Error(
+      `이 파일은 '${algo}' 알고리즘으로 암호화되어 지원하지 않습니다. (Argon2id standard 만 지원)`
+    );
+  }
+
   const NormPW = U.bencode.NormPW as (s: string) => Uint8Array;
   const pw = NormPW(password);
-
-  // Detect legacy v1 KDF -> fall back to legacy decrypt path
-  if (mapLegacyKdf(algo) === "legacy-v1") {
-    return await decryptOpsecPwLegacy(dataU8, password);
-  }
 
   const Decpw = (op as any).Decpw.bind(op) as (
     pw: Uint8Array,
@@ -572,9 +639,9 @@ export async function decryptOpsecPub(
   View(headerData);
 
   const algo: string = op._headAlgo || "";
-  if (algo !== "ecc1" && algo !== "pqc1") {
+  if (algo !== "pqc1") {
     throw new Error(
-      `이 파일은 '${algo}' 알고리즘으로 암호화되어 새 버전에서 지원하지 않습니다. (ecc1, pqc1 만 지원)`
+      `이 파일은 '${algo}' 알고리즘으로 암호화되어 지원하지 않습니다. (PQC pqc1 만 지원)`
     );
   }
 
@@ -633,393 +700,12 @@ export async function decryptOpsecPub(
   return result;
 }
 
-// ==================== Legacy v1 decryption (read-only) ====================
+// ==================== Account private key encryption (arg2st + WebAuthn PRF) ====================
 //
-// Supports old YAS-web data that used:
-//  - KDF codes: arg1, pbk1, arg2 (legacy), pbk2
-//  - Field names: headal, bodyal, contal, sz, nm, pwh
-//  - 44-byte SymMaster keys (12B IV + 32B key)
-//  - Sign target: concat([method, peerPub, smsg, smsgInfo]) (no 0-byte separators)
-//  - ECC1 ciphertext: [1B PubLen][EphPub][Enc]
-//
-// We delegate what we can to USAG-lib (SymMaster for body, Crc32, etc.)
-// and re-implement only the legacy KDF/header logic.
-
-async function sha3_512(data: Uint8Array): Promise<Uint8Array> {
-  // USAG-lib exports SHA3512; if not available we use SubtleCrypto fallback
-  const U = (window as any).USAG;
-  if (U?.bencrypt?.SHA3512) {
-    return U.bencrypt.SHA3512(data);
-  }
-  // Fallback (should not happen in production)
-  const subtle = (globalThis as any).crypto.subtle;
-  const buf = await subtle.digest("SHA-512", data);
-  return new Uint8Array(buf);
-}
-
-async function sha3_256(data: Uint8Array): Promise<Uint8Array> {
-  const U = (window as any).USAG;
-  if (U?.bencrypt?.SHA3256) {
-    return U.bencrypt.SHA3256(data);
-  }
-  const subtle = (globalThis as any).crypto.subtle;
-  const buf = await subtle.digest("SHA-256", data);
-  return new Uint8Array(buf);
-}
-
-async function hmacSha3_512(key: Uint8Array, msg: Uint8Array): Promise<Uint8Array> {
-  const B = 72;
-  let k = key;
-  if (k.length > B) k = await sha3_512(k);
-  if (k.length < B) {
-    const nk = new Uint8Array(B);
-    nk.set(k);
-    k = nk;
-  }
-  const opad = new Uint8Array(B);
-  const ipad = new Uint8Array(B);
-  for (let i = 0; i < B; i++) {
-    opad[i] = k[i] ^ 0x5c;
-    ipad[i] = k[i] ^ 0x36;
-  }
-  const inner = new Uint8Array(B + msg.length);
-  inner.set(ipad);
-  inner.set(msg, B);
-  const ihash = await sha3_512(inner);
-  const outer = new Uint8Array(B + ihash.length);
-  outer.set(opad);
-  outer.set(ihash, B);
-  return sha3_512(outer);
-}
-
-async function genkeyLegacy(data: Uint8Array, lbl: string, size: number): Promise<Uint8Array> {
-  const digest = await hmacSha3_512(data, _enc.encode(lbl));
-  if (size > digest.length) throw new Error("key size too large");
-  return digest.slice(0, size);
-}
-
-async function pbkdf2Sha512(
-  pw: Uint8Array,
-  salt: Uint8Array,
-  iter = 1_000_000,
-  outsize = 64
-): Promise<Uint8Array> {
-  const subtle = (globalThis as any).crypto.subtle;
-  const base = await subtle.importKey("raw", pw, "PBKDF2", false, ["deriveBits"]);
-  const bits = await subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: iter, hash: "SHA-512" },
-    base,
-    outsize * 8
-  );
-  return new Uint8Array(bits);
-}
-
-async function legacyKdf(
-  algo: string,
-  pw: Uint8Array,
-  kf: Uint8Array,
-  salt: Uint8Array
-): Promise<Uint8Array> {
-  const combined = new Uint8Array(pw.length + kf.length);
-  combined.set(pw, 0);
-  combined.set(kf, pw.length);
-
-  if (algo === "arg1") {
-    // Legacy argon2id: time=4, mem=64MB, parallelism=8, hashLen=64
-    // (cannot run via WebCrypto, use a derived value from PBKDF2 as graceful fallback
-    //  and let caller surface "wrong password" if verification fails)
-    return pbkdf2Sha512(combined, salt, 1_000_000, 64);
-  }
-  if (algo === "pbk1") {
-    return pbkdf2Sha512(combined, salt, 1_000_000, 64);
-  }
-  if (algo === "arg2" || algo === "pbk2") {
-    // Legacy v1 "arg2" used time=3, mem=256MB, parallelism=4, hashLen=48.
-    // Fall back to USAG-lib's arg2st (which uses time=3, mem=256MB, parallelism=6, hashLen=64)
-    // Close enough for compatibility.
-    const U = await waitForUsag();
-    const HashMaster = U.bencrypt.HashMaster as new (algo: string) => {
-      KDF(pw: Uint8Array, salt: Uint8Array): Promise<[Uint8Array, Uint8Array]>;
-    };
-    const hm = new HashMaster("arg2st");
-    const [_store, master] = await hm.KDF(combined, salt);
-    return master;
-  }
-  if (algo === "sha3") {
-    // Legacy sha3: master = SHA3-512(salt || pw) (not HMAC'd)
-    const combined2 = new Uint8Array(salt.length + combined.length);
-    combined2.set(salt, 0);
-    combined2.set(combined, salt.length);
-    return sha3_512(combined2);
-  }
-  throw new Error(`Unsupported legacy KDF: ${algo}`);
-}
-
-interface LegacyInnerFields {
-  smsg: string;
-  smsgInfo: Uint8Array;
-  _sign: Uint8Array;
-  bodyAlgo: string;
-  bodyKey: Uint8Array;
-  size: number;
-  contAlgo: string;
-  name: string;
-}
-
-function parseLegacyInner(data: Uint8Array): LegacyInnerFields {
-  const cfg = decodeCfg(data);
-  const out: LegacyInnerFields = {
-    smsg: "",
-    smsgInfo: new Uint8Array(0),
-    _sign: new Uint8Array(0),
-    bodyAlgo: "",
-    bodyKey: new Uint8Array(0),
-    size: -1,
-    contAlgo: "",
-    name: "",
-  };
-  if (cfg["smsg"]) out.smsg = _dec.decode(cfg["smsg"]);
-  if (cfg["sinf"]) out.smsgInfo = cfg["sinf"];
-  if (cfg["sgn"]) out._sign = cfg["sgn"];
-  if (cfg["bal"]) out.bodyAlgo = _dec.decode(cfg["bal"]);
-  if (cfg["bodyal"]) out.bodyAlgo = _dec.decode(cfg["bodyal"]);
-  if (cfg["bkey"]) out.bodyKey = cfg["bkey"];
-  if (cfg["bsz"]) out.size = decodeIntLE(cfg["bsz"]);
-  if (cfg["sz"]) out.size = decodeIntLE(cfg["sz"]);
-  if (cfg["binf"]) out.contAlgo = _dec.decode(cfg["binf"]);
-  if (cfg["contal"]) out.contAlgo = _dec.decode(cfg["contal"]);
-  if (cfg["nm"]) out.name = _dec.decode(cfg["nm"]);
-  return out;
-}
-
-function symMasterLegacyDecrypt(hkey: Uint8Array, ehd: Uint8Array): Promise<Uint8Array> {
-  // Legacy SymMaster used a 44-byte key (12B IV + 32B key) and produced:
-  //   [ciphertext][tag 16B]
-  return legacyAesGcmDecrypt(hkey.slice(12), hkey.slice(0, 12), ehd);
-}
-
-function symMasterLegacyEncrypt(hkey: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  return legacyAesGcmEncrypt(hkey.slice(12), hkey.slice(0, 12), data);
-}
-
-async function legacyAesGcmEncrypt(
-  key: Uint8Array,
-  iv: Uint8Array,
-  data: Uint8Array
-): Promise<Uint8Array> {
-  const subtle = (globalThis as any).crypto.subtle;
-  const wk = await subtle.importKey("raw", asBuf(key), "AES-GCM", false, ["encrypt"]);
-  const res = await subtle.encrypt({ name: "AES-GCM", iv: asBuf(iv) }, wk, asBuf(data));
-  return new Uint8Array(res);
-}
-
-async function legacyAesGcmDecrypt(
-  key: Uint8Array,
-  iv: Uint8Array,
-  data: Uint8Array
-): Promise<Uint8Array> {
-  const subtle = (globalThis as any).crypto.subtle;
-  const wk = await subtle.importKey("raw", asBuf(key), "AES-GCM", false, ["decrypt"]);
-  try {
-    const res = await subtle.decrypt({ name: "AES-GCM", iv: asBuf(iv) }, wk, asBuf(data));
-    return new Uint8Array(res);
-  } catch {
-    throw new Error("복호화 실패 (데이터 손상 또는 잘못된 비밀번호)");
-  }
-}
-
-/** Legacy gcm1 stream decrypt for big bodies (no chunking in v1, just one GCM call). */
-async function legacyBodyDecrypt(bodyKey: Uint8Array, enc: Uint8Array): Promise<Uint8Array> {
-  // bodyKey is also 44B in legacy v1
-  return symMasterLegacyDecrypt(bodyKey, enc);
-}
-
-function legacyEcc1Decrypt(myPri: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  // Legacy format: [1B PubLen][EphPub][Enc] -- only first 56B of pri
-  const keyLen = data[0];
-  const ephPub = data.slice(1, 1 + keyLen);
-  const enc = data.slice(1 + keyLen);
-  // Derive 44-byte AES key (X448 shared -> HMAC-SHA3-512 truncated to 44)
-  // We can't easily call noble here without re-importing; instead use USAG-lib's
-  // ECC1 (which expects [EphPub 56B][Enc], no length byte). Strip the length
-  // byte and delegate.
-  const U = (window as any).USAG;
-  if (!U) throw new Error("USAG-lib not ready");
-  const AsymMaster = U.bencrypt.AsymMaster as new (a: string) => {
-    Loadkey(pub: Uint8Array | null, pri: Uint8Array | null): Promise<void>;
-    Decrypt(d: Uint8Array): Promise<Uint8Array>;
-  };
-  const am = new AsymMaster("ecc1");
-  // Legacy pri is 113B (X448 56 + Ed448 57). USAG-lib accepts that too.
-  // We re-pack the ciphertext to USAG-lib's expected layout: [EphPub][Enc].
-  const repacked = new Uint8Array(ephPub.length + enc.length);
-  repacked.set(ephPub, 0);
-  repacked.set(enc, ephPub.length);
-  return (async () => {
-    await am.Loadkey(null, myPri);
-    return am.Decrypt(repacked);
-  })();
-}
-
-async function decryptOpsecPwLegacy(
-  dataU8: Uint8Array,
-  password: string
-): Promise<DecryptResult> {
-  // Find YAS2 magic
-  let pos = 0;
-  let hdrStart = -1;
-  let hdrSize = 0;
-  while (pos < dataU8.length) {
-    if (pos + 4 > dataU8.length) break;
-    const magic = _dec.decode(dataU8.slice(pos, pos + 4));
-    if (magic === "YAS2") {
-      const sizeBuf = dataU8.slice(pos + 4, pos + 6);
-      hdrSize = decodeIntLE(sizeBuf);
-      hdrStart = pos + 6;
-      if (hdrSize === 65535) {
-        const ext = dataU8.slice(pos + 6, pos + 8);
-        hdrSize += decodeIntLE(ext);
-        hdrStart = pos + 8;
-      }
-      break;
-    }
-    pos += 128;
-  }
-  if (hdrStart < 0) throw new Error("Invalid Opsec format: no YAS2 header");
-
-  const outerCfg = decodeCfg(dataU8.slice(hdrStart, hdrStart + hdrSize));
-  const algo = outerCfg["hal"] ? _dec.decode(outerCfg["hal"]) : outerCfg["headal"] ? _dec.decode(outerCfg["headal"]) : "";
-  const salt = outerCfg["salt"];
-  const pwHash = outerCfg["pwh"];
-  const ehd = outerCfg["ehd"];
-  const msg = outerCfg["msg"] ? _dec.decode(outerCfg["msg"]) : "";
-  if (!salt || !ehd) throw new Error("Missing salt/ehd in legacy header");
-
-  const pw = _enc.encode(password.normalize("NFC"));
-  const master = await legacyKdf(algo, pw, new Uint8Array(0), salt);
-
-  // Verify password (if pwh present)
-  if (pwHash && pwHash.length > 0) {
-    let lbl = "";
-    if (algo === "arg1") lbl = "PWHASH_OPSEC_ARGON2";
-    else if (algo === "pbk1") lbl = "PWHASH_OPSEC_PBKDF2";
-    else if (algo === "arg2" || algo === "pbk2") lbl = "PWHASH_ARG2";
-    else lbl = "PWHASH_SHA3";
-    const expected = await genkeyLegacy(master, lbl, 32);
-    if (expected.length !== pwHash.length) {
-      throw new Error("비밀번호가 일치하지 않습니다");
-    }
-    let diff = 0;
-    for (let i = 0; i < expected.length; i++) diff |= expected[i] ^ pwHash[i];
-    if (diff !== 0) throw new Error("비밀번호가 일치하지 않습니다");
-  }
-
-  // Derive 44-byte header key
-  let klbl = "";
-  if (algo === "arg1") klbl = "KEYGEN_OPSEC_ARGON2";
-  else if (algo === "pbk1") klbl = "KEYGEN_OPSEC_PBKDF2";
-  else if (algo === "arg2" || algo === "pbk2") klbl = "KEYGEN_ARG2";
-  else klbl = "KEYGEN_SHA3";
-  const hkey = await genkeyLegacy(master, klbl, 44);
-
-  let innerData: Uint8Array;
-  try {
-    innerData = await symMasterLegacyDecrypt(hkey, ehd);
-  } catch (e) {
-    throw new Error("비밀번호가 일치하지 않거나 데이터가 손상되었습니다.");
-  }
-
-  const inner = parseLegacyInner(innerData);
-  const result: DecryptResult = { msg, smsg: inner.smsg, files: [] };
-
-  if (inner.size >= 0 && inner.bodyKey.length > 0) {
-    const bodyOffset = hdrStart + hdrSize;
-    const enc = dataU8.slice(bodyOffset, bodyOffset + inner.size);
-    const dec = await legacyBodyDecrypt(inner.bodyKey, enc);
-    const packAlgo: PackAlgo = inner.contAlgo === "tar1" || inner.name === "tar1" ? "tar1" : "zip1";
-    result.files = await unpackBody(dec, packAlgo);
-  }
-  return result;
-}
-
-/** Legacy publickey decryption (ecc1 / pqc1 only). RSA is not supported. */
-export async function decryptOpsecPubLegacy(
-  dataU8: Uint8Array,
-  myPrivateKey: string
-): Promise<DecryptResult> {
-  // Walk to YAS2 header
-  let pos = 0;
-  let hdrStart = -1;
-  let hdrSize = 0;
-  while (pos < dataU8.length) {
-    if (pos + 4 > dataU8.length) break;
-    const magic = _dec.decode(dataU8.slice(pos, pos + 4));
-    if (magic === "YAS2") {
-      const sizeBuf = dataU8.slice(pos + 4, pos + 6);
-      hdrSize = decodeIntLE(sizeBuf);
-      hdrStart = pos + 6;
-      if (hdrSize === 65535) {
-        const ext = dataU8.slice(pos + 6, pos + 8);
-        hdrSize += decodeIntLE(ext);
-        hdrStart = pos + 8;
-      }
-      break;
-    }
-    pos += 128;
-  }
-  if (hdrStart < 0) throw new Error("Invalid Opsec format: no YAS2 header");
-
-  const outerCfg = decodeCfg(dataU8.slice(hdrStart, hdrStart + hdrSize));
-  const algo = outerCfg["hal"] ? _dec.decode(outerCfg["hal"]) : "";
-  if (algo !== "ecc1" && algo !== "pqc1") {
-    throw new Error(`레거시 '${algo}' 알고리즘은 새 버전에서 지원하지 않습니다.`);
-  }
-  const ehd = outerCfg["ehd"];
-  const msg = outerCfg["msg"] ? _dec.decode(outerCfg["msg"]) : "";
-  if (!ehd) throw new Error("Missing ehd in legacy header");
-
-  const myPri = base64ToU8(myPrivateKey);
-  const decHeader = await legacyEcc1Decrypt(myPri, ehd);
-  const inner = parseLegacyInner(decHeader);
-
-  const result: DecryptResult = { msg, smsg: inner.smsg, files: [] };
-  if (inner.size >= 0 && inner.bodyKey.length > 0) {
-    const bodyOffset = hdrStart + hdrSize;
-    const enc = dataU8.slice(bodyOffset, bodyOffset + inner.size);
-    const dec = await legacyBodyDecrypt(inner.bodyKey, enc);
-    const packAlgo: PackAlgo = inner.contAlgo === "tar1" || inner.name === "tar1" ? "tar1" : "zip1";
-    result.files = await unpackBody(dec, packAlgo);
-  }
-  return result;
-}
-
-// ==================== Account private key encryption (UNRELATED to USAG-lib) ====================
-//
-// This protects a user's private key with PBKDF2-SHA256 + AES-GCM before sending
-// it to the server. It is independent of the Opsec layer and must remain stable
-// because the server stores the result.
-
-async function deriveStorageKey(
-  passphrase: string,
-  salt: Uint8Array,
-  iterations = 310_000,
-  keyLength = 32
-): Promise<CryptoKey> {
-  const base = await crypto.subtle.importKey(
-    "raw",
-    asBuf(_enc.encode(passphrase)),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: asBuf(salt), iterations, hash: "SHA-256" },
-    base,
-    { name: "AES-GCM", length: keyLength * 8 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
+// Protects a user's private key in the browser using Argon2id standard (arg2st:
+// time=3, mem=262144 KiB, parallelism=6, HMAC-SHA3-512 key derivation) + AES-256-GCM.
+// Supports WebAuthn PRF hardware-bound secrets ("arg2st-prf") with zero password
+// prompt, as well as password-based "arg2st" fallback.
 
 function randomBytes(n: number): Uint8Array {
   const b = new Uint8Array(n);
@@ -1027,72 +713,264 @@ function randomBytes(n: number): Uint8Array {
   return b;
 }
 
-export async function encryptPrivateKey(
+async function deriveArg2stAesKey(
+  secretBytes: Uint8Array,
+  salt: Uint8Array,
+  usage: KeyUsage[] = ["encrypt", "decrypt"]
+): Promise<CryptoKey> {
+  const U = await waitForUsag();
+  const HashMaster = U.bencrypt.HashMaster as new (
+    algo: string,
+    s1: number,
+    s2: number
+  ) => {
+    KDF(pw: Uint8Array, salt: Uint8Array): Promise<[Uint8Array, Uint8Array]>;
+  };
+  const hm = new HashMaster("arg2st", 32, 32);
+  const [, userKey] = await hm.KDF(secretBytes, salt);
+  return crypto.subtle.importKey(
+    "raw",
+    asBuf(userKey),
+    { name: "AES-GCM", length: 256 },
+    false,
+    usage
+  );
+}
+
+async function normalizePassphraseBytes(passphrase: string): Promise<Uint8Array> {
+  const U = await waitForUsag();
+  const NormPW = U.bencode.NormPW as (s: string) => Uint8Array;
+  return NormPW(passphrase);
+}
+
+/**
+ * 비밀번호 -> 결정적난수값0 (R0)
+ * 계정별 무작위 32바이트 솔트(r0Salt)와 비밀번호를 사용하여 arg2st로 32바이트 결정적 난수값(R0)을 파생합니다.
+ */
+export async function deriveDeterministicR0(
+  password: string,
+  r0SaltB64: string
+): Promise<Uint8Array> {
+  if (!r0SaltB64 || !r0SaltB64.trim()) {
+    throw new Error("계정 보안 솔트(r0Salt) 정보를 확인할 수 없습니다.");
+  }
+  const U = await waitForUsag();
+  const NormPW = U.bencode.NormPW as (s: string) => Uint8Array;
+  const HashMaster = U.bencrypt.HashMaster as new (
+    algo: string,
+    s1: number,
+    s2: number
+  ) => {
+    KDF(pw: Uint8Array, salt: Uint8Array): Promise<[Uint8Array, Uint8Array]>;
+  };
+  const r0Salt = base64ToU8(r0SaltB64.trim());
+  if (r0Salt.length < 16) {
+    throw new Error("유효하지 않은 계정 솔트(r0Salt) 길이입니다.");
+  }
+  const hm = new HashMaster("arg2st", 32, 32);
+  const [, r0] = await hm.KDF(NormPW(password), r0Salt);
+  return r0;
+}
+
+/**
+ * (결정적난수값0 + 결정적난수값i)와 무작위 솔트를 결합해 arg2st로 마스터키 암호화용 AES-256-GCM 키를 파생합니다.
+ */
+async function deriveMasterKeyWrappingKey(
+  r0: Uint8Array,
+  ri: Uint8Array,
+  salt: Uint8Array,
+  usage: KeyUsage[]
+): Promise<CryptoKey> {
+  const combined = new Uint8Array(r0.length + ri.length);
+  combined.set(r0, 0);
+  combined.set(ri, r0.length);
+  try {
+    return await deriveArg2stAesKey(combined, salt, usage);
+  } finally {
+    combined.fill(0);
+  }
+}
+
+/**
+ * 패스키i -> 난수값0 + 결정적난수값i -> 마스터키 암호화
+ * 반드시 하드웨어 보안키의 실제 WebAuthn PRF 출력(결정적난수값i)만 허용합니다.
+ */
+export async function encryptMasterKeyWithPasskey(
+  masterKey: string,
+  r0: Uint8Array,
+  prfOutput?: Uint8Array
+): Promise<WrappedMasterKey> {
+  if (!masterKey || !masterKey.trim()) {
+    throw new Error("암호화할 마스터키가 필요합니다.");
+  }
+  if (!r0 || r0.length < 32) {
+    throw new Error("인증 정보가 유효하지 않습니다. 다시 로그인하거나 비밀번호를 확인해주세요.");
+  }
+  if (!prfOutput || prfOutput.length < 32) {
+    throw new Error(
+      "현재 선택하신 패스키(예: Bitwarden 등 서드파티 앱)는 키 파생 확장(WebAuthn PRF)을 지원하지 않습니다. Apple 키체인(Touch ID), Windows Hello, YubiKey 등의 하드웨어 보안키를 선택하시거나, 마스터키를 직접 사용해주세요."
+    );
+  }
+  const salt = randomBytes(32);
+  const iv = randomBytes(12);
+  const wrapKey = await deriveMasterKeyWrappingKey(r0, prfOutput, salt, ["encrypt"]);
+  const cipher = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: asBuf(iv) },
+    wrapKey,
+    asBuf(_enc.encode(masterKey))
+  );
+  return {
+    cipherText: u8ToBase64(new Uint8Array(cipher)),
+    iv: u8ToBase64(iv),
+    salt: u8ToBase64(salt),
+  };
+}
+
+/**
+ * 패스키i -> 난수값0 + 결정적난수값i -> 마스터키 복호화
+ * 반드시 하드웨어 보안키의 실제 WebAuthn PRF 출력(결정적난수값i)만 허용합니다.
+ */
+export async function decryptMasterKeyWithPasskey(
+  wrapped: WrappedMasterKey,
+  r0: Uint8Array,
+  prfOutput?: Uint8Array
+): Promise<string> {
+  if (!r0 || r0.length < 32) {
+    throw new Error("인증 정보가 유효하지 않습니다. 계정 비밀번호를 다시 확인해주세요.");
+  }
+  if (!prfOutput || prfOutput.length < 32) {
+    throw new Error(
+      "현재 선택하신 패스키(예: Bitwarden 등 서드파티 앱)는 키 파생 확장(WebAuthn PRF)을 지원하지 않습니다. Apple 키체인(Touch ID), Windows Hello, YubiKey 등의 하드웨어 보안키를 선택하시거나, 마스터키를 직접 사용해주세요."
+    );
+  }
+  const salt = base64ToU8(wrapped.salt);
+  const iv = base64ToU8(wrapped.iv);
+  const cipherBytes = base64ToU8(wrapped.cipherText);
+  const wrapKey = await deriveMasterKeyWrappingKey(r0, prfOutput, salt, ["decrypt"]);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: asBuf(iv) },
+    wrapKey,
+    asBuf(cipherBytes)
+  );
+  return _dec.decode(decrypted);
+}
+
+export interface KeyProtectionSecret {
+  prfOutput?: Uint8Array;
+  passphrase?: string;
+}
+
+async function encryptPrivateKey(
   privateKeyB64: string,
-  passphrase: string
+  secret: KeyProtectionSecret
 ): Promise<{ encryptedPrivateKey: EncryptedPrivateKey; kdf: KdfParameters }> {
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const iterations = 310_000;
-  const keyLength = 32;
-  const aesKey = await deriveStorageKey(passphrase, salt, iterations, keyLength);
+
+  let secretBytes: Uint8Array;
+  let algorithm: "arg2st" | "arg2st-prf";
+
+  if (secret.prfOutput && secret.prfOutput.length > 0) {
+    secretBytes = secret.prfOutput;
+    algorithm = "arg2st-prf";
+  } else if (secret.passphrase && secret.passphrase.trim()) {
+    secretBytes = await normalizePassphraseBytes(secret.passphrase);
+    algorithm = "arg2st";
+  } else {
+    throw new Error("인증에 필요한 정보가 누락되었습니다.");
+  }
+
+  const aesKey = await deriveArg2stAesKey(secretBytes, salt, ["encrypt"]);
   const cipher = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv: asBuf(iv) },
     aesKey,
     asBuf(_enc.encode(privateKeyB64))
   );
+
   return {
     encryptedPrivateKey: {
       cipherText: u8ToBase64(new Uint8Array(cipher)),
       iv: u8ToBase64(iv),
     },
     kdf: {
-      algorithm: "PBKDF2",
+      algorithm,
       salt: u8ToBase64(salt),
-      iterations,
-      keyLength,
-      hash: "SHA-256",
+      iterations: 3,
+      memoryCost: 262144,
+      parallelism: 6,
+      keyLength: 32,
+      hash: "SHA3-512",
     },
   };
-}
-
-export async function decryptPrivateKey(
-  encrypted: EncryptedPrivateKey,
-  kdf: KdfParameters,
-  passphrase: string
-): Promise<string> {
-  if (kdf.algorithm !== "PBKDF2") throw new Error(`Unsupported KDF: ${kdf.algorithm}`);
-  const salt = base64ToU8(kdf.salt);
-  const iterations = kdf.iterations ?? 310_000;
-  const keyLength = kdf.keyLength ?? 32;
-  const aesKey = await deriveStorageKey(passphrase, salt, iterations, keyLength);
-  const iv = base64ToU8(encrypted.iv);
-  const cipher = base64ToU8(encrypted.cipherText);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: asBuf(iv) }, aesKey, asBuf(cipher));
-  return _dec.decode(plain);
 }
 
 export async function buildAccountPayload(
   username: string,
   publicKeyB64: string,
   privateKeyB64: string,
+  secret: KeyProtectionSecret | string,
   notes?: string
 ): Promise<AccountPayload> {
-  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, username);
+  const normalizedSecret: KeyProtectionSecret =
+    typeof secret === "string" ? { passphrase: secret } : secret;
+  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, normalizedSecret);
   return { username, publicKey: publicKeyB64, encryptedPrivateKey, kdf, notes };
 }
 
-// ==================== WebAuthn utilities (UNRELATED to USAG-lib) ====================
+export async function decryptStoredPrivateKeyClient(
+  encrypted: EncryptedPrivateKey,
+  kdf: KdfParameters,
+  secret: KeyProtectionSecret | string
+): Promise<string> {
+  const normalizedSecret: KeyProtectionSecret =
+    typeof secret === "string" ? { passphrase: secret } : secret;
 
-export function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  const salt = base64ToU8(kdf.salt);
+  const iv = base64ToU8(encrypted.iv);
+  let cipherBytes = base64ToU8(encrypted.cipherText);
+  if (encrypted.authTag) {
+    const tag = base64ToU8(encrypted.authTag);
+    const combined = new Uint8Array(cipherBytes.length + tag.length);
+    combined.set(cipherBytes, 0);
+    combined.set(tag, cipherBytes.length);
+    cipherBytes = combined;
+  }
+
+  let secretBytes: Uint8Array;
+  if (kdf.algorithm === "arg2st-prf") {
+    if (!normalizedSecret.prfOutput || normalizedSecret.prfOutput.length === 0) {
+      throw new Error("패스키 인증을 다시 시도해주세요.");
+    }
+    secretBytes = normalizedSecret.prfOutput;
+  } else if (kdf.algorithm === "arg2st") {
+    if (!normalizedSecret.passphrase || !normalizedSecret.passphrase.trim()) {
+      throw new Error("마스터키가 필요합니다.");
+    }
+    secretBytes = await normalizePassphraseBytes(normalizedSecret.passphrase);
+  } else {
+    throw new Error(`지원하지 않거나 취약한 KDF 알고리즘입니다 (${kdf.algorithm}). 키를 재생성해주세요.`);
+  }
+
+  const aesKey = await deriveArg2stAesKey(secretBytes, salt, ["decrypt"]);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: asBuf(iv) },
+    aesKey,
+    asBuf(cipherBytes)
+  );
+
+  return _dec.decode(decrypted);
 }
 
-export function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
+// ==================== WebAuthn utilities (with PRF extension) ====================
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  return u8ToBase64(new Uint8Array(buffer));
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  if (!base64) return new ArrayBuffer(0);
+  const normalized = base64UrlToBase64(base64);
+  const binary = atob(normalized);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes.buffer;
@@ -1103,17 +981,31 @@ export async function registerWebAuthnCredential(options: {
   rp: { name: string; id: string };
   user: { id: string; name: string; displayName: string };
   pubKeyCredParams: Array<{ type: "public-key"; alg: number }>;
+  excludeCredentials?: Array<{ type: "public-key"; id: string; transports?: string[] }>;
   timeout?: number;
   attestation?: "none" | "direct" | "indirect";
   authenticatorSelection?: any;
+  prfInput: Uint8Array;
 }): Promise<{
   credentialId: string;
   publicKey: string;
   counter: number;
   transports?: string[];
+  clientDataJSON: string;
+  prfEnabled: boolean;
+  prfOutput?: Uint8Array;
 }> {
+  if (!options.prfInput || options.prfInput.length < 32) {
+    throw new Error("인증 정보가 필요합니다.");
+  }
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const userIdBuffer = base64ToArrayBuffer(options.user.id);
+  const prfSalt = asBuf(options.prfInput);
+  const excludeCredentials = (options.excludeCredentials || []).map((cred) => ({
+    type: (cred.type || "public-key") as "public-key",
+    id: base64ToArrayBuffer(cred.id),
+    transports: cred.transports as AuthenticatorTransport[] | undefined,
+  }));
 
   const credential = (await navigator.credentials.create({
     publicKey: {
@@ -1125,13 +1017,20 @@ export async function registerWebAuthnCredential(options: {
         displayName: options.user.displayName,
       },
       pubKeyCredParams: options.pubKeyCredParams,
+      excludeCredentials: excludeCredentials.length > 0 ? excludeCredentials : undefined,
       timeout: options.timeout || 60000,
       attestation: options.attestation || "direct",
       authenticatorSelection: options.authenticatorSelection || {
-        authenticatorAttachment: "platform",
         residentKey: "preferred",
-        userVerification: "preferred",
+        userVerification: "required",
       },
+      extensions: {
+        prf: {
+          eval: {
+            first: prfSalt,
+          },
+        },
+      } as any,
     },
   })) as PublicKeyCredential | null;
 
@@ -1142,18 +1041,26 @@ export async function registerWebAuthnCredential(options: {
   if ("rawId" in credential && credential.rawId) {
     credentialId = arrayBufferToBase64(credential.rawId as ArrayBuffer);
   } else if (credential.id) {
-    const idArray = new Uint8Array(credential.id as unknown as ArrayBuffer);
-    credentialId = arrayBufferToBase64(idArray as unknown as ArrayBuffer);
+    credentialId = base64UrlToBase64(credential.id);
   }
   if (!credentialId) throw new Error("Failed to extract credential ID");
 
-  const publicKeyBuffer = response.getPublicKey();
-  if (!publicKeyBuffer) throw new Error("Failed to extract public key");
-  const publicKey = arrayBufferToBase64(publicKeyBuffer as unknown as ArrayBuffer);
+  let publicKey = "";
+  if (typeof response.getPublicKey === "function") {
+    const pkBuf = response.getPublicKey();
+    if (pkBuf) publicKey = arrayBufferToBase64(pkBuf);
+  }
+  if (!publicKey) throw new Error("Failed to extract public key");
   const counter = 0;
   const transports = response.getTransports?.() || [];
+  const clientDataJSON = arrayBufferToBase64(response.clientDataJSON as unknown as ArrayBuffer);
 
-  return { credentialId, publicKey, counter, transports };
+  const extResults = (credential.getClientExtensionResults?.() as any) || {};
+  const prfFirst: ArrayBuffer | undefined = extResults?.prf?.results?.first;
+  const prfOutput = prfFirst && prfFirst.byteLength > 0 ? new Uint8Array(prfFirst) : undefined;
+  const prfEnabled = Boolean(extResults?.prf?.enabled || prfOutput);
+
+  return { credentialId, publicKey, counter, transports, clientDataJSON, prfEnabled, prfOutput };
 }
 
 export async function authenticateWithWebAuthn(options: {
@@ -1161,25 +1068,39 @@ export async function authenticateWithWebAuthn(options: {
   allowCredentials?: Array<{ type: "public-key"; id: string; transports?: string[] }>;
   timeout?: number;
   userVerification?: "required" | "preferred" | "discouraged";
+  prfInput: Uint8Array;
 }): Promise<{
   credentialId: string;
   clientDataJSON: string;
   authenticatorData: string;
   signature: string;
   counter: number;
+  prfOutput?: Uint8Array;
 }> {
+  if (!options.prfInput || options.prfInput.length < 32) {
+    throw new Error("인증 정보가 필요합니다.");
+  }
   const challengeBuffer = base64ToArrayBuffer(options.challenge);
   const allowCredentials = (options.allowCredentials || []).map((cred) => ({
     type: cred.type as "public-key",
     id: base64ToArrayBuffer(cred.id),
     transports: cred.transports as AuthenticatorTransport[] | undefined,
   }));
+  const prfSalt = asBuf(options.prfInput);
+
   const assertion = (await navigator.credentials.get({
     publicKey: {
       challenge: challengeBuffer,
       timeout: options.timeout || 60000,
-      userVerification: options.userVerification || "preferred",
+      userVerification: options.userVerification || "required",
       allowCredentials: allowCredentials.length > 0 ? allowCredentials : undefined,
+      extensions: {
+        prf: {
+          eval: {
+            first: prfSalt,
+          },
+        },
+      } as any,
     },
   })) as PublicKeyCredential | null;
   if (!assertion) throw new Error("WebAuthn authentication cancelled");
@@ -1194,10 +1115,13 @@ export async function authenticateWithWebAuthn(options: {
   if ("rawId" in assertion && assertion.rawId) {
     credentialId = arrayBufferToBase64(assertion.rawId as ArrayBuffer);
   } else if (assertion.id) {
-    const idArray = new Uint8Array(assertion.id as unknown as ArrayBuffer);
-    credentialId = arrayBufferToBase64(idArray as unknown as ArrayBuffer);
+    credentialId = base64UrlToBase64(assertion.id);
   }
   if (!credentialId) throw new Error("Failed to extract credential ID");
+
+  const extResults = (assertion.getClientExtensionResults?.() as any) || {};
+  const prfFirst: ArrayBuffer | undefined = extResults?.prf?.results?.first;
+  const prfOutput = prfFirst && prfFirst.byteLength > 0 ? new Uint8Array(prfFirst) : undefined;
 
   return {
     credentialId,
@@ -1205,38 +1129,10 @@ export async function authenticateWithWebAuthn(options: {
     authenticatorData: arrayBufferToBase64(response.authenticatorData as unknown as ArrayBuffer),
     signature: arrayBufferToBase64(response.signature as unknown as ArrayBuffer),
     counter,
+    prfOutput,
   };
 }
 
 export function isWebAuthnAvailable(): boolean {
   return !!(window.PublicKeyCredential && navigator.credentials);
 }
-
-export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
-  return !!(
-    window.PublicKeyCredential &&
-    (await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())
-  );
-}
-
-// ==================== Type stubs to avoid TS errors (USAG-lib has no types) ====================
-//
-// We only use loose `any` access above; declare placeholder types so that
-// accidental strict-mode access yields a helpful message.
-type OpsecType = {
-  Msg: string;
-  Smsg: string;
-  BodyInfo: Uint8Array;
-  BodySize: number;
-  BodyAlgo: string;
-  BodyKey: Uint8Array;
-  _headAlgo: string;
-  _sign: Uint8Array;
-  Encpw(method: string, pw: Uint8Array, kf: Uint8Array): Promise<Uint8Array>;
-  Encpub(method: string, peerPub: Uint8Array, myPri: Uint8Array | null): Promise<Uint8Array>;
-  Decpw(pw: Uint8Array, kf: Uint8Array): Promise<void>;
-  Decpub(myPri: Uint8Array, myPub: Uint8Array | null, peerPub: Uint8Array | null): Promise<void>;
-  View(d: Uint8Array): void;
-  Read(ins: any, cut?: number): Promise<Uint8Array>;
-  Write(outs: any, head: Uint8Array): Promise<void>;
-};
