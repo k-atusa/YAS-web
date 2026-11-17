@@ -856,6 +856,10 @@ const App = () => {
 
 	async function handleAddPasskey() {
 		if (!authToken || !isAuthed) return;
+		if (!hasStoredPrivateKey) {
+			toast.error("먼저 공개키와 개인키를 생성하여 저장해주세요.");
+			return;
+		}
 		if (!webauthnAvailable) {
 			toast.error("현재 브라우저에서 패스키(WebAuthn)를 사용할 수 없습니다.");
 			return;
@@ -880,18 +884,16 @@ const App = () => {
 			setPasskeysBusy(true);
 			setWebauthnAuthBusy(true);
 
-			// 이미 저장된 개인키가 있다면 입력한 마스터키가 올바른지 먼저 검증
-			if (hasStoredPrivateKey) {
-				const vault = await getMyPrivateKeyVault(authToken);
-				try {
-					await decryptStoredPrivateKeyClient(
-						vault.encryptedPrivateKey,
-						vault.kdf,
-						{ passphrase: masterKey }
-					);
-				} catch {
-					throw new Error("마스터키가 일치하지 않습니다.");
-				}
+			// 입력한 마스터키가 저장된 개인키와 일치하는지 먼저 검증
+			const vault = await getMyPrivateKeyVault(authToken);
+			try {
+				await decryptStoredPrivateKeyClient(
+					vault.encryptedPrivateKey,
+					vault.kdf,
+					{ passphrase: masterKey }
+				);
+			} catch {
+				throw new Error("마스터키가 일치하지 않습니다.");
 			}
 
 			const optionsResp = await getWebAuthnRegisterOptions(authToken);
