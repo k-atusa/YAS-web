@@ -1,0 +1,16 @@
+.git
+.github
+data/
+uploads/
+*.db
+*.db-shm
+*.db-wal
+yas-web-*
+backend/yas-web-*
+backend/internal/webui/static/*
+!backend/internal/webui/static/.gitkeep
+frontend/node_modules
+frontend/dist
+.env
+.env.*
+words.json
