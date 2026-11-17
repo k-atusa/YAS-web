@@ -14,8 +14,8 @@ type KeysTabProps = {
 	canUpload?: boolean;
 	busy: boolean;
 	onGenerateKeys?: () => void;
-	onSaveManualKeys?: (pub: string, pri: string) => Promise<boolean | void>;
-	onSaveKeys?: (pub: string, pri: string) => Promise<boolean | void>;
+	onSaveManualKeys?: (pub: string, pri: string, authMode?: "auto" | "passkey" | "masterkey") => Promise<boolean | void>;
+	onSaveKeys?: (pub: string, pri: string, authMode?: "auto" | "passkey" | "masterkey") => Promise<boolean | void>;
 	onUpload?: () => void;
 	onRegenerate: () => void;
 	onCopyPublicKey: (value?: string) => void;
@@ -133,6 +133,57 @@ export const KeysTab = ({
 					</div>
 				)}
 			</div>
+		);
+	}
+
+	function renderSaveActionButtons(options: {
+		pub: string;
+		pri: string;
+		disabled: boolean;
+		defaultLabel: string;
+		defaultBusyLabel: string;
+		onSuccess: () => void;
+	}) {
+		const triggerSave = async (authMode: "auto" | "passkey" | "masterkey") => {
+			if (!saveHandler) return;
+			const success = await saveHandler(options.pub, options.pri, authMode);
+			if (success !== false) {
+				options.onSuccess();
+			}
+		};
+
+		if (hasStoredKey && hasUsablePasskey) {
+			return (
+				<>
+					<button
+						type="button"
+						className="btn btn-secondary"
+						onClick={() => triggerSave("masterkey")}
+						disabled={options.disabled}
+					>
+						{busy ? "인증 중..." : "마스터키로 저장"}
+					</button>
+					<button
+						type="button"
+						className="btn btn-primary"
+						onClick={() => triggerSave("passkey")}
+						disabled={options.disabled}
+					>
+						{busy ? options.defaultBusyLabel : "패스키 인증 후 저장"}
+					</button>
+				</>
+			);
+		}
+
+		return (
+			<button
+				type="button"
+				className="btn btn-primary"
+				onClick={() => triggerSave(hasStoredKey ? "masterkey" : "auto")}
+				disabled={options.disabled}
+			>
+				{busy ? options.defaultBusyLabel : options.defaultLabel}
+			</button>
 		);
 	}
 
@@ -390,7 +441,7 @@ export const KeysTab = ({
 								이전
 							</button>
 						) : <div />}
-						<div style={{ display: "flex", gap: 10 }}>
+						<div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
 							{previewPublic && previewPrivate && (
 								<button
 									type="button"
@@ -401,21 +452,17 @@ export const KeysTab = ({
 									다시 생성
 								</button>
 							)}
-							<button
-								className="btn btn-primary"
-								onClick={async () => {
-									if (previewPublic && previewPrivate && saveHandler) {
-										const success = await saveHandler(previewPublic, previewPrivate);
-										if (success !== false) {
-											setPreviewPublic("");
-											setPreviewPrivate("");
-										}
-									}
-								}}
-								disabled={busy || generatingPreview || !previewPublic || !previewPrivate}
-							>
-								{busy ? "암호화 및 저장 중..." : "키 저장"}
-							</button>
+							{renderSaveActionButtons({
+								pub: previewPublic,
+								pri: previewPrivate,
+								disabled: busy || generatingPreview || !previewPublic || !previewPrivate,
+								defaultLabel: "키 저장",
+								defaultBusyLabel: "암호화 및 저장 중...",
+								onSuccess: () => {
+									setPreviewPublic("");
+									setPreviewPrivate("");
+								},
+							})}
 						</div>
 					</div>
 				</>
@@ -446,6 +493,7 @@ export const KeysTab = ({
 					<div className="btn-row">
 						{storedAccount && (
 							<button
+								type="button"
 								className="btn btn-secondary"
 								onClick={() => {
 									setManualPublicKey("");
@@ -457,22 +505,19 @@ export const KeysTab = ({
 								이전
 							</button>
 						)}
-						<button
-							className="btn btn-primary"
-							onClick={async () => {
-								if (saveHandler) {
-									const success = await saveHandler(manualPublicKey, manualPrivateKey);
-									if (success !== false) {
-										setManualPublicKey("");
-										setManualPrivateKey("");
-									}
-								}
-							}}
-							disabled={busy || !manualPublicKey.trim() || !manualPrivateKey.trim()}
-							style={{ marginLeft: storedAccount ? undefined : "auto" }}
-						>
-							{busy ? "검증 및 저장 중..." : "키 등록 및 저장"}
-						</button>
+						<div style={{ display: "flex", gap: 10, marginLeft: storedAccount ? undefined : "auto", flexWrap: "wrap" }}>
+							{renderSaveActionButtons({
+								pub: manualPublicKey,
+								pri: manualPrivateKey,
+								disabled: busy || !manualPublicKey.trim() || !manualPrivateKey.trim(),
+								defaultLabel: "키 등록 및 저장",
+								defaultBusyLabel: "검증 및 저장 중...",
+								onSuccess: () => {
+									setManualPublicKey("");
+									setManualPrivateKey("");
+								},
+							})}
+						</div>
 					</div>
 				</>
 			)}
