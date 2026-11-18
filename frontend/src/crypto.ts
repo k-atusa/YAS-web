@@ -299,10 +299,7 @@ const FRAGMENT_SPLITTERS = ["!", "@", "#", "$", "%", "^", "&", "*", "~", "|"] as
 
 export function cleanBase64Key(raw: string): string {
   if (!raw) return "";
-  let cleaned = raw.trim();
-  cleaned = cleaned.replace(/-----BEGIN [^-]+-----/g, "");
-  cleaned = cleaned.replace(/-----END [^-]+-----/g, "");
-  cleaned = cleaned.replace(/\s+/g, "");
+  let cleaned = raw.replace(/\s+/g, "");
 
   for (const sp of FRAGMENT_SPLITTERS) {
     const escaped = sp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

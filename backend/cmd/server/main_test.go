@@ -117,7 +117,7 @@ func TestEndToEndFlow(t *testing.T) {
 	iv := []byte("0123456789ab") // 12 bytes
 	weakPayload, _ := json.Marshal(map[string]any{
 		"username":  "alice",
-		"publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----",
+		"publicKey": base64.StdEncoding.EncodeToString([]byte("test-pqc1-public-key-placeholder-bytes-0123456789")),
 		"encryptedPrivateKey": map[string]string{
 			"cipherText": base64.StdEncoding.EncodeToString([]byte("ciphertext")),
 			"iv":         base64.StdEncoding.EncodeToString(iv),
@@ -144,12 +144,12 @@ func TestEndToEndFlow(t *testing.T) {
 	aesKey := argon2.IDKey(prfSecret, salt, 3, 65536, 4, 32)
 	block, _ := aes.NewCipher(aesKey)
 	gcm, _ := cipher.NewGCM(block)
-	plainPrivKey := "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC\n-----END PRIVATE KEY-----"
+	plainPrivKey := base64.StdEncoding.EncodeToString([]byte("test-pqc1-private-key-placeholder-bytes-0123456789"))
 	sealed := gcm.Seal(nil, iv, []byte(plainPrivKey), nil)
 
 	accPayload, _ := json.Marshal(map[string]any{
 		"username":  "alice",
-		"publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----",
+		"publicKey": base64.StdEncoding.EncodeToString([]byte("test-pqc1-public-key-placeholder-bytes-0123456789")),
 		"encryptedPrivateKey": map[string]string{
 			"cipherText": base64.StdEncoding.EncodeToString(sealed),
 			"iv":         base64.StdEncoding.EncodeToString(iv),

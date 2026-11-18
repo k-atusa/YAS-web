@@ -27,18 +27,15 @@ func ContactsRouter() http.Handler {
 
 func isValidPublicKey(key string) bool {
 	trimmed := strings.TrimSpace(key)
-	if strings.Contains(trimmed, "BEGIN PUBLIC KEY") && strings.Contains(trimmed, "END PUBLIC KEY") {
-		return true
+	if len(trimmed) < 50 {
+		return false
 	}
-	if len(trimmed) >= 50 {
-		cleaned := strings.Join(strings.Fields(trimmed), "")
-		decoded, err := base64.StdEncoding.DecodeString(cleaned)
-		if err != nil {
-			return false
-		}
-		return base64.StdEncoding.EncodeToString(decoded) == cleaned
+	cleaned := strings.Join(strings.Fields(trimmed), "")
+	decoded, err := base64.StdEncoding.DecodeString(cleaned)
+	if err != nil {
+		return false
 	}
-	return false
+	return base64.StdEncoding.EncodeToString(decoded) == cleaned
 }
 
 func handleListContacts(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +97,7 @@ func handleUpsertContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.PublicKey != "" && !isValidPublicKey(body.PublicKey) {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Public key must be valid Base64 or PEM format"})
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Public key must be valid Base64 format"})
 		return
 	}
 
