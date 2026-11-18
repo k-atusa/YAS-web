@@ -8,6 +8,10 @@
     <a href="https://hub.docker.com/r/d3vle0/yas-web"><img src="https://img.shields.io/docker/pulls/d3vle0/yas-web?style=for-the-badge&color=00a8fc" alt="Docker Pulls"></a> 
     <a href="https://github.com/k-atusa/Yas-Web/stargazers"><img src="https://img.shields.io/github/stars/k-atusa/Yas-Web?style=for-the-badge&color=ffd700" alt="Stars"></a> 
   </p>
+
+  <p>
+    <a href="README.md">🇺🇸 English</a> | <a href="README-ko.md">🇰🇷 한국어</a>
+  </p>
 </div>
 
 ## Key Model & Security Boundaries
@@ -67,7 +71,6 @@ The container image (`d3vle0/yas-web:latest`) is a lightweight Alpine multi-arch
    ```
 
 ### 2. Pre-built Binary
-No Go or Node.js runtime is required.
 
 1. Download the binary matching your platform from the [GitHub Releases](https://github.com/k-atusa/YAS-web/releases) page.
 
