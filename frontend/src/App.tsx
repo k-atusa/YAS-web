@@ -31,6 +31,7 @@ import {
 	generateKeyPair,
 	validateKeyPair,
 	cleanBase64Key,
+	formatUsagKey,
 	encryptOpsec,
 	decryptOpsecPw,
 	decryptOpsecPub,
@@ -509,7 +510,7 @@ const App = () => {
 	async function handleCopyPublicKey(value?: string) {
 		if (!value) return;
 		try {
-			await navigator.clipboard.writeText(value);
+			await navigator.clipboard.writeText(formatUsagKey(value));
 			setCopyPublicStatus("copied");
 			setTimeout(() => setCopyPublicStatus("idle"), 2000);
 		} catch {
@@ -521,7 +522,7 @@ const App = () => {
 	async function handleCopyPrivateKey(value?: string) {
 		if (!value) return;
 		try {
-			await navigator.clipboard.writeText(value);
+			await navigator.clipboard.writeText(formatUsagKey(value));
 			setCopyPrivateStatus("copied");
 			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
 		} catch {

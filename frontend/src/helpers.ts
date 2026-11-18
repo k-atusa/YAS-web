@@ -1,3 +1,5 @@
+import { cleanBase64Key } from "./crypto";
+
 export const formatBytes = (bytes: number): string => {
 	if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
 	const units = ["B", "KB", "MB", "GB", "TB"];
@@ -12,6 +14,7 @@ export const formatBytes = (bytes: number): string => {
 };
 
 export const truncateKey = (key: string): string => {
-	if (key.length <= 15) return key;
-	return `${key.slice(0, 6)}…${key.slice(-6)}`;
+	const clean = cleanBase64Key(key) || key;
+	if (clean.length <= 15) return clean;
+	return `${clean.slice(0, 6)}…${clean.slice(-6)}`;
 };
