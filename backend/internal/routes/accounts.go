@@ -56,8 +56,8 @@ func isBase64MinLength(str string, minExpected int) bool {
 }
 
 func validateAccountPayload(p models.AccountPayload) error {
-	if len(p.Username) < 3 {
-		return errors.New("username must be at least 3 characters")
+	if err := validateUsername(p.Username); err != nil {
+		return err
 	}
 	if len(p.PublicKey) < 1 {
 		return errors.New("publicKey is required")

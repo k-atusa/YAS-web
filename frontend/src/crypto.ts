@@ -276,17 +276,43 @@ export async function generateKeyPair(
   };
   const am = new AsymMaster("pqc1");
   const [pub, pri] = await am.Genkey();
-  return { publicKey: u8ToBase64(pub), privateKey: u8ToBase64(pri) };
+  return {
+    publicKey: encode64WithSplit(pub, "#", 40, 10),
+    privateKey: encode64WithSplit(pri, "#", 40, 10),
+  };
+}
+
+export function formatUsagKey(rawKey: string): string {
+  const clean = cleanBase64Key(rawKey);
+  if (!clean) return "";
+  try {
+    const bytes = base64ToU8(clean);
+    return encode64WithSplit(bytes, "#", 40, 10);
+  } catch {
+    return rawKey;
+  }
 }
 
 // ==================== Key cleaning & validation ====================
 
+const FRAGMENT_SPLITTERS = ["!", "@", "#", "$", "%", "^", "&", "*", "~", "|"] as const;
+
 export function cleanBase64Key(raw: string): string {
   if (!raw) return "";
-  let cleaned = raw.trim();
-  cleaned = cleaned.replace(/-----BEGIN [^-]+-----/g, "");
-  cleaned = cleaned.replace(/-----END [^-]+-----/g, "");
-  cleaned = cleaned.replace(/\s+/g, "");
+  let cleaned = raw.replace(/\s+/g, "");
+
+  for (const sp of FRAGMENT_SPLITTERS) {
+    const escaped = sp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const markerRe = new RegExp(`${escaped}(?:START|END|\\d+/\\d+)${escaped}`);
+    if (markerRe.test(cleaned)) {
+      cleaned = cleaned
+        .split(sp)
+        .filter((_, idx) => idx % 2 === 0)
+        .join("");
+      break;
+    }
+  }
+
   return cleaned;
 }
 
@@ -466,8 +492,8 @@ export async function encryptOpsec(options: EncryptOptions): Promise<Uint8Array>
     ) => Promise<Uint8Array>;
     headerBytes = await Encpw("arg2st", pw, new Uint8Array(0));
   } else {
-    const peerPub = base64ToU8(options.peerPublicKey);
-    const myPri = options.myPrivateKey ? base64ToU8(options.myPrivateKey) : null;
+    const peerPub = base64ToU8(cleanBase64Key(options.peerPublicKey));
+    const myPri = options.myPrivateKey ? base64ToU8(cleanBase64Key(options.myPrivateKey)) : null;
     const Encpub = (op as any).Encpub.bind(op) as (
       method: string,
       peerPub: Uint8Array,
@@ -645,7 +671,7 @@ export async function decryptOpsecPub(
     );
   }
 
-  const myPri = base64ToU8(myPrivateKey);
+  const myPri = base64ToU8(cleanBase64Key(myPrivateKey));
   const Decpub = (op as any).Decpub.bind(op) as (
     myPri: Uint8Array,
     myPub?: Uint8Array | null,
@@ -656,8 +682,8 @@ export async function decryptOpsecPub(
   let verified: boolean | undefined;
   let verifyError: string | undefined;
   const hasSignature = (op as any)._sign && (op as any)._sign.length > 0;
-  const peerPub = peerPublicKey ? base64ToU8(peerPublicKey) : null;
-  const myPub = myPublicKey ? base64ToU8(myPublicKey) : null;
+  const peerPub = peerPublicKey ? base64ToU8(cleanBase64Key(peerPublicKey)) : null;
+  const myPub = myPublicKey ? base64ToU8(cleanBase64Key(myPublicKey)) : null;
 
   if (hasSignature && peerPub && myPub) {
     const DecpubVerify = (op as any).Decpub.bind(op) as (
@@ -911,10 +937,12 @@ export async function buildAccountPayload(
   secret: KeyProtectionSecret | string,
   notes?: string
 ): Promise<AccountPayload> {
+  const cleanPublicKey = cleanBase64Key(publicKeyB64);
+  const cleanPrivateKey = cleanBase64Key(privateKeyB64);
   const normalizedSecret: KeyProtectionSecret =
     typeof secret === "string" ? { passphrase: secret } : secret;
-  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(privateKeyB64, normalizedSecret);
-  return { username, publicKey: publicKeyB64, encryptedPrivateKey, kdf, notes };
+  const { encryptedPrivateKey, kdf } = await encryptPrivateKey(cleanPrivateKey, normalizedSecret);
+  return { username, publicKey: cleanPublicKey, encryptedPrivateKey, kdf, notes };
 }
 
 export async function decryptStoredPrivateKeyClient(

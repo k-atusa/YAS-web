@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { truncateKey } from "../../helpers";
-import { generateKeyPair } from "../../crypto";
+import { generateKeyPair, formatUsagKey } from "../../crypto";
 import type { AccountRecord, PasskeyCredentialItem } from "../../types";
 
 type KeysTabProps = {
@@ -210,7 +210,7 @@ export const KeysTab = ({
 	async function handleCopyPreviewKey(text: string, type: "public" | "private") {
 		if (!text) return;
 		try {
-			await navigator.clipboard.writeText(text);
+			await navigator.clipboard.writeText(formatUsagKey(text));
 			if (type === "public") {
 				setLocalCopyPublic("copied");
 				setTimeout(() => setLocalCopyPublic("idle"), 2000);

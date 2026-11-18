@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"yas-web-backend/internal/db"
 	"yas-web-backend/internal/middleware"
@@ -26,18 +27,15 @@ func ContactsRouter() http.Handler {
 
 func isValidPublicKey(key string) bool {
 	trimmed := strings.TrimSpace(key)
-	if strings.Contains(trimmed, "BEGIN PUBLIC KEY") && strings.Contains(trimmed, "END PUBLIC KEY") {
-		return true
+	if len(trimmed) < 50 {
+		return false
 	}
-	if len(trimmed) >= 50 {
-		cleaned := strings.Join(strings.Fields(trimmed), "")
-		decoded, err := base64.StdEncoding.DecodeString(cleaned)
-		if err != nil {
-			return false
-		}
-		return base64.StdEncoding.EncodeToString(decoded) == cleaned
+	cleaned := strings.Join(strings.Fields(trimmed), "")
+	decoded, err := base64.StdEncoding.DecodeString(cleaned)
+	if err != nil {
+		return false
 	}
-	return false
+	return base64.StdEncoding.EncodeToString(decoded) == cleaned
 }
 
 func handleListContacts(w http.ResponseWriter, r *http.Request) {
@@ -86,12 +84,20 @@ func handleUpsertContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(body.ContactUsername) < 3 || len(body.ContactUsername) > 64 || len(body.Label) > 120 || len(body.Notes) > 500 {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Invalid payload"})
+	if err := validateUsername(body.ContactUsername); err != nil {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
+		return
+	}
+	if utf8.RuneCountInString(body.Label) > 120 {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "라벨은 120자 이하로 입력해주세요."})
+		return
+	}
+	if utf8.RuneCountInString(body.Notes) > 500 {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "메모는 500자 이하로 입력해주세요."})
 		return
 	}
 	if body.PublicKey != "" && !isValidPublicKey(body.PublicKey) {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Public key must be valid Base64 or PEM format"})
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "Public key must be valid Base64 format"})
 		return
 	}
 

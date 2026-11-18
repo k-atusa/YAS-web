@@ -1,15 +1,18 @@
-# YAS-web
+<div align="center">
+  <img src="img/icon.png" alt="YAS-Web" width="128" />
+  <h1>YAS-Web</h1>
+  <b><p>Zero-knowledge key storage &amp; post-quantum encryption platform.</p></b>
+  <p>
+    <a href="https://github.com/k-atusa/Yas-Web/releases"><img src="https://img.shields.io/github/v/release/k-atusa/Yas-Web?style=for-the-badge&color=30b065" alt="Release"></a> 
+    <a href="https://github.com/k-atusa/Yas-Web/blob/main/LICENSE"><img src="https://img.shields.io/github/license/k-atusa/Yas-Web?style=for-the-badge&color=b0305f" alt="License"></a> 
+    <a href="https://hub.docker.com/r/d3vle0/yas-web"><img src="https://img.shields.io/docker/pulls/d3vle0/yas-web?style=for-the-badge&color=00a8fc" alt="Docker Pulls"></a> 
+    <a href="https://github.com/k-atusa/Yas-Web/stargazers"><img src="https://img.shields.io/github/stars/k-atusa/Yas-Web?style=for-the-badge&color=ffd700" alt="Stars"></a> 
+  </p>
 
-Encrypted-key storage & client-side encryption platform. Key pairs (PQC) are generated in the browser, the private key is wrapped with an Argon2id (`arg2st`)-derived AES-256-GCM key, and only ciphertext plus KDF metadata ever reach the server. A JWT-protected API lets you sync encrypted key material, manage contacts, and authenticate via WebAuthn passkeys.
-
-## Architecture
-- **Backend**: Go (`net/http` + `chi` router) + SQLite (`modernc.org/sqlite`).
-  - `/api/auth` handles signup/login, password verification, and JWT issuance.
-  - `/api/accounts` stores and fetches encrypted key material (guarded by `Authorization: Bearer <token>`; decryption occurs strictly client-side).
-  - `/api/contacts` manages contact public keys.
-  - `/api/webauthn` handles WebAuthn passkey registration, verification, and short-lived verification tokens.
-- **Frontend**: React + Vite + TypeScript.
-- **Data shape**: `{ username, publicKey, encryptedPrivateKey: { cipherText, iv, authTag? }, kdf: { algorithm, salt, keyLength, iterations?, memoryCost?, parallelism?, hash? }, notes, timestamps }`.
+  <p>
+    <a href="README.md">🇺🇸 English</a> | <a href="README-ko.md">🇰🇷 한국어</a>
+  </p>
+</div>
 
 ## Key Model & Security Boundaries
 
@@ -37,10 +40,37 @@ YAS-web separates **account authentication** from **cryptographic key protection
 - **Public Key**: Stored in plaintext on the server (`GET /api/accounts/username/{username}`) so peers can encrypt messages/files for you and verify signatures.
 - **Private Key**: Decrypted strictly in browser memory from the fetched vault and automatically cleared after 60 seconds, on tab switch, or when the page becomes hidden.
 
-## Quick start
+## Installation
 
-### 1. Pre-built Binary (Recommended)
-No Go or Node.js runtime is required.
+### 1. Docker Compose (Recommended)
+Prerequisites: Docker and Docker Compose v2.
+
+The container image (`d3vle0/yas-web:latest`) is a lightweight Alpine multi-arch image (`linux/amd64`, `linux/arm64`) and persists the SQLite database in `./data`.
+
+1. Create `docker-compose.yml`
+   ```yaml
+   services:
+     yas-web:
+       image: d3vle0/yas-web:latest
+       container_name: yas-web
+       restart: unless-stopped
+       ports:
+         - "4000:4000"
+       environment:
+         # Domain name for WebAuthn passkeys (e.g. example.com in production)
+         DOMAIN: localhost
+         # Optional; a random 32-byte secret is generated in memory if omitted.
+         # JWT_SECRET: change-this-to-a-random-secret-key
+       volumes:
+         - ./data:/app/data
+   ```
+
+2. Start the service (accessible at `http://localhost:4000` by default):
+   ```bash
+   docker compose up -d
+   ```
+
+### 2. Pre-built Binary
 
 1. Download the binary matching your platform from the [GitHub Releases](https://github.com/k-atusa/YAS-web/releases) page.
 
@@ -58,7 +88,9 @@ No Go or Node.js runtime is required.
    .\yas-web-*.exe
    ```
 
-### 2. Manual Build from Source
+   *(Optional)* To customize settings, create a `.env` file in the same directory as the binary (see [`.env.example`](.env.example)).
+
+### 3. Manual Build from Source
 Prerequisites: Go 1.26+ and Node.js 18+.
 
 The compiled frontend (`index.html`, JS, CSS) is embedded directly into the Go binary via `embed.FS`.
@@ -74,12 +106,6 @@ cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../yas-web-$(go env GOO
 ./yas-web-*
 ```
 
-## Environment variables
-All settings have safe defaults, so **no `.env` file is required** to run locally.
-
-To customize settings (e.g. in production), create a `.env` file in the same directory as the binary (see `.env.example`):
-- `PORT` – Server port (default: `4000`)
-- `DOMAIN` – Domain name for WebAuthn passkeys (default: `localhost`, set to your domain like `example.com` in production)
-- `JWT_SECRET` – Secret key for JWT signing (optional; auto-generated random 32-byte secret in memory if omitted)
+*(Optional)* To customize settings, create a `.env` file in the project root (see [`.env.example`](.env.example)).
 
 *(SQLite database is automatically stored in `./data/yas-web.db`)*

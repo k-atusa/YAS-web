@@ -30,13 +30,14 @@ import {
 	decryptStoredPrivateKeyClient,
 	generateKeyPair,
 	validateKeyPair,
+	cleanBase64Key,
+	formatUsagKey,
 	encryptOpsec,
 	decryptOpsecPw,
 	decryptOpsecPub,
 	detectAuthMode,
 	base64ToU8,
 	encode64WithSplit,
-	decode64WithSplit,
 	registerWebAuthnCredential,
 	authenticateWithWebAuthn,
 	isWebAuthnAvailable,
@@ -58,6 +59,9 @@ const TAB_INDEX: Record<Tab, number> = {
 	encrypt: 2,
 	decrypt: 3,
 };
+
+const USERNAME_REGEX = /^[A-Za-z][A-Za-z0-9]{1,15}$/;
+const USERNAME_RULE_MESSAGE = "아이디는 영문으로 시작하는 2~16자의 영문·숫자만 사용할 수 있습니다 (한글·특수문자·공백 불가).";
 
 const App = () => {
 	/* Auth */
@@ -418,6 +422,11 @@ const App = () => {
 	async function handleSignup(e: React.FormEvent) {
 		e.preventDefault();
 		if (!canLogin) return;
+		if (!USERNAME_REGEX.test(loginUsername)) {
+			setError(USERNAME_RULE_MESSAGE);
+			toast.error(USERNAME_RULE_MESSAGE);
+			return;
+		}
 		setLoginBusy(true);
 		setError(null);
 		setStatus(null);
@@ -501,7 +510,7 @@ const App = () => {
 	async function handleCopyPublicKey(value?: string) {
 		if (!value) return;
 		try {
-			await navigator.clipboard.writeText(value);
+			await navigator.clipboard.writeText(formatUsagKey(value));
 			setCopyPublicStatus("copied");
 			setTimeout(() => setCopyPublicStatus("idle"), 2000);
 		} catch {
@@ -513,7 +522,7 @@ const App = () => {
 	async function handleCopyPrivateKey(value?: string) {
 		if (!value) return;
 		try {
-			await navigator.clipboard.writeText(value);
+			await navigator.clipboard.writeText(formatUsagKey(value));
 			setCopyPrivateStatus("copied");
 			setTimeout(() => setCopyPrivateStatus("idle"), 2000);
 		} catch {
@@ -580,6 +589,10 @@ const App = () => {
 		if (!authToken) return;
 		const trimmedUsername = contactForm.contactUsername.trim();
 		if (!trimmedUsername) { toast.error("사용자 아이디는 필수입니다"); return; }
+		if (!USERNAME_REGEX.test(trimmedUsername)) {
+			toast.error(USERNAME_RULE_MESSAGE);
+			return;
+		}
 		setContactBusy(true);
 		setContactModalError(null);
 		try {
@@ -1371,7 +1384,7 @@ const App = () => {
 	}
 
 	async function resolvePrivateKeyB64(): Promise<string> {
-		const manual = decryptPrivateKeyInput.trim();
+		const manual = cleanBase64Key(decryptPrivateKeyInput);
 		if (manual) return manual;
 		if (privateKeyPem) return privateKeyPem;
 		if (hasStoredPrivateKey) {
@@ -1396,10 +1409,7 @@ const App = () => {
 		const raw = decryptPayloadInput.trim();
 		if (!raw) throw new Error("암호문 텍스트를 붙여넣으세요");
 		try {
-			if (raw.includes("#START#") || raw.includes("#END#")) {
-				return decode64WithSplit(raw, "#");
-			}
-			return base64ToU8(raw);
+			return base64ToU8(cleanBase64Key(raw));
 		} catch {
 			throw new Error("올바르지 않은 암호문 형식입니다");
 		}
@@ -1506,11 +1516,11 @@ const App = () => {
 			} else {
 				const priB64 = await resolvePrivateKeyB64();
 
-				let finalPeerPub = decryptPeerPublicKey.trim();
+				let finalPeerPub = cleanBase64Key(decryptPeerPublicKey);
 				if (decryptPeerKeySource === "contact" && decryptSelectedContactId) {
 					const contact = contacts.find((c) => c.id === decryptSelectedContactId);
 					if (contact?.publicKey) {
-						finalPeerPub = contact.publicKey.trim();
+						finalPeerPub = cleanBase64Key(contact.publicKey);
 					}
 				}
 				const peerPub = finalPeerPub || undefined;
@@ -1599,11 +1609,13 @@ const App = () => {
 							<form className="auth-form" onSubmit={handleSignup}>
 								<div className="form-group">
 									<label className="form-label">아이디</label>
-									<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="사용할 아이디" autoComplete="username" />
+									<input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} placeholder="아이디 입력" autoComplete="username" />
+									<span className="form-hint">2~16자의 영문·숫자만 사용 가능</span>
 								</div>
 								<div className="form-group">
 									<label className="form-label">비밀번호</label>
 									<input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="비밀번호 입력" autoComplete="new-password" />
+									<span className="form-hint">영문 대·소문자, 숫자, 특수문자를 포함해 10자 이상 입력하세요</span>
 								</div>
 								<div className="form-group">
 									<label className="form-label">비밀번호 확인</label>
@@ -2134,9 +2146,7 @@ const App = () => {
 										setDecryptError(null);
 										if (val.trim()) {
 											try {
-												const decoded = val.includes("#START#") || val.includes("#END#")
-													? decode64WithSplit(val.trim(), "#")
-													: base64ToU8(val.trim());
+												const decoded = base64ToU8(cleanBase64Key(val));
 												tryAutoDetect(decoded);
 											} catch {
 												setDecryptDetected(null);
@@ -2435,9 +2445,10 @@ const App = () => {
 									type="text"
 									value={contactForm.contactUsername}
 									onChange={(e) => setContactForm((prev) => ({ ...prev, contactUsername: e.target.value }))}
-									placeholder="아이디"
+									placeholder="아이디 입력"
 									required
 								/>
+								<span className="form-hint">2~16자의 영문·숫자만 사용 가능</span>
 							</div>
 							<div className="form-group">
 								<label className="form-label">메모 (선택)</label>

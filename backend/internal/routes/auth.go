@@ -35,11 +35,19 @@ const (
 )
 
 var (
-	upperRegex   = regexp.MustCompile(`[A-Z]`)
-	lowerRegex   = regexp.MustCompile(`[a-z]`)
-	numberRegex  = regexp.MustCompile(`[0-9]`)
-	specialRegex = regexp.MustCompile(`[^A-Za-z0-9]`)
+	usernameRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{1,15}$`)
+	upperRegex    = regexp.MustCompile(`[A-Z]`)
+	lowerRegex    = regexp.MustCompile(`[a-z]`)
+	numberRegex   = regexp.MustCompile(`[0-9]`)
+	specialRegex  = regexp.MustCompile(`[^A-Za-z0-9]`)
 )
+
+func validateUsername(username string) error {
+	if !usernameRegex.MatchString(username) {
+		return errors.New("아이디는 영문으로 시작하는 2~16자의 영문·숫자만 사용할 수 있습니다 (한글·특수문자·공백 불가)")
+	}
+	return nil
+}
 
 func AuthRouter() http.Handler {
 	r := chi.NewRouter()
@@ -122,6 +130,10 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateUsername(body.Username); err != nil {
+		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
+		return
+	}
 	if len(body.Password) < 10 {
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "비밀번호는 최소 10자 이상이어야 합니다"})
 		return
@@ -134,10 +146,6 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{
 			"message": "비밀번호가 약합니다: 대문자, 소문자, 숫자, 특수문자를 포함해주세요",
 		})
-		return
-	}
-	if len(body.Username) < 3 {
-		middleware.WriteJSON(w, http.StatusBadRequest, map[string]string{"message": "잘못된 요청입니다"})
 		return
 	}
 

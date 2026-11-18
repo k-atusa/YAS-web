@@ -117,7 +117,7 @@ func TestEndToEndFlow(t *testing.T) {
 	iv := []byte("0123456789ab") // 12 bytes
 	weakPayload, _ := json.Marshal(map[string]any{
 		"username":  "alice",
-		"publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----",
+		"publicKey": base64.StdEncoding.EncodeToString([]byte("test-pqc1-public-key-placeholder-bytes-0123456789")),
 		"encryptedPrivateKey": map[string]string{
 			"cipherText": base64.StdEncoding.EncodeToString([]byte("ciphertext")),
 			"iv":         base64.StdEncoding.EncodeToString(iv),
@@ -144,12 +144,12 @@ func TestEndToEndFlow(t *testing.T) {
 	aesKey := argon2.IDKey(prfSecret, salt, 3, 65536, 4, 32)
 	block, _ := aes.NewCipher(aesKey)
 	gcm, _ := cipher.NewGCM(block)
-	plainPrivKey := "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC\n-----END PRIVATE KEY-----"
+	plainPrivKey := base64.StdEncoding.EncodeToString([]byte("test-pqc1-private-key-placeholder-bytes-0123456789"))
 	sealed := gcm.Seal(nil, iv, []byte(plainPrivKey), nil)
 
 	accPayload, _ := json.Marshal(map[string]any{
 		"username":  "alice",
-		"publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----",
+		"publicKey": base64.StdEncoding.EncodeToString([]byte("test-pqc1-public-key-placeholder-bytes-0123456789")),
 		"encryptedPrivateKey": map[string]string{
 			"cipherText": base64.StdEncoding.EncodeToString(sealed),
 			"iv":         base64.StdEncoding.EncodeToString(iv),
@@ -508,4 +508,76 @@ func TestEndToEndFlow(t *testing.T) {
 		t.Fatalf("deleted user's public key should return 404, got status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestUsernameValidationRules(t *testing.T) {
+	ts := setupTestServer(t)
+	defer ts.Close()
+	client := ts.Client()
+
+	// Valid 2-char, alphanumeric, and 16-char usernames starting with English letter
+	for _, validUser := range []string{"ko", "a1", "abcdefghijklmnop"} {
+		body, _ := json.Marshal(map[string]string{
+			"username": validUser,
+			"password": "StrongPassword1!",
+		})
+		resp, err := client.Post(ts.URL+"/api/auth/signup", "application/json", bytes.NewReader(body))
+		if err != nil || resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected valid username %q to succeed (201), got err=%v status=%d", validUser, err, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	// Invalid usernames: < 2 chars, > 16 chars, starts with digit, Korean, special chars, spaces
+	invalidUsers := []string{"a", "1", "1abc", "abcdefghijklmnopq", `"`, `ab"`, "ab!", "ab_cd", "ab cd", "한글", "ab한"}
+	for _, invalidUser := range invalidUsers {
+		body, _ := json.Marshal(map[string]string{
+			"username": invalidUser,
+			"password": "StrongPassword1!",
+		})
+		resp, err := client.Post(ts.URL+"/api/auth/signup", "application/json", bytes.NewReader(body))
+		if err != nil || resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected invalid username %q to return 400, got err=%v status=%d", invalidUser, err, resp.StatusCode)
+		}
+		var errBody map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&errBody)
+		resp.Body.Close()
+		if !strings.Contains(errBody["message"], "영문으로 시작하는 2~16자") {
+			t.Fatalf("expected descriptive username error for %q, got %q", invalidUser, errBody["message"])
+		}
+	}
+
+	// Login as "ko" and verify contact validation rejects invalid usernames with descriptive message
+	loginBody, _ := json.Marshal(map[string]string{
+		"username": "ko",
+		"password": "StrongPassword1!",
+	})
+	resp, err := client.Post(ts.URL+"/api/auth/login", "application/json", bytes.NewReader(loginBody))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("login as ko failed: err=%v status=%d", err, resp.StatusCode)
+	}
+	var loginRes struct {
+		Token string `json:"token"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&loginRes)
+	resp.Body.Close()
+
+	for _, invalidContact := range []string{"1", `"`, "한글", "a!", "abcdefghijklmnopq"} {
+		cBody, _ := json.Marshal(map[string]string{
+			"contactUsername": invalidContact,
+		})
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/contacts", bytes.NewReader(cBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+loginRes.Token)
+		resp, err := client.Do(req)
+		if err != nil || resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("expected invalid contactUsername %q to return 400, got err=%v status=%d", invalidContact, err, resp.StatusCode)
+		}
+		var errBody map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&errBody)
+		resp.Body.Close()
+		if !strings.Contains(errBody["message"], "영문으로 시작하는 2~16자") {
+			t.Fatalf("expected descriptive contact error for %q, got %q", invalidContact, errBody["message"])
+		}
+	}
 }
