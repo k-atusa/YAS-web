@@ -1,15 +1,14 @@
-# YAS-web
-
-Encrypted-key storage & client-side encryption platform. Key pairs (PQC) are generated in the browser, the private key is wrapped with an Argon2id (`arg2st`)-derived AES-256-GCM key, and only ciphertext plus KDF metadata ever reach the server. A JWT-protected API lets you sync encrypted key material, manage contacts, and authenticate via WebAuthn passkeys.
-
-## Architecture
-- **Backend**: Go (`net/http` + `chi` router) + SQLite (`modernc.org/sqlite`).
-  - `/api/auth` handles signup/login, password verification, and JWT issuance.
-  - `/api/accounts` stores and fetches encrypted key material (guarded by `Authorization: Bearer <token>`; decryption occurs strictly client-side).
-  - `/api/contacts` manages contact public keys.
-  - `/api/webauthn` handles WebAuthn passkey registration, verification, and short-lived verification tokens.
-- **Frontend**: React + Vite + TypeScript.
-- **Data shape**: `{ username, publicKey, encryptedPrivateKey: { cipherText, iv, authTag? }, kdf: { algorithm, salt, keyLength, iterations?, memoryCost?, parallelism?, hash? }, notes, timestamps }`.
+<div align="center">
+  <img src="img/icon.png" alt="YAS-Web" width="128" />
+  <h1>YAS-Web</h1>
+  <b><p>Zero-knowledge key storage &amp; post-quantum encryption platform.</p></b>
+  <p>
+    <a href="https://github.com/k-atusa/Yas-Web/releases"><img src="https://img.shields.io/github/v/release/k-atusa/Yas-Web?style=for-the-badge&color=30b065" alt="Release"></a> 
+    <a href="https://github.com/k-atusa/Yas-Web/blob/main/LICENSE"><img src="https://img.shields.io/github/license/k-atusa/Yas-Web?style=for-the-badge&color=b0305f" alt="License"></a> 
+    <a href="https://hub.docker.com/r/d3vle0/yas-web"><img src="https://img.shields.io/docker/pulls/d3vle0/yas-web?style=for-the-badge&color=00a8fc" alt="Docker Pulls"></a> 
+    <a href="https://github.com/k-atusa/Yas-Web/stargazers"><img src="https://img.shields.io/github/stars/k-atusa/Yas-Web?style=for-the-badge&color=ffd700" alt="Stars"></a> 
+  </p>
+</div>
 
 ## Key Model & Security Boundaries
 
